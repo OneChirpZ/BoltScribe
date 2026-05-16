@@ -53,6 +53,12 @@
   font-size: 12px;
 }
 
+.brand-version {
+  margin-top: 3px;
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
 nav {
   display: grid;
   gap: 8px;

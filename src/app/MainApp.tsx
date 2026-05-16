@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppConfig, HistoryRecord, InputStats, WorkflowStatus } from "../types";
+import type { AppConfig, ConfigImportReport, HistoryRecord, InputStats, WorkflowStatus } from "../types";
 import type { Page } from "../domain/navigation";
 import type { PermissionRequestState } from "../domain/permissions";
 import { appLanguage, translations } from "../domain/i18n";
@@ -13,7 +13,7 @@ import HistoryRecordsPage from "../pages/HistoryRecordsPage";
 import ModelsPage from "../pages/ModelsPage";
 import CorrectionPage from "../pages/CorrectionPage";
 import SettingsPage from "../pages/SettingsPage";
-import { accessibilityPermissionGranted, copyTextToClipboard, getStatus, hideMainWindow, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, requestAccessibilityPermission, requestMicrophonePermission as requestMicrophonePermissionCommand, saveConfig, toggleRecording as toggleRecordingCommand } from "./tauriApi";
+import { accessibilityPermissionGranted, copyTextToClipboard, exportConfig as exportConfigCommand, getAppVersion, getStatus, hideMainWindow, importConfig as importConfigCommand, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, requestAccessibilityPermission, requestMicrophonePermission as requestMicrophonePermissionCommand, saveConfig, toggleRecording as toggleRecordingCommand } from "./tauriApi";
 
 const appIconUrl = new URL("../assets/app-icon.png", import.meta.url).href;
 const recentHistoryLimit = 6;
@@ -40,6 +40,8 @@ export default function MainApp() {
   const [microphonePermission, setMicrophonePermission] = useState<PermissionRequestState>("unknown");
   const [showPermissionGuide, setShowPermissionGuide] = useState(false);
   const [pendingConfigAction, setPendingConfigAction] = useState<PendingConfigAction | null>(null);
+  const [configImportReport, setConfigImportReport] = useState<ConfigImportReport | null>(null);
+  const [appVersion, setAppVersion] = useState("");
   const configRef = useRef<AppConfig | null>(null);
   const savedConfigRef = useRef<AppConfig | null>(null);
 
@@ -78,6 +80,7 @@ export default function MainApp() {
   }
 
   useEffect(() => {
+    getAppVersion().then(setAppVersion).catch(() => setAppVersion(""));
     refreshAll().catch((error) => setNotice(String(error)));
     const unlistenStatus = listenWorkflowStatus(setStatus);
     const unlistenHistory = listenHistoryUpdated(() => {
@@ -280,6 +283,38 @@ export default function MainApp() {
     }
   }
 
+  async function exportCurrentConfig() {
+    const currentConfig = configRef.current;
+    if (!currentConfig) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const path = await exportConfigCommand(currentConfig);
+      setNotice(text.notices.configExported(path));
+    } catch (error) {
+      setNotice(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importConfigFile(file: File) {
+    setBusy(true);
+    try {
+      const raw = await file.text();
+      const result = await importConfigCommand(raw);
+      applyLoadedConfig(result.config);
+      setConfigImportReport(result.report);
+      setNotice(text.notices.configImported);
+    } catch (error) {
+      setNotice(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function openHistoryPage() {
     setPage("history");
     loadHistoryPage(0).catch((error) => setNotice(String(error)));
@@ -299,6 +334,7 @@ export default function MainApp() {
           <div>
             <div className="brand-title">BoltScribe</div>
             <div className="brand-subtitle">{text.appSubtitle}</div>
+            {appVersion ? <div className="brand-version">{text.common.version(appVersion)}</div> : null}
           </div>
         </div>
         <nav>
@@ -370,7 +406,16 @@ export default function MainApp() {
           <CorrectionPage config={config} onChange={changeConfig} onSave={() => save(config)} canSave={canSave} text={text} />
         ) : null}
         {config && page === "settings" ? (
-          <SettingsPage config={config} onChange={changeConfig} onSave={() => save(config)} canSave={canSave} text={text} />
+          <SettingsPage
+            config={config}
+            onChange={changeConfig}
+            onSave={() => save(config)}
+            onExportConfig={() => { void exportCurrentConfig(); }}
+            onImportConfig={(file) => { void importConfigFile(file); }}
+            importReport={configImportReport}
+            canSave={canSave}
+            text={text}
+          />
         ) : null}
       </main>
       {pendingConfigAction ? (

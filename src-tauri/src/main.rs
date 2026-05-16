@@ -13,10 +13,10 @@ mod windows;
 mod workflow;
 
 use commands::{
-    accessibility_permission_granted, cancel_current_workflow, copy_text_to_clipboard, get_status,
-    hide_main_window, load_config, load_history, load_stats, open_accessibility_settings,
-    open_app_dir, request_accessibility_permission, request_microphone_permission, save_config,
-    toggle_recording,
+    accessibility_permission_granted, cancel_current_workflow, copy_text_to_clipboard,
+    export_config, get_status, hide_main_window, import_config, load_config, load_history,
+    load_stats, open_accessibility_settings, open_app_dir, request_accessibility_permission,
+    request_microphone_permission, save_config, toggle_recording,
 };
 use tauri::{Emitter, RunEvent};
 
@@ -47,6 +47,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             load_config,
             save_config,
+            export_config,
+            import_config,
             load_history,
             load_stats,
             get_status,

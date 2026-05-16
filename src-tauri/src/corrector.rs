@@ -492,15 +492,15 @@ mod tests {
             variables: Vec::new(),
             correction_rules: Vec::new(),
             dictionary: vec![DictionaryEntry {
-                term: "Acme".to_string(),
-                aliases: vec!["acme".to_string()],
+                term: "LDFC".to_string(),
+                aliases: vec!["ldfc".to_string()],
                 note: "项目名".to_string(),
             }],
         };
-        let prompt = build_correction_prompt("这是 acme", &correction);
+        let prompt = build_correction_prompt("这是 ldfc", &correction);
         assert!(prompt.contains("不要扩写"));
-        assert!(prompt.contains("Acme"));
-        assert!(prompt.contains("这是 acme"));
+        assert!(prompt.contains("LDFC"));
+        assert!(prompt.contains("这是 ldfc"));
     }
 
     #[test]
@@ -522,8 +522,8 @@ mod tests {
             }],
             dictionary: vec![
                 DictionaryEntry {
-                    term: "Acme".to_string(),
-                    aliases: vec!["acme".to_string()],
+                    term: "LDFC".to_string(),
+                    aliases: vec!["ldfc".to_string()],
                     note: "项目名".to_string(),
                 },
                 DictionaryEntry {
@@ -534,12 +534,12 @@ mod tests {
             ],
         };
 
-        let prompt = build_correction_prompt("这是 acme", &correction);
+        let prompt = build_correction_prompt("这是 ldfc", &correction);
 
         assert!(prompt.contains("场景=技术讨论"));
-        assert!(prompt.contains("词典=Acme\nCodex"));
+        assert!(prompt.contains("词典=LDFC\nCodex"));
         assert!(!prompt.contains("艾迪"));
-        assert!(prompt.contains("```text\n这是 acme\n```"));
+        assert!(prompt.contains("```text\n这是 ldfc\n```"));
     }
 
     #[test]

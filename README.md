@@ -24,6 +24,12 @@ BoltScribe is a desktop voice input app for macOS and Windows. Press a global ho
 
 It runs as a lightweight tray/menu bar app, keeps data on your machine, and provides history, logs, and input statistics for reviewing past dictation.
 
+## Screenshots
+
+![BoltScribe settings in English](docs/assets/screenshots/ui-screenshot-en.jpg)
+
+![BoltScribe capsule overlay](docs/assets/screenshots/capsule-cn.jpg)
+
 ## Features
 
 - **Hotkey dictation:** start and stop voice input from anywhere on macOS or Windows.

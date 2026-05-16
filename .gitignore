@@ -18,6 +18,7 @@ config.json
 
 # Local Codex workspace actions and machine-specific paths.
 .codex/
+/AGENTS.md
 
 # Local recording/build artifacts.
 *.wav

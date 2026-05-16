@@ -1,13 +1,8 @@
 {
   "name": "boltscribe",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Local-first macOS and Windows voice input with ASR transcription, LLM correction, global hotkeys, and a Tauri tray workflow.",
   "private": true,
-  "license": "CC-BY-NC-4.0",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/OneChirpZ/BoltScribe.git"
-  },
   "type": "module",
   "keywords": [
     "macos",
@@ -27,7 +22,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "version:check": "node scripts/check-version.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.0",
