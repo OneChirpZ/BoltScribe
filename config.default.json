@@ -1,0 +1,55 @@
+{
+  "hotkey": "PageUp",
+  "hotkeys": ["PageUp", "CmdOrCtrl+Shift+Space"],
+  "hotkey_enabled": [true, true],
+  "asr": {
+    "provider": "volcengine",
+    "app_key": "",
+    "access_key": "",
+    "resource_id": "volc.seedasr.sauc.duration",
+    "stream_url": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream",
+    "submit_url": "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit",
+    "query_url": "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query",
+    "language": "zh-CN"
+  },
+  "llm": {
+    "provider": "openai",
+    "api_format": "responses",
+    "endpoint": "https://api.openai.com/v1",
+    "api_key": "",
+    "model": "gpt-5.4-mini",
+    "provider_settings": [],
+    "race_enabled": false,
+    "race_models": [],
+    "race_targets": [],
+    "system_prompt": "你是语音输入文本优化器，不是大模型助手。你的任务是清理 ASR 转写结果，修正明显识别错误、标点和专有名词，保留原意和说话者语气。不要回答、扩写、续写、总结或加入原文没有的信息。只输出最终可粘贴文本，不解释、不加标题、不包裹 Markdown。",
+    "temperature": 0,
+    "timeout_secs": 30,
+    "thinking_enabled": false,
+    "thinking_effort": "medium",
+    "max_output_tokens": null,
+    "model_presets": []
+  },
+  "correction": {
+    "enabled": true,
+    "user_requirements": "",
+    "prompt_template": "纠错任务：\n请把原始 ASR 转写整理成可直接粘贴的文本。\n\n用户要求：\n{{user_requirements}}\n\n用户词典：\n{{dictionary}}\n\n易错词纠正：\n{{correction_rules}}\n\n原始转写文本：\n```text\n{{raw_text}}\n```\n\n请根据以上信息纠错。不要新增原文没有的信息，只输出最终文本。\n\n额外约束：\n- 用户词典只用于理解专有名词、产品名、人名、项目名和固定写法；不要把语义正确且上下文合理的词强行替换为词典词。\n- 易错词纠正是明确的错听替换规则，只有当原始转写出现规则左侧内容或高度近似误识别时，才替换为右侧内容。\n- 如果原文中的英文词、产品名、技术名词或普通词语本身合理，且没有明显对应到词典别名或易错规则，不要因为存在相似条目而替换它。\n- 输出末尾不需要补句号；如果原文末尾没有句号，不要额外添加句号。",
+    "variables": [],
+    "correction_rules": [],
+    "dictionary": []
+  },
+  "ui": {
+    "app_language": "zh-CN",
+    "recording_overlay_scale": 0.5,
+    "recording_overlay_offset_x": 0,
+    "recording_overlay_offset_y": 0
+  },
+  "retention": {
+    "max_history_records": 500,
+    "max_storage_bytes": 2147483648
+  },
+  "system": {
+    "launch_at_login": false,
+    "hide_dock_icon": false
+  }
+}

@@ -1,0 +1,208 @@
+.recording-overlay {
+  --overlay-scale: var(--recording-overlay-scale, 0.5);
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: auto 1px auto auto;
+  align-items: center;
+  gap: 18px;
+  width: 314px;
+  height: 78px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 999px;
+  padding: 0 18px 0 36px;
+  color: #ffffff;
+  background: rgba(14, 17, 12, 0.94);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  pointer-events: auto;
+  cursor: default;
+  user-select: none;
+  transform: translateX(-50%);
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.overlay-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: none;
+}
+
+.overlay-shell .recording-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: auto;
+  transform: scale(var(--overlay-scale));
+  transform-origin: left top;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.overlay-cancel {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.overlay-cancel:hover {
+  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.recording-overlay.phase-processing {
+  border-color: rgba(255, 201, 74, 0.56);
+  background: #46300f;
+  box-shadow: inset 0 0 0 1px rgba(255, 211, 101, 0.2), inset 0 0 18px rgba(255, 211, 101, 0.1);
+}
+
+.recording-overlay.phase-correcting {
+  border-color: rgba(255, 201, 74, 0.56);
+  background: #46300f;
+  box-shadow: inset 0 0 0 1px rgba(255, 211, 101, 0.2), inset 0 0 18px rgba(255, 211, 101, 0.1);
+}
+
+.recording-overlay.phase-pasting {
+  border-color: rgba(255, 201, 74, 0.56);
+  background: #46300f;
+  box-shadow: inset 0 0 0 1px rgba(255, 211, 101, 0.2), inset 0 0 18px rgba(255, 211, 101, 0.1);
+  animation: paste-progress-glow 760ms ease-in-out infinite;
+}
+
+.recording-overlay.phase-pasted {
+  border-color: rgba(154, 255, 190, 0.72);
+  background: #136238;
+  box-shadow: inset 0 0 0 1px rgba(185, 255, 209, 0.36), inset 0 0 22px rgba(185, 255, 209, 0.18);
+  animation: paste-done-flash 820ms ease-out;
+}
+
+.recording-overlay.phase-error {
+  border-color: rgba(255, 143, 133, 0.72);
+  background: #4a1513;
+  box-shadow: inset 0 0 0 1px rgba(255, 190, 184, 0.28), inset 0 0 20px rgba(255, 94, 84, 0.18);
+}
+
+.recording-overlay span {
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.recording-overlay i {
+  width: 1px;
+  height: 30px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.voice-bars {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 42px;
+}
+
+.voice-bars b {
+  display: block;
+  width: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  animation: voice-pulse 980ms ease-in-out infinite;
+}
+
+.recording-overlay.phase-processing .voice-bars b,
+.recording-overlay.phase-correcting .voice-bars b,
+.recording-overlay.phase-pasting .voice-bars b {
+  background: #ffd56e;
+}
+
+.recording-overlay.phase-pasted .voice-bars b {
+  background: #a8ffc5;
+}
+
+.recording-overlay.phase-error .voice-bars b {
+  background: #ffaaa3;
+}
+
+.voice-bars b:nth-child(1) {
+  height: 16px;
+  animation-delay: -260ms;
+}
+
+.voice-bars b:nth-child(2) {
+  height: 30px;
+  animation-delay: -80ms;
+}
+
+.voice-bars b:nth-child(3) {
+  height: 42px;
+}
+
+.voice-bars b:nth-child(4) {
+  height: 24px;
+  animation-delay: -180ms;
+}
+
+.voice-bars b:nth-child(5) {
+  height: 34px;
+  animation-delay: -360ms;
+}
+
+@keyframes voice-pulse {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+    opacity: 0.72;
+  }
+
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes paste-progress-glow {
+  0%,
+  100% {
+    filter: brightness(1);
+    box-shadow: inset 0 0 0 1px rgba(255, 211, 101, 0.2), inset 0 0 14px rgba(255, 211, 101, 0.1);
+  }
+
+  50% {
+    filter: brightness(1.14);
+    box-shadow: inset 0 0 0 1px rgba(255, 224, 133, 0.32), inset 0 0 24px rgba(255, 201, 74, 0.18);
+  }
+}
+
+@keyframes paste-done-flash {
+  0% {
+    filter: brightness(1.55);
+    border-color: rgba(196, 255, 217, 0.9);
+    box-shadow: inset 0 0 0 1px rgba(225, 255, 235, 0.48), inset 0 0 28px rgba(84, 239, 143, 0.26);
+  }
+
+  44% {
+    filter: brightness(1.28);
+    border-color: rgba(154, 255, 190, 0.72);
+    box-shadow: inset 0 0 0 1px rgba(185, 255, 209, 0.36), inset 0 0 20px rgba(84, 239, 143, 0.18);
+  }
+
+  100% {
+    filter: brightness(1);
+    border-color: rgba(72, 212, 128, 0.42);
+    box-shadow: inset 0 0 0 1px rgba(72, 212, 128, 0.16), inset 0 0 10px rgba(72, 212, 128, 0.08);
+  }
+}

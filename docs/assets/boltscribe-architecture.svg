@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="520" viewBox="0 0 1180 520" role="img" aria-labelledby="title desc">
+  <title id="title">BoltScribe architecture</title>
+  <desc id="desc">A diagram of the React frontend, Tauri command layer, Rust services, and local application data.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101510"/>
+      <stop offset="0.55" stop-color="#151b22"/>
+      <stop offset="1" stop-color="#21170f"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect width="1180" height="520" rx="28" fill="url(#bg)"/>
+  <text x="52" y="64" fill="#f6f2e8" font-family="Inter, SF Pro Display, Arial, sans-serif" font-size="28" font-weight="750">BoltScribe architecture</text>
+  <text x="52" y="96" fill="#9ea79a" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="15">A Tauri desktop app with a React settings UI, a native Rust workflow engine, and local-first history storage.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="52" y="140" width="316" height="286" rx="20" fill="#1e241f" stroke="#3a433b"/>
+    <text x="82" y="180" fill="#f6f2e8" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="20" font-weight="750">React frontend</text>
+    <text x="82" y="210" fill="#9ea79a" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="13">src/app · src/pages · src/components</text>
+    <g transform="translate(82 246)" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="15">
+      <rect width="226" height="34" rx="10" fill="#151a16" stroke="#3a433b"/>
+      <text x="16" y="23" fill="#d9d3c6">Home + recent history</text>
+      <rect y="48" width="226" height="34" rx="10" fill="#151a16" stroke="#3a433b"/>
+      <text x="16" y="71" fill="#d9d3c6">Models + ASR settings</text>
+      <rect y="96" width="226" height="34" rx="10" fill="#151a16" stroke="#3a433b"/>
+      <text x="16" y="119" fill="#d9d3c6">LLM correction editor</text>
+      <rect y="144" width="226" height="34" rx="10" fill="#151a16" stroke="#3a433b"/>
+      <text x="16" y="167" fill="#d9d3c6">Application settings</text>
+    </g>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="432" y="140" width="316" height="286" rx="20" fill="#202018" stroke="#574728"/>
+    <text x="462" y="180" fill="#f6f2e8" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="20" font-weight="750">Tauri boundary</text>
+    <text x="462" y="210" fill="#cbbd9a" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="13">commands.rs · events · tray · windows</text>
+    <g transform="translate(462 246)" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="15">
+      <rect width="226" height="34" rx="10" fill="#181711" stroke="#574728"/>
+      <text x="16" y="23" fill="#f2d99e">load/save config</text>
+      <rect y="48" width="226" height="34" rx="10" fill="#181711" stroke="#574728"/>
+      <text x="16" y="71" fill="#f2d99e">toggle recording</text>
+      <rect y="96" width="226" height="34" rx="10" fill="#181711" stroke="#574728"/>
+      <text x="16" y="119" fill="#f2d99e">workflow/status events</text>
+      <rect y="144" width="226" height="34" rx="10" fill="#181711" stroke="#574728"/>
+      <text x="16" y="167" fill="#f2d99e">menu bar management</text>
+    </g>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="812" y="140" width="316" height="286" rx="20" fill="#1e232a" stroke="#36495b"/>
+    <text x="842" y="180" fill="#f6f2e8" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="20" font-weight="750">Rust services</text>
+    <text x="842" y="210" fill="#9bb3c7" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="13">ASR · LLM · recorder · injector · history</text>
+    <g transform="translate(842 246)" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="15">
+      <rect width="226" height="34" rx="10" fill="#111922" stroke="#36495b"/>
+      <text x="16" y="23" fill="#d8ecff">Volcengine live/file ASR</text>
+      <rect y="48" width="226" height="34" rx="10" fill="#111922" stroke="#36495b"/>
+      <text x="16" y="71" fill="#d8ecff">OpenAI-compatible LLM</text>
+      <rect y="96" width="226" height="34" rx="10" fill="#111922" stroke="#36495b"/>
+      <text x="16" y="119" fill="#d8ecff">Accessibility paste</text>
+      <rect y="144" width="226" height="34" rx="10" fill="#111922" stroke="#36495b"/>
+      <text x="16" y="167" fill="#d8ecff">History retention pruning</text>
+    </g>
+  </g>
+
+  <g stroke="#f5b84b" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.78">
+    <path d="M372 282h52"/>
+    <path d="M418 276l8 6-8 6"/>
+    <path d="M752 282h52"/>
+    <path d="M798 276l8 6-8 6"/>
+  </g>
+
+  <g transform="translate(168 458)" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="14">
+    <rect width="844" height="36" rx="18" fill="#ffffff" fill-opacity="0.05" stroke="#ffffff" stroke-opacity="0.1"/>
+    <text x="24" y="24" fill="#d9d3c6">Local data: ~/.boltscribe/config.json · Application Support/BoltScribe/history.jsonl · recordings/*.wav</text>
+  </g>
+</svg>

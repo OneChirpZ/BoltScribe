@@ -1,0 +1,114 @@
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.primary,
+.secondary,
+.icon-button {
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.primary {
+  color: #171306;
+  border-color: rgba(245, 184, 75, 0.88);
+  background: linear-gradient(180deg, #ffd56d, var(--amber));
+  font-weight: 700;
+  box-shadow: 0 10px 28px rgba(245, 184, 75, 0.18);
+}
+
+.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #ffe092, #ffc34d);
+  transform: translateY(-1px);
+}
+
+.primary.danger {
+  color: #fff9f7;
+  border-color: rgba(225, 94, 86, 0.8);
+  background: linear-gradient(180deg, #eb786f, var(--danger));
+  box-shadow: 0 10px 28px rgba(225, 94, 86, 0.18);
+}
+
+.primary:disabled,
+.secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.secondary,
+.icon-button {
+  color: var(--text-soft);
+  border-color: var(--line);
+  background: var(--surface-raised);
+}
+
+.secondary:hover,
+.icon-button:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: #262b24;
+  transform: translateY(-1px);
+}
+
+.small {
+  padding: 9px 12px;
+  font-size: 13px;
+}
+
+.hotkey-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hotkey-pill {
+  border: 1px solid rgba(36, 152, 255, 0.34);
+  border-radius: var(--radius);
+  padding: 11px 14px;
+  color: #cfe8ff;
+  background: rgba(36, 152, 255, 0.08);
+}
+
+.hotkey-pill.muted {
+  color: var(--muted);
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summary-item {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.025);
+  transition: border-color 140ms ease, transform 140ms ease, background 140ms ease;
+}
+
+.summary-item:hover {
+  border-color: rgba(36, 152, 255, 0.28);
+  background: rgba(36, 152, 255, 0.045);
+  transform: translateY(-1px);
+}
+
+.summary-item span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.summary-item strong {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
