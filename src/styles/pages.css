@@ -269,6 +269,51 @@ textarea.dictionary-lines {
   width: auto;
 }
 
+.hidden-file-input {
+  display: none;
+}
+
+.config-import-report {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.config-import-report strong {
+  color: var(--text);
+}
+
+.config-import-report p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.config-import-report-list {
+  display: grid;
+  gap: 6px;
+}
+
+.config-import-report-list span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.config-import-report-list ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.config-import-report-list li {
+  overflow-wrap: anywhere;
+}
+
 .inline-toggle {
   align-self: end;
   min-height: 44px;

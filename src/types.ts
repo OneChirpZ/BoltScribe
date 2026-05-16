@@ -100,6 +100,20 @@ export interface CorrectionRule {
   note: string;
 }
 
+export interface ConfigImportReport {
+  format: string | null;
+  version: number | null;
+  missing_fields: string[];
+  unknown_fields: string[];
+  invalid_fields: string[];
+  notes: string[];
+}
+
+export interface ConfigImportResult {
+  config: AppConfig;
+  report: ConfigImportReport;
+}
+
 export interface WorkflowStatus {
   mode: "idle" | "recording" | "processing" | "error";
   message: string;

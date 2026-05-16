@@ -24,6 +24,12 @@ BoltScribe is a macOS voice input app. Press a global hotkey to record, press it
 
 It runs as a lightweight menu bar app, keeps data on your Mac, and provides history, logs, and input statistics for reviewing past dictation.
 
+## Screenshots
+
+![BoltScribe settings in English](docs/assets/screenshots/ui-screenshot-en.jpg)
+
+![BoltScribe capsule overlay](docs/assets/screenshots/capsule-cn.jpg)
+
 ## Features
 
 - **Hotkey dictation:** start and stop voice input from anywhere on macOS.

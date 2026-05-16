@@ -1,4 +1,5 @@
-import type { AppConfig } from "../types";
+import { useRef, type ChangeEvent } from "react";
+import type { AppConfig, ConfigImportReport } from "../types";
 import Field from "../components/Field";
 import PanelHeader from "../components/PanelHeader";
 import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrectionTemplates";
@@ -13,15 +14,22 @@ export default function SettingsPage({
   config,
   onChange,
   onSave,
+  onExportConfig,
+  onImportConfig,
+  importReport,
   canSave,
   text,
 }: {
   config: AppConfig;
   onChange: (config: AppConfig) => void;
   onSave: () => void;
+  onExportConfig: () => void;
+  onImportConfig: (file: File) => void;
+  importReport: ConfigImportReport | null;
   canSave: boolean;
   text: TextBundle;
 }) {
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const storageGb = Number((config.retention.max_storage_bytes / bytesPerGb).toFixed(2));
 
   function updateMaxRecords(value: string) {
@@ -54,6 +62,14 @@ export default function SettingsPage({
   function updateLanguage(value: string) {
     const language: AppLanguage = value === "en-US" ? "en-US" : "zh-CN";
     onChange(applyLanguageDefaultCorrectionTemplate(config, language));
+  }
+
+  function importSelectedFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (file) {
+      onImportConfig(file);
+    }
   }
 
   return (
@@ -121,6 +137,28 @@ export default function SettingsPage({
 
       <div className="settings-section">
         <div className="section-title">
+          <h2>{text.settings.configPortability}</h2>
+          <div className="section-actions">
+            <button className="secondary small" type="button" disabled={!canSave} onClick={onExportConfig}>
+              {text.settings.exportConfig}
+            </button>
+            <button className="secondary small" type="button" disabled={!canSave} onClick={() => importInputRef.current?.click()}>
+              {text.settings.importConfig}
+            </button>
+            <input
+              ref={importInputRef}
+              className="hidden-file-input"
+              type="file"
+              accept="application/json,.json"
+              onChange={importSelectedFile}
+            />
+          </div>
+        </div>
+        {importReport ? <ConfigImportReportView report={importReport} text={text} /> : null}
+      </div>
+
+      <div className="settings-section">
+        <div className="section-title">
           <h2>{text.settings.system}</h2>
         </div>
         <label className="toggle-row">
@@ -141,6 +179,50 @@ export default function SettingsPage({
         </label>
       </div>
     </section>
+  );
+}
+
+function ConfigImportReportView({
+  report,
+  text,
+}: {
+  report: ConfigImportReport;
+  text: TextBundle;
+}) {
+  const hasDetails =
+    report.missing_fields.length > 0 ||
+    report.unknown_fields.length > 0 ||
+    report.invalid_fields.length > 0 ||
+    report.notes.length > 0;
+
+  return (
+    <div className="config-import-report">
+      <div>
+        <strong>{text.settings.importReport}</strong>
+        <p>{text.settings.importFormat(report.format, report.version)}</p>
+      </div>
+      {!hasDetails ? <p>{text.settings.importNoIssues}</p> : null}
+      <ReportList title={text.settings.importMissingFields} items={report.missing_fields} />
+      <ReportList title={text.settings.importUnknownFields} items={report.unknown_fields} />
+      <ReportList title={text.settings.importInvalidFields} items={report.invalid_fields} />
+      <ReportList title={text.settings.importNotes} items={report.notes} />
+    </div>
+  );
+}
+
+function ReportList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <div className="config-import-report-list">
+      <span>{title}</span>
+      <ul>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

@@ -1,6 +1,7 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AppConfig, HistoryRecord, InputStats, WorkflowStatus } from "../types";
+import type { AppConfig, ConfigImportResult, HistoryRecord, InputStats, WorkflowStatus } from "../types";
 
 export function loadConfig() {
   return invoke<AppConfig>("load_config");
@@ -8,6 +9,18 @@ export function loadConfig() {
 
 export function saveConfig(config: AppConfig) {
   return invoke<AppConfig>("save_config", { config });
+}
+
+export function exportConfig(config: AppConfig) {
+  return invoke<string>("export_config", { config });
+}
+
+export function importConfig(raw: string) {
+  return invoke<ConfigImportResult>("import_config", { raw });
+}
+
+export function getAppVersion() {
+  return getVersion();
 }
 
 export function loadHistory(limit: number, offset = 0) {

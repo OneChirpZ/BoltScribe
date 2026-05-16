@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn counts_only_chinese_characters_and_english_words() {
         assert_eq!(
-            count_chinese_characters_and_english_words("你好，Agent! Acme works. 123"),
+            count_chinese_characters_and_english_words("你好，Agent! LDFC works. 123"),
             5
         );
         assert_eq!(

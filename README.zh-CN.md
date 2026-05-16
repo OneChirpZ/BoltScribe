@@ -24,6 +24,12 @@ BoltScribe 是一个 macOS 语音输入应用。按下全局快捷键开始录�
 
 它以菜单栏应用的方式常驻后台，数据保存在本机，并提供历史记录、日志和输入统计。
 
+## 界面示例
+
+![BoltScribe 中文界面截图](docs/assets/screenshots/ui-screenshot-cn.jpg)
+
+![BoltScribe 胶囊浮窗截图](docs/assets/screenshots/capsule-cn.jpg)
+
 ## 功能亮点
 
 - **快捷语音输入：** 在 macOS 任意位置通过全局快捷键开始和结束输入。

@@ -723,14 +723,14 @@ mod tests {
 
     #[test]
     fn extracts_object_result_text() {
-        let value = json!({"result": {"text": "  你好，Acme。 "}});
-        assert_eq!(extract_text(&value).unwrap(), "你好，Acme。");
+        let value = json!({"result": {"text": "  你好，LDFC。 "}});
+        assert_eq!(extract_text(&value).unwrap(), "你好，LDFC。");
     }
 
     #[test]
     fn extracts_array_result_text() {
-        let value = json!({"result": [{"text": "你好，"}, {"text": "Acme。"}]});
-        assert_eq!(extract_text(&value).unwrap(), "你好，Acme。");
+        let value = json!({"result": [{"text": "你好，"}, {"text": "LDFC。"}]});
+        assert_eq!(extract_text(&value).unwrap(), "你好，LDFC。");
     }
 
     #[test]
