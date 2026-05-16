@@ -222,6 +222,8 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tungstenite",
  "uuid",
+ "windows 0.54.0",
+ "winreg 0.50.0",
 ]
 
 [[package]]

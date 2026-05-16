@@ -1,6 +1,7 @@
 use crate::{
     autostart, config, history, injector, paths, recorder, shortcuts, tray, windows, workflow,
 };
+use std::path::Path;
 use tauri::{Emitter, State, Wry};
 
 #[tauri::command]
@@ -89,11 +90,23 @@ pub(crate) fn cancel_current_workflow(
 pub(crate) fn open_app_dir() -> Result<(), String> {
     let dir = paths::app_dir()?;
     std::fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
-    std::process::Command::new("open")
-        .arg(dir)
-        .status()
-        .map_err(|err| err.to_string())?;
+    open_path(&dir).map_err(|err| err.to_string())?;
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn open_path(path: &Path) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("open").arg(path).status()
+}
+
+#[cfg(target_os = "windows")]
+fn open_path(path: &Path) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("explorer").arg(path).status()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn open_path(path: &Path) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("xdg-open").arg(path).status()
 }
 
 #[tauri::command]

@@ -1,7 +1,7 @@
 [package]
 name = "boltscribe"
 version = "0.1.0"
-description = "Local-first macOS voice input with ASR transcription and LLM correction"
+description = "Local-first macOS and Windows voice input with ASR transcription and LLM correction"
 authors = ["BoltScribe contributors"]
 license = "CC-BY-NC-4.0"
 repository = "https://github.com/OneChirpZ/BoltScribe"
@@ -27,6 +27,10 @@ tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-global-shortcut = "2.3.1"
 tungstenite = { version = "0.29.0", features = ["native-tls"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.54", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+winreg = "0.50"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

@@ -28,6 +28,7 @@ const workflowMessagesEn: Record<string, string> = {
   "正在粘贴文本": "Pasting text",
   "粘贴完成": "Paste complete",
   "处理完成，但粘贴失败，请检查辅助功能权限": "Complete, but paste failed. Check Accessibility permission",
+  "处理完成，但粘贴失败，请检查剪贴板或当前输入位置": "Complete, but paste failed. Check clipboard access or the active input field",
   "处理完成，纠错失败，已粘贴原始转写": "Complete, correction failed, pasted the raw transcript",
   "处理完成，已粘贴纠错文本": "Complete, pasted corrected text",
   "实时识别失败，正在使用录音文件重试": "Live recognition failed, retrying with the recorded file",

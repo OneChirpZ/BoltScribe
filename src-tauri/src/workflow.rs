@@ -484,7 +484,7 @@ fn process_recording(
         WorkflowStatus {
             mode: WorkflowMode::Idle,
             message: if record.injection_error.is_some() {
-                "处理完成，但粘贴失败，请检查辅助功能权限".to_string()
+                paste_failure_message()
             } else if record.correction_error.is_some() {
                 "处理完成，纠错失败，已粘贴原始转写".to_string()
             } else {
@@ -501,6 +501,14 @@ fn process_recording(
         total_started_at.elapsed().as_millis()
     );
     Ok(())
+}
+
+fn paste_failure_message() -> String {
+    if cfg!(target_os = "windows") {
+        "处理完成，但粘贴失败，请检查剪贴板或当前输入位置".to_string()
+    } else {
+        "处理完成，但粘贴失败，请检查辅助功能权限".to_string()
+    }
 }
 
 fn transcribe_with_live_fallback(

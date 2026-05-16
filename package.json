@@ -1,7 +1,7 @@
 {
   "name": "boltscribe",
   "version": "0.1.0",
-  "description": "Local-first macOS voice input with ASR transcription, LLM correction, global hotkeys, and a Tauri menu bar workflow.",
+  "description": "Local-first macOS and Windows voice input with ASR transcription, LLM correction, global hotkeys, and a Tauri tray workflow.",
   "private": true,
   "license": "CC-BY-NC-4.0",
   "repository": {
@@ -11,6 +11,7 @@
   "type": "module",
   "keywords": [
     "macos",
+    "windows",
     "tauri",
     "react",
     "rust",

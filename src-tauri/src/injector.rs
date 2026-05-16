@@ -149,7 +149,108 @@ mod platform {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+mod platform {
+    use ::windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+        VIRTUAL_KEY, VK_CONTROL, VK_V,
+    };
+    use anyhow::{anyhow, Context, Result};
+    use arboard::Clipboard;
+    use std::thread;
+    use std::time::Duration;
+
+    pub fn accessibility_trusted(_prompt: bool) -> bool {
+        true
+    }
+
+    pub fn open_accessibility_settings() -> Result<()> {
+        Ok(())
+    }
+
+    pub fn type_text(text: &str) -> Result<()> {
+        let previous_text = write_clipboard_text(text)?;
+        thread::sleep(Duration::from_millis(40));
+
+        let paste_result = send_ctrl_v();
+        thread::sleep(Duration::from_millis(300));
+
+        if let Some(previous_text) = previous_text {
+            if let Err(err) = restore_clipboard_text(previous_text) {
+                eprintln!("failed to restore clipboard text after paste: {err:?}");
+            }
+        }
+
+        paste_result
+    }
+
+    fn write_clipboard_text(text: &str) -> Result<Option<String>> {
+        let mut clipboard = Clipboard::new().context("Failed to access clipboard")?;
+        let previous_text = clipboard.get_text().ok();
+        clipboard
+            .set_text(text.to_string())
+            .context("Failed to write clipboard")?;
+        Ok(previous_text)
+    }
+
+    fn restore_clipboard_text(text: String) -> Result<()> {
+        let mut clipboard = Clipboard::new().context("Failed to access clipboard")?;
+        clipboard
+            .set_text(text)
+            .context("Failed to restore clipboard text")?;
+        Ok(())
+    }
+
+    fn send_ctrl_v() -> Result<()> {
+        let inputs = [
+            keyboard_input(VK_CONTROL, false),
+            keyboard_input(VK_V, false),
+            keyboard_input(VK_V, true),
+            keyboard_input(VK_CONTROL, true),
+        ];
+        let sent = send_inputs(&inputs);
+        if sent != inputs.len() as u32 {
+            if sent > 0 {
+                release_paste_keys();
+            }
+            return Err(anyhow!(
+                "Failed to send paste shortcut, sent {sent}/{} input events",
+                inputs.len()
+            ));
+        }
+        Ok(())
+    }
+
+    fn release_paste_keys() {
+        let cleanup = [keyboard_input(VK_V, true), keyboard_input(VK_CONTROL, true)];
+        let _ = send_inputs(&cleanup);
+    }
+
+    fn send_inputs(inputs: &[INPUT]) -> u32 {
+        unsafe { SendInput(inputs, std::mem::size_of::<INPUT>() as i32) }
+    }
+
+    fn keyboard_input(key: VIRTUAL_KEY, key_up: bool) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: key,
+                    wScan: 0,
+                    dwFlags: if key_up {
+                        KEYEVENTF_KEYUP
+                    } else {
+                        KEYBD_EVENT_FLAGS(0)
+                    },
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod platform {
     use anyhow::{anyhow, Result};
 
@@ -162,6 +263,8 @@ mod platform {
     }
 
     pub fn type_text(_text: &str) -> Result<()> {
-        Err(anyhow!("Text injection is only implemented on macOS"))
+        Err(anyhow!(
+            "Text injection is not implemented on this platform"
+        ))
     }
 }

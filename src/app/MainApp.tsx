@@ -3,6 +3,7 @@ import type { AppConfig, HistoryRecord, InputStats, WorkflowStatus } from "../ty
 import type { Page } from "../domain/navigation";
 import type { PermissionRequestState } from "../domain/permissions";
 import { appLanguage, translations } from "../domain/i18n";
+import { requiresAccessibilityPermission } from "../domain/platform";
 import { emptyStatus } from "../domain/workflow";
 import NavButton from "../components/NavButton";
 import InputStatsCard from "../components/InputStatsCard";
@@ -23,6 +24,7 @@ type PendingConfigAction =
   | { kind: "close" };
 
 export default function MainApp() {
+  const needsAccessibilityPermission = requiresAccessibilityPermission();
   const [page, setPage] = useState<Page>("home");
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [savedConfig, setSavedConfig] = useState<AppConfig | null>(null);
@@ -70,7 +72,7 @@ export default function MainApp() {
     setHistory(records);
     setStats(loadedStats);
     setAccessibilityGranted(hasAccessibility);
-    if (!hasAccessibility) {
+    if (needsAccessibilityPermission && !hasAccessibility) {
       setShowPermissionGuide(true);
     }
   }
@@ -109,7 +111,7 @@ export default function MainApp() {
   }, [page]);
 
   useEffect(() => {
-    if (accessibilityGranted !== false) {
+    if (!needsAccessibilityPermission || accessibilityGranted !== false) {
       return;
     }
 
@@ -315,7 +317,7 @@ export default function MainApp() {
       </aside>
 
       <main className="content">
-        {accessibilityGranted === false ? (
+        {needsAccessibilityPermission && accessibilityGranted === false ? (
           <div className="permission-banner">
             <div>
               <strong>{text.permission.bannerTitle}</strong>
@@ -389,6 +391,7 @@ export default function MainApp() {
       {showPermissionGuide ? (
         <PermissionGuide
           accessibilityGranted={accessibilityGranted}
+          requiresAccessibility={needsAccessibilityPermission}
           microphonePermission={microphonePermission}
           onClose={() => setShowPermissionGuide(false)}
           onRefreshAccessibility={() => refreshAccessibility().catch((error) => setNotice(String(error)))}

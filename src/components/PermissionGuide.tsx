@@ -4,6 +4,7 @@ import type { TextBundle } from "../domain/i18n";
 
 export default function PermissionGuide({
   accessibilityGranted,
+  requiresAccessibility,
   microphonePermission,
   onClose,
   onRefreshAccessibility,
@@ -12,6 +13,7 @@ export default function PermissionGuide({
   text,
 }: {
   accessibilityGranted: boolean | null;
+  requiresAccessibility: boolean;
   microphonePermission: PermissionRequestState;
   onClose: () => void;
   onRefreshAccessibility: () => void;
@@ -19,7 +21,7 @@ export default function PermissionGuide({
   onRequestMicrophone: () => void;
   text: TextBundle;
 }) {
-  const allPermissionsGranted = accessibilityGranted === true && microphonePermission === "granted";
+  const allPermissionsGranted = (!requiresAccessibility || accessibilityGranted === true) && microphonePermission === "granted";
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -35,18 +37,20 @@ export default function PermissionGuide({
           <button className="notice-close" type="button" onClick={onClose} aria-label={text.permission.closeGuide}>×</button>
         </div>
         <div className="permission-guide-grid">
-          <PermissionCard
-            title={text.permission.accessibility}
-            status={accessibilityGranted ? text.permission.statusEnabled : text.permission.statusDisabled}
-            tone={accessibilityGranted ? "ok" : "danger"}
-            description={text.permission.accessibilityDescription}
-            actions={(
-              <>
-                <button className="secondary small" type="button" onClick={onRefreshAccessibility}>{text.permission.recheck}</button>
-                <button className="primary small" type="button" onClick={onOpenAccessibility}>{text.permission.openSettings}</button>
-              </>
-            )}
-          />
+          {requiresAccessibility ? (
+            <PermissionCard
+              title={text.permission.accessibility}
+              status={accessibilityGranted ? text.permission.statusEnabled : text.permission.statusDisabled}
+              tone={accessibilityGranted ? "ok" : "danger"}
+              description={text.permission.accessibilityDescription}
+              actions={(
+                <>
+                  <button className="secondary small" type="button" onClick={onRefreshAccessibility}>{text.permission.recheck}</button>
+                  <button className="primary small" type="button" onClick={onOpenAccessibility}>{text.permission.openSettings}</button>
+                </>
+              )}
+            />
+          ) : null}
           <PermissionCard
             title={text.permission.microphone}
             status={microphoneStatusLabel(microphonePermission, text)}

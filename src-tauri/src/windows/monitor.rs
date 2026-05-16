@@ -24,6 +24,7 @@ pub(crate) fn active_overlay_monitor(
     app.primary_monitor()
 }
 
+#[cfg(target_os = "macos")]
 fn focused_foreground_window_center() -> Option<(f64, f64)> {
     let script = r#"
 tell application "System Events"
@@ -75,6 +76,51 @@ end tell
     let text = String::from_utf8(output.stdout).ok()?;
     let (x, y) = text.trim().split_once(',')?;
     Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+}
+
+#[cfg(target_os = "windows")]
+fn focused_foreground_window_center() -> Option<(f64, f64)> {
+    use ::windows::Win32::Foundation::{HWND, RECT};
+    use ::windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowRect};
+
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd == HWND(0) || foreground_process_id(hwnd) == Some(std::process::id()) {
+        return None;
+    }
+
+    let mut rect = RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut rect) }.ok()?;
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+    if width <= 0 || height <= 0 {
+        return None;
+    }
+
+    Some((
+        rect.left as f64 + width as f64 / 2.0,
+        rect.top as f64 + height as f64 / 2.0,
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn foreground_process_id(hwnd: ::windows::Win32::Foundation::HWND) -> Option<u32> {
+    let mut process_id = 0u32;
+    unsafe {
+        ::windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(
+            hwnd,
+            Some(&mut process_id as *mut u32),
+        )
+    };
+    if process_id == 0 {
+        None
+    } else {
+        Some(process_id)
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn focused_foreground_window_center() -> Option<(f64, f64)> {
+    None
 }
 
 fn monitor_from_point_variants(

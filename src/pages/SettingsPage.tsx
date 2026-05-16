@@ -3,6 +3,7 @@ import Field from "../components/Field";
 import PanelHeader from "../components/PanelHeader";
 import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrectionTemplates";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
+import { supportsDockVisibilityControl } from "../domain/platform";
 
 const maxHistoryRecords = 500;
 const bytesPerGb = 1024 * 1024 * 1024;
@@ -23,6 +24,7 @@ export default function SettingsPage({
   text: TextBundle;
 }) {
   const storageGb = Number((config.retention.max_storage_bytes / bytesPerGb).toFixed(2));
+  const canControlDockVisibility = supportsDockVisibilityControl();
 
   function updateMaxRecords(value: string) {
     const max_history_records = clampInt(Number(value), 1, maxHistoryRecords);
@@ -131,14 +133,16 @@ export default function SettingsPage({
           />
           {text.settings.launchAtLogin}
         </label>
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={config.system.hide_dock_icon ?? false}
-            onChange={(event) => onChange({ ...config, system: { ...config.system, hide_dock_icon: event.target.checked } })}
-          />
-          {text.settings.hideDockIcon}
-        </label>
+        {canControlDockVisibility ? (
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={config.system.hide_dock_icon ?? false}
+              onChange={(event) => onChange({ ...config, system: { ...config.system, hide_dock_icon: event.target.checked } })}
+            />
+            {text.settings.hideDockIcon}
+          </label>
+        ) : null}
       </div>
     </section>
   );
