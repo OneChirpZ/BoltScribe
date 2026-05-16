@@ -258,6 +258,12 @@ fn load_page_from_path(path: &PathBuf, limit: usize, offset: usize) -> Result<Hi
             visible_count: 0,
         });
     }
+    if !path.exists() {
+        return Ok(HistoryPage {
+            records: Vec::new(),
+            visible_count: 0,
+        });
+    }
 
     let mut file =
         fs::File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
@@ -561,6 +567,19 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["2", "1"]
         );
+    }
+
+    #[test]
+    fn load_from_path_returns_empty_when_history_file_is_missing() {
+        let path = std::env::temp_dir().join(format!(
+            "boltscribe-missing-history-test-{}-{}.jsonl",
+            std::process::id(),
+            Utc::now().timestamp_millis()
+        ));
+
+        let records = load_from_path(&path, 20, 0).unwrap();
+
+        assert!(records.is_empty());
     }
 
     #[test]
