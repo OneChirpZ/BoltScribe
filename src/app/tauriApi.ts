@@ -1,7 +1,7 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AppConfig, ConfigImportResult, HistoryRecord, InputStats, WorkflowStatus } from "../types";
+import type { AppConfig, AudioInputDevice, ConfigImportResult, HistoryRecord, InputStats, WorkflowStatus } from "../types";
 
 export function loadConfig() {
   return invoke<AppConfig>("load_config");
@@ -17,6 +17,10 @@ export function exportConfig(config: AppConfig) {
 
 export function importConfig(raw: string) {
   return invoke<ConfigImportResult>("import_config", { raw });
+}
+
+export function loadAudioInputDevices() {
+  return invoke<AudioInputDevice[]>("load_audio_input_devices");
 }
 
 export function getAppVersion() {

@@ -154,9 +154,11 @@ pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStat
                 .as_ref()
                 .and_then(|session| session.audio_sender().ok());
             let recorder_started_at = Instant::now();
-            state.recorder.start_with_sink(audio_sink)?;
+            state
+                .recorder
+                .start_with_config(audio_sink, config.audio.clone())?;
             log_timing(
-                "recorder.start_with_sink",
+                "recorder.start_with_config",
                 recorder_started_at,
                 total_started_at,
             );

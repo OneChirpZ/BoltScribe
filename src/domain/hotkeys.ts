@@ -1,12 +1,14 @@
 import type { AppConfig } from "../types";
+import { runtimePlatform, type RuntimePlatform } from "./platform";
 
 export const hotkeySlotCount = 2;
-export const shortcutModifiers = [
-  { value: "Ctrl", label: "Ctrl" },
-  { value: "Alt", label: "Opt" },
-  { value: "Cmd", label: "Cmd" },
-  { value: "Shift", label: "Shift" },
+export const shortcutModifierValues = [
+  "Ctrl",
+  "Alt",
+  "Cmd",
+  "Shift",
 ] as const;
+export const shortcutModifiers = shortcutModifierOptions("macos");
 export const shortcutKeyOptions = [
   { value: "Space", label: "Space" },
   { value: "PageUp", label: "Page Up" },
@@ -22,6 +24,9 @@ export const shortcutKeyOptions = [
   { value: "ArrowDown", label: "Down" },
   { value: "ArrowLeft", label: "Left" },
   { value: "ArrowRight", label: "Right" },
+  { value: "MouseMiddle", label: "Mouse Middle" },
+  { value: "MouseBack", label: "Mouse Back" },
+  { value: "MouseForward", label: "Mouse Forward" },
   ...Array.from({ length: 12 }, (_, index) => {
     const key = `F${index + 1}`;
     return { value: key, label: key };
@@ -30,11 +35,20 @@ export const shortcutKeyOptions = [
   ..."0123456789".split("").map((key) => ({ value: key, label: key })),
 ];
 
-export type ShortcutModifier = (typeof shortcutModifiers)[number]["value"];
+export type ShortcutModifier = (typeof shortcutModifierValues)[number];
 export type ShortcutParts = {
   modifiers: ShortcutModifier[];
   key: string;
 };
+
+export function shortcutModifierOptions(platform: RuntimePlatform = runtimePlatform()) {
+  const labels: Record<ShortcutModifier, string> = platform === "windows"
+    ? { Ctrl: "Control", Alt: "Alt", Cmd: "Win", Shift: "Shift" }
+    : platform === "macos"
+      ? { Ctrl: "Ctrl", Alt: "Option", Cmd: "Command", Shift: "Shift" }
+      : { Ctrl: "Ctrl", Alt: "Alt", Cmd: "Super", Shift: "Shift" };
+  return shortcutModifierValues.map((value) => ({ value, label: labels[value] }));
+}
 
 export function hotkeySlots(config: AppConfig) {
   const source = config.hotkeys?.some((hotkey) => hotkey.trim()) ? config.hotkeys : [config.hotkey];
@@ -92,7 +106,7 @@ export function updateHotkeyEnabled(config: AppConfig, index: number, enabled: b
   };
 }
 
-export function parseShortcut(value: string): ShortcutParts {
+export function parseShortcut(value: string, platform: RuntimePlatform = runtimePlatform()): ShortcutParts {
   const modifiers = new Set<ShortcutModifier>();
   let key = "";
   for (const rawToken of value.split("+")) {
@@ -100,7 +114,7 @@ export function parseShortcut(value: string): ShortcutParts {
     if (!token) {
       continue;
     }
-    const modifier = normalizeModifier(token);
+    const modifier = normalizeModifier(token, platform);
     if (modifier) {
       modifiers.add(modifier);
     } else {
@@ -109,7 +123,7 @@ export function parseShortcut(value: string): ShortcutParts {
   }
 
   return {
-    modifiers: shortcutModifiers.map((modifier) => modifier.value).filter((modifier) => modifiers.has(modifier)),
+    modifiers: shortcutModifierValues.filter((modifier) => modifiers.has(modifier)),
     key,
   };
 }
@@ -118,16 +132,17 @@ export function formatShortcut(parts: ShortcutParts) {
   if (!parts.key) {
     return "";
   }
-  return [...shortcutModifiers.map((modifier) => modifier.value).filter((modifier) => parts.modifiers.includes(modifier)), parts.key].join("+");
+  return [...shortcutModifierValues.filter((modifier) => parts.modifiers.includes(modifier)), parts.key].join("+");
 }
 
-export function displayShortcut(value: string) {
-  const parts = parseShortcut(value);
-  return displayShortcutParts(parts.modifiers, parts.key);
+export function displayShortcut(value: string, platform?: RuntimePlatform) {
+  const resolvedPlatform = platform ?? runtimePlatform();
+  const parts = parseShortcut(value, resolvedPlatform);
+  return displayShortcutParts(parts.modifiers, parts.key, resolvedPlatform);
 }
 
-export function displayShortcutParts(modifiers: ShortcutModifier[], key: string) {
-  const labels = shortcutModifiers
+export function displayShortcutParts(modifiers: ShortcutModifier[], key: string, platform?: RuntimePlatform) {
+  const labels = shortcutModifierOptions(platform)
     .filter((modifier) => modifiers.includes(modifier.value))
     .map((modifier) => modifier.label);
   if (!key) {
@@ -137,7 +152,7 @@ export function displayShortcutParts(modifiers: ShortcutModifier[], key: string)
   return [...labels, keyLabel].join("+");
 }
 
-export function normalizeModifier(value: string): ShortcutModifier | null {
+export function normalizeModifier(value: string, platform: RuntimePlatform = runtimePlatform()): ShortcutModifier | null {
   switch (value.toUpperCase()) {
     case "CTRL":
     case "CONTROL":
@@ -148,11 +163,15 @@ export function normalizeModifier(value: string): ShortcutModifier | null {
     case "CMD":
     case "COMMAND":
     case "SUPER":
+    case "WIN":
+    case "WINDOWS":
+    case "META":
+      return "Cmd";
     case "COMMANDORCONTROL":
     case "COMMANDORCTRL":
     case "CMDORCONTROL":
     case "CMDORCTRL":
-      return "Cmd";
+      return platform === "macos" ? "Cmd" : "Ctrl";
     case "SHIFT":
       return "Shift";
     default:
@@ -176,6 +195,17 @@ export function normalizeShortcutKey(value: string) {
     DOWN: "ArrowDown",
     LEFT: "ArrowLeft",
     RIGHT: "ArrowRight",
+    MOUSEMIDDLE: "MouseMiddle",
+    MIDDLEMOUSE: "MouseMiddle",
+    MOUSEBUTTONMIDDLE: "MouseMiddle",
+    MOUSEBACK: "MouseBack",
+    BACKMOUSE: "MouseBack",
+    MOUSEBUTTONBACK: "MouseBack",
+    XBUTTON1: "MouseBack",
+    MOUSEFORWARD: "MouseForward",
+    FORWARDMOUSE: "MouseForward",
+    MOUSEBUTTONFORWARD: "MouseForward",
+    XBUTTON2: "MouseForward",
   };
   if (aliases[upper]) {
     return aliases[upper];

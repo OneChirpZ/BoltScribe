@@ -1,5 +1,6 @@
 use crate::{
-    autostart, config, history, injector, paths, recorder, shortcuts, tray, windows, workflow,
+    audio_devices, autostart, config, history, injector, paths, recorder, shortcuts, tray, windows,
+    workflow,
 };
 use std::path::Path;
 use tauri::{Emitter, State, Wry};
@@ -37,13 +38,18 @@ pub(crate) fn import_config(
     })
 }
 
+#[tauri::command]
+pub(crate) fn load_audio_input_devices() -> Result<Vec<audio_devices::AudioInputDevice>, String> {
+    audio_devices::list_input_devices().map_err(|err| err.to_string())
+}
+
 fn apply_and_save_config(
     app: &tauri::AppHandle<Wry>,
     config: config::AppConfig,
 ) -> Result<config::AppConfig, String> {
     let previous = config::ConfigStore::load().unwrap_or_default();
     let mut next = config;
-    next.normalize_hotkeys();
+    next.normalize();
 
     shortcuts::apply_global_shortcuts(app, &next).inspect_err(|_| {
         if let Err(err) = shortcuts::apply_global_shortcuts(app, &previous) {

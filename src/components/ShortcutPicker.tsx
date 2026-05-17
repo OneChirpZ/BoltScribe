@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { displayShortcutParts, formatShortcut, parseShortcut, shortcutKeyOptions, shortcutModifiers } from "../domain/hotkeys";
+import { displayShortcutParts, formatShortcut, parseShortcut, shortcutKeyOptions, shortcutModifierOptions } from "../domain/hotkeys";
 import type { ShortcutModifier } from "../domain/hotkeys";
 import type { TextBundle } from "../domain/i18n";
 
@@ -19,6 +19,7 @@ export default function ShortcutPicker({
   text: TextBundle;
 }) {
   const parts = parseShortcut(value);
+  const modifierOptions = shortcutModifierOptions();
   const [draftModifiers, setDraftModifiers] = useState<ShortcutModifier[]>(parts.modifiers);
   useEffect(() => {
     setDraftModifiers(parts.modifiers);
@@ -55,7 +56,7 @@ export default function ShortcutPicker({
       </div>
       <div className="shortcut-controls">
         <div className="shortcut-modifiers">
-          {shortcutModifiers.map((modifier) => (
+          {modifierOptions.map((modifier) => (
             <button
               key={modifier.value}
               type="button"

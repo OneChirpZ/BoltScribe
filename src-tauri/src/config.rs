@@ -16,6 +16,8 @@ pub struct AppConfig {
     pub hotkeys: Vec<String>,
     #[serde(default)]
     pub hotkey_enabled: Vec<bool>,
+    #[serde(default)]
+    pub audio: AudioConfig,
     pub asr: AsrConfig,
     pub llm: LlmConfig,
     pub correction: CorrectionConfig,
@@ -25,6 +27,16 @@ pub struct AppConfig {
     pub retention: RetentionConfig,
     #[serde(default)]
     pub system: SystemConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AudioConfig {
+    #[serde(default = "default_input_device_mode")]
+    pub input_device_mode: String,
+    #[serde(default)]
+    pub input_device_id: Option<String>,
+    #[serde(default)]
+    pub input_device_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -185,6 +197,7 @@ impl Default for AppConfig {
             hotkey: default_hotkey(),
             hotkeys: default_hotkey_slots(),
             hotkey_enabled: default_hotkey_enabled_slots(),
+            audio: AudioConfig::default(),
             asr: AsrConfig {
                 provider: "volcengine".to_string(),
                 app_key: String::new(),
@@ -237,6 +250,7 @@ impl AppConfig {
 
     pub fn normalize(&mut self) {
         self.normalize_hotkeys();
+        self.audio.normalize();
         self.ui.recording_overlay_scale = self.ui.recording_overlay_scale.clamp(0.25, 1.0);
         self.ui.recording_overlay_offset_x = self.ui.recording_overlay_offset_x.clamp(-4000, 4000);
         self.ui.recording_overlay_offset_y = self.ui.recording_overlay_offset_y.clamp(-4000, 4000);
@@ -314,6 +328,41 @@ impl AppConfig {
         }
         enabled
     }
+}
+
+impl AudioConfig {
+    pub fn normalize(&mut self) {
+        if self.input_device_mode != "manual" {
+            self.input_device_mode = default_input_device_mode();
+            self.input_device_id = None;
+            self.input_device_name = None;
+            return;
+        }
+
+        self.input_device_id = normalized_optional_string(self.input_device_id.as_deref());
+        self.input_device_name = normalized_optional_string(self.input_device_name.as_deref());
+        if self.input_device_id.is_none() && self.input_device_name.is_none() {
+            self.input_device_mode = default_input_device_mode();
+        }
+    }
+
+    pub fn uses_system_default_input_device(&self) -> bool {
+        self.input_device_mode != "manual"
+    }
+}
+
+impl Default for AudioConfig {
+    fn default() -> Self {
+        Self {
+            input_device_mode: default_input_device_mode(),
+            input_device_id: None,
+            input_device_name: None,
+        }
+    }
+}
+
+fn default_input_device_mode() -> String {
+    "system_default".to_string()
 }
 
 fn default_hotkey() -> String {
@@ -549,6 +598,13 @@ fn normalize_string_list(items: &[String]) -> Vec<String> {
         normalized.push(value.to_string());
     }
     normalized
+}
+
+fn normalized_optional_string(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
 }
 
 impl Default for UiConfig {
@@ -1132,6 +1188,7 @@ mod tests {
     #[test]
     fn missing_ui_config_defaults_overlay_scale() {
         let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value.as_object_mut().unwrap().remove("audio");
         value.as_object_mut().unwrap().remove("ui");
         value.as_object_mut().unwrap().remove("retention");
         value.as_object_mut().unwrap().remove("system");
@@ -1156,6 +1213,25 @@ mod tests {
         );
         assert!(!config.system.launch_at_login);
         assert!(!config.system.hide_dock_icon);
+        assert!(config.audio.uses_system_default_input_device());
+    }
+
+    #[test]
+    fn audio_config_defaults_to_system_input_device() {
+        let mut config = AppConfig {
+            audio: AudioConfig {
+                input_device_mode: "manual".to_string(),
+                input_device_id: Some(" ".to_string()),
+                input_device_name: None,
+            },
+            ..Default::default()
+        };
+
+        config.normalize();
+
+        assert_eq!(config.audio.input_device_mode, "system_default");
+        assert!(config.audio.input_device_id.is_none());
+        assert!(config.audio.input_device_name.is_none());
     }
 
     #[test]

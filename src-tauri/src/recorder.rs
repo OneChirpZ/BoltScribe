@@ -1,6 +1,8 @@
+use crate::audio_devices;
+use crate::config::{AudioConfig, ConfigStore};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{
@@ -27,6 +29,7 @@ pub struct RecorderController {
 enum RecorderCommand {
     Start {
         audio_sink: Option<AudioSink>,
+        audio_config: AudioConfig,
         reply: mpsc::Sender<Result<()>>,
     },
     Stop {
@@ -81,11 +84,16 @@ impl RecorderController {
         Self { sender }
     }
 
-    pub fn start_with_sink(&self, audio_sink: Option<AudioSink>) -> Result<()> {
+    pub fn start_with_config(
+        &self,
+        audio_sink: Option<AudioSink>,
+        audio_config: AudioConfig,
+    ) -> Result<()> {
         let (reply_sender, reply_receiver) = mpsc::channel();
         self.sender
             .send(RecorderCommand::Start {
                 audio_sink,
+                audio_config,
                 reply: reply_sender,
             })
             .map_err(|_| anyhow!("Recorder worker is not running"))?;
@@ -127,10 +135,10 @@ impl Default for RecorderController {
 }
 
 pub fn request_microphone_permission() -> Result<bool> {
-    let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or_else(|| anyhow!("No default input device found"))?;
+    let audio_config = ConfigStore::load()
+        .map(|config| config.audio)
+        .unwrap_or_default();
+    let device = audio_devices::resolve_input_device(&audio_config)?;
     let supported_config = device
         .default_input_config()
         .context("Failed to get default input config")?;
@@ -167,16 +175,20 @@ fn recorder_worker(receiver: mpsc::Receiver<RecorderCommand>) {
     let mut active = false;
     while let Ok(command) = receiver.recv() {
         match command {
-            RecorderCommand::Start { audio_sink, reply } => {
+            RecorderCommand::Start {
+                audio_sink,
+                audio_config,
+                reply,
+            } => {
                 let result = if active {
                     Err(anyhow!("Recording is already active"))
                 } else {
                     if prepared
                         .as_ref()
-                        .map(|stream| stream.needs_rebuild().unwrap_or(true))
+                        .map(|stream| stream.needs_rebuild(&audio_config).unwrap_or(true))
                         .unwrap_or(true)
                     {
-                        prepared = match PreparedInputStream::new() {
+                        prepared = match PreparedInputStream::new(&audio_config) {
                             Ok(stream) => Some(stream),
                             Err(err) => {
                                 let _ = reply.send(Err(err));
@@ -227,8 +239,8 @@ fn recorder_worker(receiver: mpsc::Receiver<RecorderCommand>) {
 }
 
 impl PreparedInputStream {
-    fn new() -> Result<Self> {
-        let (device, supported_config, spec) = default_input_spec()?;
+    fn new(audio_config: &AudioConfig) -> Result<Self> {
+        let (device, supported_config, spec) = selected_input_spec(audio_config)?;
         let sample_rate = supported_config.sample_rate().0;
         let channels = supported_config.channels();
         let stream_config = supported_config.config();
@@ -293,11 +305,11 @@ impl PreparedInputStream {
         })
     }
 
-    fn needs_rebuild(&self) -> Result<bool> {
+    fn needs_rebuild(&self, audio_config: &AudioConfig) -> Result<bool> {
         if self.unhealthy.load(Ordering::SeqCst) {
             return Ok(true);
         }
-        let (_, _, current_spec) = default_input_spec()?;
+        let (_, _, current_spec) = selected_input_spec(audio_config)?;
         Ok(current_spec != self.spec)
     }
 
@@ -381,11 +393,10 @@ impl PreparedInputStream {
     }
 }
 
-fn default_input_spec() -> Result<(cpal::Device, cpal::SupportedStreamConfig, InputStreamSpec)> {
-    let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .ok_or_else(|| anyhow!("No default input device found"))?;
+fn selected_input_spec(
+    audio_config: &AudioConfig,
+) -> Result<(cpal::Device, cpal::SupportedStreamConfig, InputStreamSpec)> {
+    let device = audio_devices::resolve_input_device(audio_config)?;
     let supported_config = device
         .default_input_config()
         .context("Failed to get default input config")?;

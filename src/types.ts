@@ -2,12 +2,26 @@ export interface AppConfig {
   hotkey: string;
   hotkeys: string[];
   hotkey_enabled: boolean[];
+  audio: AudioConfig;
   asr: AsrConfig;
   llm: LlmConfig;
   correction: CorrectionConfig;
   ui: UiConfig;
   retention: RetentionConfig;
   system: SystemConfig;
+}
+
+export interface AudioConfig {
+  input_device_mode: "system_default" | "manual" | string;
+  input_device_id: string | null;
+  input_device_name: string | null;
+}
+
+export interface AudioInputDevice {
+  id: string;
+  name: string;
+  is_default: boolean;
+  platform: string;
 }
 
 export interface AsrConfig {

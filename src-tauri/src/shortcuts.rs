@@ -1,14 +1,25 @@
-use crate::{config, workflow};
+use crate::{config, mouse_shortcuts, workflow};
+use std::collections::HashSet;
 use tauri::Wry;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
-fn initial_hotkeys() -> Vec<String> {
+#[derive(Debug)]
+struct ValidatedHotkeys {
+    keyboard: Vec<String>,
+    mouse: Vec<mouse_shortcuts::MouseShortcut>,
+}
+
+fn initial_keyboard_hotkeys() -> Vec<String> {
     let config = config::ConfigStore::load().unwrap_or_default();
-    config.active_hotkeys()
+    config
+        .active_hotkeys()
+        .into_iter()
+        .filter(|hotkey| !matches!(mouse_shortcuts::parse(hotkey), Ok(Some(_))))
+        .collect()
 }
 
 pub(crate) fn global_shortcut_plugin() -> tauri::plugin::TauriPlugin<Wry> {
-    let hotkeys = initial_hotkeys();
+    let hotkeys = initial_keyboard_hotkeys();
     let builder =
         tauri_plugin_global_shortcut::Builder::<Wry>::new().with_handler(global_shortcut_handler);
     if hotkeys.is_empty() {
@@ -36,40 +47,84 @@ pub(crate) fn apply_global_shortcuts(
     app.global_shortcut()
         .unregister_all()
         .map_err(|err| format!("Failed to unregister existing shortcuts: {err}"))?;
-    if hotkeys.is_empty() {
-        return Ok(());
+    mouse_shortcuts::apply(app, &[])?;
+
+    if !hotkeys.keyboard.is_empty() {
+        app.global_shortcut()
+            .register_multiple(hotkeys.keyboard.iter().map(String::as_str))
+            .map_err(|err| format!("Failed to register shortcuts {:?}: {err}", hotkeys.keyboard))?;
     }
 
-    app.global_shortcut()
-        .register_multiple(hotkeys.iter().map(String::as_str))
-        .map_err(|err| format!("Failed to register shortcuts {hotkeys:?}: {err}"))?;
+    mouse_shortcuts::apply(app, &hotkeys.mouse)?;
     Ok(())
 }
 
-fn validate_hotkeys(config: &config::AppConfig) -> Result<Vec<String>, String> {
-    let hotkeys = config
+pub(crate) fn apply_startup_mouse_shortcuts(
+    app: &tauri::AppHandle<Wry>,
+    config: &config::AppConfig,
+) -> Result<(), String> {
+    let mouse = validate_mouse_hotkeys(config)?;
+    mouse_shortcuts::apply(app, &mouse)
+}
+
+fn validate_hotkeys(config: &config::AppConfig) -> Result<ValidatedHotkeys, String> {
+    let mut keyboard = Vec::new();
+    let mut mouse = Vec::new();
+    let mut keyboard_ids = HashSet::new();
+    let mut mouse_ids = HashSet::new();
+
+    for hotkey in active_config_hotkeys(config) {
+        if let Some(mouse_shortcut) = mouse_shortcuts::parse(&hotkey)? {
+            if !mouse_ids.insert(mouse_shortcut) {
+                return Err(format!("Duplicate shortcut '{hotkey}'"));
+            }
+            mouse.push(mouse_shortcut);
+            continue;
+        }
+
+        let shortcut = hotkey
+            .parse::<Shortcut>()
+            .map_err(|err| format!("Invalid shortcut '{hotkey}': {err}"))?;
+        if !keyboard_ids.insert(shortcut.id()) {
+            return Err(format!("Duplicate shortcut '{hotkey}'"));
+        }
+        keyboard.push(hotkey);
+    }
+
+    Ok(ValidatedHotkeys { keyboard, mouse })
+}
+
+fn validate_mouse_hotkeys(
+    config: &config::AppConfig,
+) -> Result<Vec<mouse_shortcuts::MouseShortcut>, String> {
+    let mut mouse = Vec::new();
+    let mut mouse_ids = HashSet::new();
+    for hotkey in active_config_hotkeys(config) {
+        let Some(mouse_shortcut) = mouse_shortcuts::parse(&hotkey)? else {
+            continue;
+        };
+        if !mouse_ids.insert(mouse_shortcut) {
+            return Err(format!("Duplicate shortcut '{hotkey}'"));
+        }
+        mouse.push(mouse_shortcut);
+    }
+    Ok(mouse)
+}
+
+fn active_config_hotkeys(config: &config::AppConfig) -> Vec<String> {
+    config
         .hotkey_slots()
         .into_iter()
         .zip(config.hotkey_enabled_slots())
         .filter_map(|(hotkey, enabled)| {
+            let hotkey = hotkey.trim();
             if enabled && !hotkey.is_empty() {
-                Some(hotkey)
+                Some(hotkey.to_string())
             } else {
                 None
             }
         })
-        .collect::<Vec<_>>();
-
-    let mut ids = std::collections::HashSet::new();
-    for hotkey in &hotkeys {
-        let shortcut = hotkey
-            .parse::<Shortcut>()
-            .map_err(|err| format!("Invalid shortcut '{hotkey}': {err}"))?;
-        if !ids.insert(shortcut.id()) {
-            return Err(format!("Duplicate shortcut '{hotkey}'"));
-        }
-    }
-    Ok(hotkeys)
+        .collect()
 }
 
 fn global_shortcut_handler(
@@ -107,7 +162,7 @@ mod tests {
         let config = config_with_hotkeys(vec!["PageUp", "CmdOrCtrl+Shift+Space"]);
 
         assert_eq!(
-            validate_hotkeys(&config).unwrap(),
+            validate_hotkeys(&config).unwrap().keyboard,
             vec!["PageUp".to_string(), "CmdOrCtrl+Shift+Space".to_string()]
         );
     }
@@ -139,6 +194,27 @@ mod tests {
         };
         config.normalize_hotkeys();
 
-        assert!(validate_hotkeys(&config).unwrap().is_empty());
+        let validated = validate_hotkeys(&config).unwrap();
+        assert!(validated.keyboard.is_empty());
+        assert!(validated.mouse.is_empty());
+    }
+
+    #[test]
+    fn validates_mouse_shortcut() {
+        let config = config_with_hotkeys(vec!["PageUp", "Ctrl+MouseBack"]);
+
+        let validated = validate_hotkeys(&config).unwrap();
+
+        assert_eq!(validated.keyboard, vec!["PageUp".to_string()]);
+        assert_eq!(validated.mouse.len(), 1);
+    }
+
+    #[test]
+    fn rejects_duplicate_mouse_shortcuts() {
+        let config = config_with_hotkeys(vec!["Ctrl+MouseBack", "Control+MouseBack"]);
+
+        assert!(validate_hotkeys(&config)
+            .unwrap_err()
+            .contains("Duplicate shortcut"));
     }
 }

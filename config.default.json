@@ -2,6 +2,11 @@
   "hotkey": "PageUp",
   "hotkeys": ["PageUp", "CmdOrCtrl+Shift+Space"],
   "hotkey_enabled": [true, true],
+  "audio": {
+    "input_device_mode": "system_default",
+    "input_device_id": null,
+    "input_device_name": null
+  },
   "asr": {
     "provider": "volcengine",
     "app_key": "",
