@@ -5,7 +5,7 @@
 <h1 align="center">BoltScribe</h1>
 
 <p align="center">
-  一个简洁的 macOS 语音输入工具，支持全局快捷键、ASR 转写和可选的 LLM 纠错。
+  一个简洁的 macOS 和 Windows 语音输入工具，支持全局快捷键、ASR 转写和可选的 LLM 纠错。
 </p>
 
 <p align="center">
@@ -20,9 +20,9 @@
 
 ## 项目简介
 
-BoltScribe 是一个 macOS 语音输入应用。按下全局快捷键开始录音，再次按下结束录音；BoltScribe 会完成语音转写，按需用 OpenAI 兼容模型整理文本，并把结果写入当前应用。
+BoltScribe 是一个 macOS 和 Windows 语音输入应用。按下全局快捷键开始录音，再次按下结束录音；BoltScribe 会完成语音转写，按需用 OpenAI 兼容模型整理文本，并把结果写入当前应用。
 
-它以菜单栏应用的方式常驻后台，数据保存在本机，并提供历史记录、日志和输入统计。
+它以托盘/菜单栏应用的方式常驻后台，数据保存在本机，并提供历史记录、日志和输入统计。
 
 ## 界面示例
 
@@ -32,11 +32,11 @@ BoltScribe 是一个 macOS 语音输入应用。按下全局快捷键开始录�
 
 ## 功能亮点
 
-- **快捷语音输入：** 在 macOS 任意位置通过全局快捷键开始和结束输入。
+- **快捷语音输入：** 在 macOS 或 Windows 任意位置通过全局快捷键开始和结束输入。
 - **ASR 与纠错：** 使用火山引擎 ASR 转写，并可通过 LLM 整理文本。
 - **灵活模型配置：** 支持 OpenAI 兼容服务商、模型预设和多模型竞速。
 - **本地历史记录：** 可查看录音、原始转写、纠错结果、日志和输入统计。
-- **菜单栏工作流：** 常驻后台，快速进入设置或开关 LLM 纠错。
+- **托盘/菜单栏工作流：** 常驻后台，快速进入设置或开关 LLM 纠错。
 - **中英文界面：** 支持中文和英文界面切换。
 
 ## 架构
@@ -49,10 +49,11 @@ BoltScribe 使用 Tauri、React、TypeScript 和 Rust 构建。React 前端位�
 
 ### 环境要求
 
-- macOS 11 或更新版本。
+- 支持平台：macOS 11 或更新版本，或 Windows 10/11。
 - Node.js 和 npm。
 - Rust toolchain。
-- macOS 上的 Tauri 构建环境。
+- 当前平台的 Tauri 构建环境。
+- Windows 构建需要 WebView2 Runtime 和带 C++ 工作负载的 Visual Studio 2022 Build Tools。
 - 火山引擎 ASR 配置。
 - 如果启用 LLM 纠错，需要 OpenAI 兼容的大模型接口和 API Key。
 
@@ -99,7 +100,7 @@ config.example.json
 
 ## 权限
 
-BoltScribe 需要麦克风权限来录音，并需要辅助功能权限来把文本写入当前应用。
+BoltScribe 需要麦克风权限来录音。在 macOS 上，它还需要辅助功能权限来把文本写入当前应用；在 Windows 上，文本写入使用剪贴板和模拟粘贴快捷键。
 
 ## 本地数据
 
@@ -108,6 +109,8 @@ BoltScribe 需要麦克风权限来录音，并需要辅助功能权限来把文
 ```text
 ~/Library/Application Support/BoltScribe/history.jsonl
 ~/Library/Application Support/BoltScribe/recordings/
+%APPDATA%\BoltScribe\history.jsonl
+%APPDATA%\BoltScribe\recordings\
 ```
 
 默认保留策略：

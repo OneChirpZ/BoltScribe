@@ -49,7 +49,7 @@ BoltScribe is built with Tauri, React, TypeScript, and Rust. The React frontend 
 
 ### Requirements
 
-- macOS 11 or later, or Windows 10/11.
+- Supported platforms: macOS 11 or later, or Windows 10/11.
 - Node.js and npm.
 - Rust toolchain.
 - Tauri build prerequisites for your platform.
