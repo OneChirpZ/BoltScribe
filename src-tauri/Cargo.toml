@@ -28,6 +28,10 @@ tauri-plugin-global-shortcut = "2.3.1"
 tungstenite = { version = "0.29.0", features = ["native-tls"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation-sys = "0.8"
+coreaudio-sys = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.54", features = ["Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 winreg = "0.50"

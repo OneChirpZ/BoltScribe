@@ -135,9 +135,7 @@ impl Default for RecorderController {
 }
 
 pub fn request_microphone_permission() -> Result<bool> {
-    let audio_config = ConfigStore::load()
-        .map(|config| config.audio)
-        .unwrap_or_default();
+    let audio_config = microphone_permission_audio_config();
     let device = audio_devices::resolve_input_device(&audio_config)?;
     let supported_config = device
         .default_input_config()
@@ -168,6 +166,16 @@ pub fn request_microphone_permission() -> Result<bool> {
     std::thread::sleep(Duration::from_millis(300));
     drop(stream);
     Ok(true)
+}
+
+fn microphone_permission_audio_config() -> AudioConfig {
+    if cfg!(target_os = "macos") {
+        AudioConfig::default()
+    } else {
+        ConfigStore::load()
+            .map(|config| config.audio)
+            .unwrap_or_default()
+    }
 }
 
 fn recorder_worker(receiver: mpsc::Receiver<RecorderCommand>) {

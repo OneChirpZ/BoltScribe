@@ -96,7 +96,9 @@ config.default.json
 config.example.json
 ```
 
-Configuration covers ASR, LLM providers, correction templates, language, overlay position, history retention, and system integration.
+Configuration covers ASR, LLM providers, correction templates, language, audio input device selection, overlay position, history retention, and system integration.
+
+Mouse-button shortcuts are available on Windows. On macOS, use keyboard global shortcuts.
 
 ## Permissions
 

@@ -9,7 +9,7 @@ export const shortcutModifierValues = [
   "Shift",
 ] as const;
 export const shortcutModifiers = shortcutModifierOptions("macos");
-export const shortcutKeyOptions = [
+export const keyboardShortcutKeyOptions = [
   { value: "Space", label: "Space" },
   { value: "PageUp", label: "Page Up" },
   { value: "PageDown", label: "Page Down" },
@@ -24,9 +24,6 @@ export const shortcutKeyOptions = [
   { value: "ArrowDown", label: "Down" },
   { value: "ArrowLeft", label: "Left" },
   { value: "ArrowRight", label: "Right" },
-  { value: "MouseMiddle", label: "Mouse Middle" },
-  { value: "MouseBack", label: "Mouse Back" },
-  { value: "MouseForward", label: "Mouse Forward" },
   ...Array.from({ length: 12 }, (_, index) => {
     const key = `F${index + 1}`;
     return { value: key, label: key };
@@ -34,6 +31,12 @@ export const shortcutKeyOptions = [
   ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((key) => ({ value: key, label: key })),
   ..."0123456789".split("").map((key) => ({ value: key, label: key })),
 ];
+export const mouseShortcutKeyOptions = [
+  { value: "MouseMiddle", label: "Mouse Middle" },
+  { value: "MouseBack", label: "Mouse Back" },
+  { value: "MouseForward", label: "Mouse Forward" },
+];
+const allShortcutKeyOptions = [...keyboardShortcutKeyOptions, ...mouseShortcutKeyOptions];
 
 export type ShortcutModifier = (typeof shortcutModifierValues)[number];
 export type ShortcutParts = {
@@ -48,6 +51,10 @@ export function shortcutModifierOptions(platform: RuntimePlatform = runtimePlatf
       ? { Ctrl: "Ctrl", Alt: "Option", Cmd: "Command", Shift: "Shift" }
       : { Ctrl: "Ctrl", Alt: "Alt", Cmd: "Super", Shift: "Shift" };
   return shortcutModifierValues.map((value) => ({ value, label: labels[value] }));
+}
+
+export function shortcutKeyOptions(platform: RuntimePlatform = runtimePlatform()) {
+  return platform === "windows" ? allShortcutKeyOptions : keyboardShortcutKeyOptions;
 }
 
 export function hotkeySlots(config: AppConfig) {
@@ -142,13 +149,15 @@ export function displayShortcut(value: string, platform?: RuntimePlatform) {
 }
 
 export function displayShortcutParts(modifiers: ShortcutModifier[], key: string, platform?: RuntimePlatform) {
-  const labels = shortcutModifierOptions(platform)
+  const resolvedPlatform = platform ?? runtimePlatform();
+  const labels = shortcutModifierOptions(resolvedPlatform)
     .filter((modifier) => modifiers.includes(modifier.value))
     .map((modifier) => modifier.label);
   if (!key) {
     return labels.length > 0 ? `${labels.join("+")}+...` : "";
   }
-  const keyLabel = shortcutKeyOptions.find((option) => option.value === key)?.label ?? key;
+  const keyLabel = shortcutKeyOptions(resolvedPlatform).find((option) => option.value === key)
+    ?.label ?? allShortcutKeyOptions.find((option) => option.value === key)?.label ?? key;
   return [...labels, keyLabel].join("+");
 }
 
@@ -210,6 +219,6 @@ export function normalizeShortcutKey(value: string) {
   if (aliases[upper]) {
     return aliases[upper];
   }
-  const option = shortcutKeyOptions.find((item) => item.value.toUpperCase() === upper || item.label.toUpperCase() === upper);
+  const option = allShortcutKeyOptions.find((item) => item.value.toUpperCase() === upper || item.label.toUpperCase() === upper);
   return option?.value ?? normalized;
 }

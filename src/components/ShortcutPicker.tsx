@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { displayShortcutParts, formatShortcut, parseShortcut, shortcutKeyOptions, shortcutModifierOptions } from "../domain/hotkeys";
 import type { ShortcutModifier } from "../domain/hotkeys";
 import type { TextBundle } from "../domain/i18n";
+import { runtimePlatform } from "../domain/platform";
 
 export default function ShortcutPicker({
   label,
@@ -18,15 +19,17 @@ export default function ShortcutPicker({
   onChange: (value: string) => void;
   text: TextBundle;
 }) {
-  const parts = parseShortcut(value);
-  const modifierOptions = shortcutModifierOptions();
+  const platform = runtimePlatform();
+  const parts = parseShortcut(value, platform);
+  const modifierOptions = shortcutModifierOptions(platform);
+  const platformKeyOptions = shortcutKeyOptions(platform);
   const [draftModifiers, setDraftModifiers] = useState<ShortcutModifier[]>(parts.modifiers);
   useEffect(() => {
     setDraftModifiers(parts.modifiers);
   }, [value]);
-  const options = shortcutKeyOptions.some((option) => option.value === parts.key) || !parts.key
-    ? shortcutKeyOptions
-    : [{ value: parts.key, label: parts.key }, ...shortcutKeyOptions];
+  const options = platformKeyOptions.some((option) => option.value === parts.key) || !parts.key
+    ? platformKeyOptions
+    : [{ value: parts.key, label: parts.key }, ...platformKeyOptions];
   const activeModifiers = parts.key ? parts.modifiers : draftModifiers;
 
   function setKey(key: string) {
@@ -52,7 +55,7 @@ export default function ShortcutPicker({
           <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} />
           {text.common.enabled}
         </label>
-        <code>{enabled ? displayShortcutParts(activeModifiers, parts.key) || text.common.unset : text.common.disabled}</code>
+        <code>{enabled ? displayShortcutParts(activeModifiers, parts.key, platform) || text.common.unset : text.common.disabled}</code>
       </div>
       <div className="shortcut-controls">
         <div className="shortcut-modifiers">

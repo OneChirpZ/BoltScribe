@@ -210,6 +210,8 @@ dependencies = [
  "arboard",
  "base64 0.21.7",
  "chrono",
+ "core-foundation-sys",
+ "coreaudio-sys",
  "cpal",
  "dirs 5.0.1",
  "flate2",

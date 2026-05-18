@@ -276,7 +276,7 @@ mod platform {
         if shortcuts.is_empty() {
             Ok(())
         } else {
-            Err("Mouse-button shortcuts are currently implemented on Windows only".to_string())
+            Err("Mouse-button shortcuts are currently supported on Windows only".to_string())
         }
     }
 }
