@@ -209,7 +209,6 @@ let previewConfig: AppConfig = {
       enabled: true,
       reduction_percent: 70,
       device_name_whitelist: ["Audient iD4"],
-      soundsource_enabled: true,
     },
   },
   asr: {
