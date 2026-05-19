@@ -23,3 +23,7 @@ export function requiresAccessibilityPermission() {
 export function supportsDockVisibilityControl() {
   return runtimePlatform() === "macos";
 }
+
+export function supportsOutputVolumeDucking() {
+  return runtimePlatform() === "macos";
+}

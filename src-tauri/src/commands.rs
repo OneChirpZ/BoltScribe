@@ -1,6 +1,6 @@
 use crate::{
-    audio_devices, autostart, config, history, injector, paths, recorder, shortcuts, tray, windows,
-    workflow,
+    audio_devices, autostart, config, history, injector, output_volume, paths, recorder, shortcuts,
+    tray, windows, workflow,
 };
 use std::path::Path;
 use tauri::{Emitter, State, Wry};
@@ -41,6 +41,11 @@ pub(crate) fn import_config(
 #[tauri::command]
 pub(crate) fn load_audio_input_devices() -> Result<Vec<audio_devices::AudioInputDevice>, String> {
     audio_devices::list_input_devices().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn load_audio_output_devices() -> Result<Vec<output_volume::AudioOutputDevice>, String> {
+    output_volume::list_output_devices().map_err(|err| err.to_string())
 }
 
 fn apply_and_save_config(

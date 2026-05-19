@@ -15,9 +15,23 @@ export interface AudioConfig {
   input_device_mode: "system_default" | "manual" | string;
   input_device_id: string | null;
   input_device_name: string | null;
+  output_volume_ducking: OutputVolumeDuckingConfig;
+}
+
+export interface OutputVolumeDuckingConfig {
+  enabled: boolean;
+  reduction_percent: number;
+  device_name_whitelist: string[];
 }
 
 export interface AudioInputDevice {
+  id: string;
+  name: string;
+  is_default: boolean;
+  platform: string;
+}
+
+export interface AudioOutputDevice {
   id: string;
   name: string;
   is_default: boolean;

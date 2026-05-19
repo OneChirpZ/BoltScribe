@@ -3,6 +3,7 @@ use crate::config::{AppConfig, ConfigStore, CorrectionConfig, LlmConfig, RaceMod
 use crate::corrector::{LlmCallLog, LlmProvider, OpenAiCompatibleCorrector};
 use crate::history::{self, HistoryRecord, HistoryStore};
 use crate::injector;
+use crate::output_volume::{self, OutputVolumeDuckingSession};
 use crate::paths;
 use crate::recorder::{RecordedAudio, RecorderController};
 use anyhow::{anyhow, Result};
@@ -30,6 +31,7 @@ struct WorkflowRuntime {
     config: Option<AppConfig>,
     live_asr: Option<VolcengineLiveAsrSession>,
     live_asr_start_error: Option<String>,
+    volume_ducking: Option<OutputVolumeDuckingSession>,
     active_task_id: Option<String>,
     cancel_token: Option<Arc<AtomicBool>>,
 }
@@ -117,6 +119,7 @@ pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStat
             let config = runtime.config.take();
             let live_asr = runtime.live_asr.take();
             let live_asr_start_error = runtime.live_asr_start_error.take();
+            let volume_ducking = runtime.volume_ducking.take();
             runtime.recording = false;
             runtime.processing = true;
             runtime.status = WorkflowStatus {
@@ -131,6 +134,7 @@ pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStat
                 config,
                 live_asr,
                 live_asr_start_error,
+                volume_ducking,
             ))
         } else {
             let total_started_at = Instant::now();
@@ -153,10 +157,22 @@ pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStat
             let audio_sink = live_asr
                 .as_ref()
                 .and_then(|session| session.audio_sender().ok());
+            let mut volume_ducking =
+                match output_volume::start_ducking_session(&config.audio.output_volume_ducking) {
+                    Ok(session) => session,
+                    Err(err) => {
+                        eprintln!("failed to duck output volume: {err:?}");
+                        None
+                    }
+                };
             let recorder_started_at = Instant::now();
-            state
+            if let Err(err) = state
                 .recorder
-                .start_with_config(audio_sink, config.audio.clone())?;
+                .start_with_config(audio_sink, config.audio.clone())
+            {
+                restore_output_volume(volume_ducking.take());
+                return Err(err);
+            }
             log_timing(
                 "recorder.start_with_config",
                 recorder_started_at,
@@ -170,6 +186,7 @@ pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStat
             runtime.config = Some(config);
             runtime.live_asr = live_asr;
             runtime.live_asr_start_error = live_asr_start_error;
+            runtime.volume_ducking = volume_ducking;
             runtime.active_task_id = Some(task_id);
             runtime.cancel_token = Some(cancel_token);
             runtime.status = WorkflowStatus {
@@ -186,7 +203,9 @@ pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStat
     let status = state.status();
     emit_status(&app, &status);
 
-    if let Some((task_id, cancel_token, config, live_asr, live_asr_start_error)) = should_stop {
+    if let Some((task_id, cancel_token, config, live_asr, live_asr_start_error, volume_ducking)) =
+        should_stop
+    {
         let recorder = state.recorder.clone();
         std::thread::spawn(move || {
             let task = WorkflowTask {
@@ -201,6 +220,7 @@ pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStat
                 config,
                 live_asr,
                 live_asr_start_error,
+                volume_ducking,
             ) {
                 if task_for_error.cancelled() {
                     return;
@@ -237,7 +257,7 @@ pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStat
 }
 
 pub fn cancel_current_workflow(app: AppHandle, state: &AppState) -> Result<WorkflowStatus> {
-    let (status, should_cancel_recorder) = {
+    let (status, should_cancel_recorder, volume_ducking) = {
         let mut runtime = state
             .runtime
             .lock()
@@ -256,6 +276,7 @@ pub fn cancel_current_workflow(app: AppHandle, state: &AppState) -> Result<Workf
         runtime.config = None;
         runtime.live_asr = None;
         runtime.live_asr_start_error = None;
+        let volume_ducking = runtime.volume_ducking.take();
         runtime.active_task_id = None;
         runtime.cancel_token = None;
         runtime.status = WorkflowStatus {
@@ -264,15 +285,27 @@ pub fn cancel_current_workflow(app: AppHandle, state: &AppState) -> Result<Workf
             current_audio_path: runtime.status.current_audio_path.clone(),
             last_record_id: runtime.status.last_record_id.clone(),
         };
-        (runtime.status.clone(), was_recording)
+        (runtime.status.clone(), was_recording, volume_ducking)
     };
     emit_status(&app, &status);
 
-    if should_cancel_recorder {
-        state.recorder.cancel()?;
-    }
+    let cancel_result = if should_cancel_recorder {
+        state.recorder.cancel()
+    } else {
+        Ok(())
+    };
+    restore_output_volume(volume_ducking);
+    cancel_result?;
 
     Ok(status)
+}
+
+fn restore_output_volume(session: Option<OutputVolumeDuckingSession>) {
+    if let Some(session) = session {
+        if let Err(err) = session.restore() {
+            eprintln!("failed to restore output volume: {err:?}");
+        }
+    }
 }
 
 fn stop_and_process_recording(
@@ -282,15 +315,24 @@ fn stop_and_process_recording(
     config: Option<AppConfig>,
     live_asr: Option<VolcengineLiveAsrSession>,
     live_asr_start_error: Option<String>,
+    volume_ducking: Option<OutputVolumeDuckingSession>,
 ) -> Result<()> {
     let total_started_at = Instant::now();
     let retention = config
         .as_ref()
         .map(|config| config.retention.clone())
         .unwrap_or_default();
-    let recordings_dir = paths::recordings_dir()?;
+    let recordings_dir = match paths::recordings_dir() {
+        Ok(path) => path,
+        Err(err) => {
+            restore_output_volume(volume_ducking);
+            return Err(err);
+        }
+    };
     let recorder_stop_started_at = Instant::now();
-    let recorded = recorder.stop(recordings_dir)?;
+    let recorded = recorder.stop(recordings_dir);
+    restore_output_volume(volume_ducking);
+    let recorded = recorded?;
     log_timing("recorder.stop", recorder_stop_started_at, total_started_at);
     if task.cancelled() {
         return Ok(());

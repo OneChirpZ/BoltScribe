@@ -37,6 +37,18 @@ pub struct AudioConfig {
     pub input_device_id: Option<String>,
     #[serde(default)]
     pub input_device_name: Option<String>,
+    #[serde(default)]
+    pub output_volume_ducking: OutputVolumeDuckingConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OutputVolumeDuckingConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_output_volume_ducking_reduction_percent")]
+    pub reduction_percent: u32,
+    #[serde(default)]
+    pub device_name_whitelist: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -336,14 +348,14 @@ impl AudioConfig {
             self.input_device_mode = default_input_device_mode();
             self.input_device_id = None;
             self.input_device_name = None;
-            return;
+        } else {
+            self.input_device_id = normalized_optional_string(self.input_device_id.as_deref());
+            self.input_device_name = normalized_optional_string(self.input_device_name.as_deref());
+            if self.input_device_id.is_none() && self.input_device_name.is_none() {
+                self.input_device_mode = default_input_device_mode();
+            }
         }
-
-        self.input_device_id = normalized_optional_string(self.input_device_id.as_deref());
-        self.input_device_name = normalized_optional_string(self.input_device_name.as_deref());
-        if self.input_device_id.is_none() && self.input_device_name.is_none() {
-            self.input_device_mode = default_input_device_mode();
-        }
+        self.output_volume_ducking.normalize();
     }
 
     pub fn uses_system_default_input_device(&self) -> bool {
@@ -357,12 +369,34 @@ impl Default for AudioConfig {
             input_device_mode: default_input_device_mode(),
             input_device_id: None,
             input_device_name: None,
+            output_volume_ducking: OutputVolumeDuckingConfig::default(),
+        }
+    }
+}
+
+impl OutputVolumeDuckingConfig {
+    pub fn normalize(&mut self) {
+        self.reduction_percent = self.reduction_percent.clamp(0, 100);
+        self.device_name_whitelist = normalize_string_list(&self.device_name_whitelist);
+    }
+}
+
+impl Default for OutputVolumeDuckingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            reduction_percent: default_output_volume_ducking_reduction_percent(),
+            device_name_whitelist: Vec::new(),
         }
     }
 }
 
 fn default_input_device_mode() -> String {
     "system_default".to_string()
+}
+
+fn default_output_volume_ducking_reduction_percent() -> u32 {
+    70
 }
 
 fn default_hotkey() -> String {
@@ -837,6 +871,11 @@ fn config_schema_value() -> Result<serde_json::Value> {
     set_schema_array(&mut schema, &["hotkey_enabled"], serde_json::json!(false));
     set_schema_array(
         &mut schema,
+        &["audio", "output_volume_ducking", "device_name_whitelist"],
+        serde_json::json!(""),
+    );
+    set_schema_array(
+        &mut schema,
         &["llm", "provider_settings"],
         serde_json::json!({
             "provider": "",
@@ -1223,6 +1262,7 @@ mod tests {
                 input_device_mode: "manual".to_string(),
                 input_device_id: Some(" ".to_string()),
                 input_device_name: None,
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -1232,6 +1272,33 @@ mod tests {
         assert_eq!(config.audio.input_device_mode, "system_default");
         assert!(config.audio.input_device_id.is_none());
         assert!(config.audio.input_device_name.is_none());
+    }
+
+    #[test]
+    fn output_volume_ducking_defaults_and_normalizes() {
+        let mut config = AppConfig::default();
+        config.audio.output_volume_ducking.enabled = true;
+        config.audio.output_volume_ducking.reduction_percent = 150;
+        config.audio.output_volume_ducking.device_name_whitelist = vec![
+            " External Speaker ".to_string(),
+            "External Speaker".to_string(),
+            String::new(),
+            "Display Audio".to_string(),
+        ];
+
+        config.normalize();
+
+        assert!(config.audio.output_volume_ducking.enabled);
+        assert_eq!(config.audio.output_volume_ducking.reduction_percent, 100);
+        assert_eq!(
+            config.audio.output_volume_ducking.device_name_whitelist,
+            vec!["External Speaker".to_string(), "Display Audio".to_string()]
+        );
+
+        let default_ducking = OutputVolumeDuckingConfig::default();
+        assert!(!default_ducking.enabled);
+        assert_eq!(default_ducking.reduction_percent, 70);
+        assert!(default_ducking.device_name_whitelist.is_empty());
     }
 
     #[test]
@@ -1394,6 +1461,10 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("thinking_effort");
+        config_value["audio"]
+            .as_object_mut()
+            .unwrap()
+            .remove("output_volume_ducking");
         config_value["llm"]["provider_settings"] = serde_json::json!([
             {
                 "provider": "custom",
@@ -1426,6 +1497,10 @@ mod tests {
             .contains(&"llm.thinking_effort".to_string()));
         assert!(result
             .report
+            .missing_fields
+            .contains(&"audio.output_volume_ducking".to_string()));
+        assert!(result
+            .report
             .unknown_fields
             .contains(&"future_top_level".to_string()));
         assert!(result
@@ -1438,6 +1513,10 @@ mod tests {
             .contains(&"envelope.future_envelope_field".to_string()));
         assert_eq!(result.config.hotkeys, default_hotkey_slots());
         assert_eq!(result.config.llm.thinking_effort, default_thinking_effort());
+        assert_eq!(
+            result.config.audio.output_volume_ducking,
+            OutputVolumeDuckingConfig::default()
+        );
         assert_eq!(result.config.llm.provider_settings.len(), 1);
         assert_eq!(result.config.llm.provider_settings[0].provider, "custom");
     }

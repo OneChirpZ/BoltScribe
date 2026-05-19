@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppConfig, AudioInputDevice, ConfigImportReport, HistoryRecord, InputStats, WorkflowStatus } from "../types";
+import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, HistoryRecord, InputStats, WorkflowStatus } from "../types";
 import type { Page } from "../domain/navigation";
 import type { PermissionRequestState } from "../domain/permissions";
 import { appLanguage, translations } from "../domain/i18n";
@@ -13,7 +13,7 @@ import HistoryRecordsPage from "../pages/HistoryRecordsPage";
 import ModelsPage from "../pages/ModelsPage";
 import CorrectionPage from "../pages/CorrectionPage";
 import SettingsPage from "../pages/SettingsPage";
-import { accessibilityPermissionGranted, copyTextToClipboard, exportConfig as exportConfigCommand, getAppVersion, getStatus, hideMainWindow, importConfig as importConfigCommand, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadAudioInputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, requestAccessibilityPermission, requestMicrophonePermission as requestMicrophonePermissionCommand, saveConfig, toggleRecording as toggleRecordingCommand } from "./tauriApi";
+import { accessibilityPermissionGranted, copyTextToClipboard, exportConfig as exportConfigCommand, getAppVersion, getStatus, hideMainWindow, importConfig as importConfigCommand, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadAudioInputDevices, loadAudioOutputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, requestAccessibilityPermission, requestMicrophonePermission as requestMicrophonePermissionCommand, saveConfig, toggleRecording as toggleRecordingCommand } from "./tauriApi";
 
 const appIconUrl = new URL("../assets/app-icon.png", import.meta.url).href;
 const recentHistoryLimit = 6;
@@ -32,6 +32,7 @@ export default function MainApp() {
   const [history, setHistory] = useState<HistoryRecord[]>([]);
   const [stats, setStats] = useState<InputStats | null>(null);
   const [audioDevices, setAudioDevices] = useState<AudioInputDevice[]>([]);
+  const [audioOutputDevices, setAudioOutputDevices] = useState<AudioOutputDevice[]>([]);
   const [historyPageRecords, setHistoryPageRecords] = useState<HistoryRecord[]>([]);
   const [historyPageIndex, setHistoryPageIndex] = useState(0);
   const [historyHasOlder, setHistoryHasOlder] = useState(false);
@@ -55,8 +56,23 @@ export default function MainApp() {
     setStats(await loadStats());
   }
 
-  async function refreshAudioInputDevices() {
-    setAudioDevices(await loadAudioInputDevices());
+  async function refreshAudioDevices() {
+    const [inputResult, outputResult] = await Promise.allSettled([
+      loadAudioInputDevices(),
+      loadAudioOutputDevices(),
+    ]);
+    if (inputResult.status === "fulfilled") {
+      setAudioDevices(inputResult.value);
+    }
+    if (outputResult.status === "fulfilled") {
+      setAudioOutputDevices(outputResult.value);
+    }
+    const errors = [inputResult, outputResult]
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => String(result.reason));
+    if (errors.length > 0) {
+      throw new Error(errors.join("; "));
+    }
   }
 
   async function loadHistoryPage(pageIndex: number) {
@@ -87,7 +103,7 @@ export default function MainApp() {
   useEffect(() => {
     getAppVersion().then(setAppVersion).catch(() => setAppVersion(""));
     refreshAll().catch((error) => setNotice(String(error)));
-    refreshAudioInputDevices().catch((error) => setNotice(String(error)));
+    refreshAudioDevices().catch((error) => setNotice(String(error)));
     const unlistenStatus = listenWorkflowStatus(setStatus);
     const unlistenHistory = listenHistoryUpdated(() => {
       refreshHistory().catch((error) => setNotice(String(error)));
@@ -415,11 +431,12 @@ export default function MainApp() {
           <SettingsPage
             config={config}
             audioDevices={audioDevices}
+            audioOutputDevices={audioOutputDevices}
             onChange={changeConfig}
             onSave={() => save(config)}
             onExportConfig={() => { void exportCurrentConfig(); }}
             onImportConfig={(file) => { void importConfigFile(file); }}
-            onRefreshAudioDevices={() => { void refreshAudioInputDevices().catch((error) => setNotice(String(error))); }}
+            onRefreshAudioDevices={() => { void refreshAudioDevices().catch((error) => setNotice(String(error))); }}
             importReport={configImportReport}
             canSave={canSave}
             text={text}

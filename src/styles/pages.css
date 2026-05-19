@@ -187,6 +187,13 @@ input[type="range"].range-input {
   background: transparent;
 }
 
+.range-with-value {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px auto;
+  align-items: center;
+  gap: 10px;
+}
+
 input[type="checkbox"] {
   accent-color: var(--amber);
 }
@@ -266,6 +273,50 @@ textarea.dictionary-lines {
 }
 
 .toggle-row input {
+  width: auto;
+}
+
+.form-note {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.output-ducking-block {
+  display: grid;
+  gap: 12px;
+}
+
+.output-ducking-block h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.output-ducking-controls {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.output-ducking-controls:disabled {
+  opacity: 0.62;
+}
+
+.device-checklist {
+  display: grid;
+  gap: 8px;
+  color: var(--text-soft);
+}
+
+.device-checklist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.device-checklist-row input {
   width: auto;
 }
 

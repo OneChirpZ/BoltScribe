@@ -12,6 +12,7 @@ mod corrector;
 mod history;
 mod injector;
 mod mouse_shortcuts;
+mod output_volume;
 mod paths;
 mod recorder;
 mod shortcuts;
@@ -22,8 +23,9 @@ mod workflow;
 use commands::{
     accessibility_permission_granted, cancel_current_workflow, copy_text_to_clipboard,
     export_config, get_status, hide_main_window, import_config, load_audio_input_devices,
-    load_config, load_history, load_stats, open_accessibility_settings, open_app_dir,
-    request_accessibility_permission, request_microphone_permission, save_config, toggle_recording,
+    load_audio_output_devices, load_config, load_history, load_stats, open_accessibility_settings,
+    open_app_dir, request_accessibility_permission, request_microphone_permission, save_config,
+    toggle_recording,
 };
 use tauri::{Emitter, RunEvent};
 
@@ -61,6 +63,7 @@ fn main() {
             export_config,
             import_config,
             load_audio_input_devices,
+            load_audio_output_devices,
             load_history,
             load_stats,
             get_status,

@@ -1,10 +1,10 @@
 import { useRef, type ChangeEvent } from "react";
-import type { AppConfig, AudioInputDevice, ConfigImportReport } from "../types";
+import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, OutputVolumeDuckingConfig } from "../types";
 import Field from "../components/Field";
 import PanelHeader from "../components/PanelHeader";
 import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrectionTemplates";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
-import { supportsDockVisibilityControl } from "../domain/platform";
+import { supportsDockVisibilityControl, supportsOutputVolumeDucking } from "../domain/platform";
 
 const maxHistoryRecords = 500;
 const bytesPerGb = 1024 * 1024 * 1024;
@@ -14,6 +14,7 @@ const maxOverlayOffset = 4000;
 export default function SettingsPage({
   config,
   audioDevices,
+  audioOutputDevices,
   onChange,
   onSave,
   onExportConfig,
@@ -25,6 +26,7 @@ export default function SettingsPage({
 }: {
   config: AppConfig;
   audioDevices: AudioInputDevice[];
+  audioOutputDevices: AudioOutputDevice[];
   onChange: (config: AppConfig) => void;
   onSave: () => void;
   onExportConfig: () => void;
@@ -37,6 +39,11 @@ export default function SettingsPage({
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const storageGb = Number((config.retention.max_storage_bytes / bytesPerGb).toFixed(2));
   const canControlDockVisibility = supportsDockVisibilityControl();
+  const canDuckOutputVolume = supportsOutputVolumeDucking();
+  const outputDucking = outputVolumeDuckingConfig(config);
+  const defaultOutputDevice = audioOutputDevices.find((device) => device.is_default) ?? null;
+  const outputDeviceNames = uniqueStrings(audioOutputDevices.map((device) => device.name));
+  const missingOutputDuckingNames = outputDucking.device_name_whitelist.filter((name) => !outputDeviceNames.includes(name));
 
   function updateMaxRecords(value: string) {
     const max_history_records = clampInt(Number(value), 1, maxHistoryRecords);
@@ -93,6 +100,30 @@ export default function SettingsPage({
         input_device_id: value,
         input_device_name: device?.name ?? value,
       },
+    });
+  }
+
+  function updateOutputVolumeDucking(patch: Partial<OutputVolumeDuckingConfig>) {
+    onChange({
+      ...config,
+      audio: {
+        ...config.audio,
+        output_volume_ducking: {
+          ...outputDucking,
+          ...patch,
+        },
+      },
+    });
+  }
+
+  function updateOutputVolumeReduction(value: string) {
+    updateOutputVolumeDucking({ reduction_percent: clampInt(Number(value), 0, 100) });
+  }
+
+  function toggleOutputDuckingDeviceName(name: string, checked: boolean) {
+    const current = outputDucking.device_name_whitelist.filter((item) => item !== name);
+    updateOutputVolumeDucking({
+      device_name_whitelist: checked ? uniqueStrings([...current, name]) : current,
     });
   }
 
@@ -154,6 +185,72 @@ export default function SettingsPage({
             </select>
             {audioDevices.length === 0 ? <span>{text.settings.audioNoInputDevices}</span> : null}
           </Field>
+          <div className="field-wide output-ducking-block">
+            <h3>{text.settings.audioOutputVolumeDucking}</h3>
+            <fieldset className="output-ducking-controls" disabled={!canDuckOutputVolume}>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={outputDucking.enabled}
+                  onChange={(event) => updateOutputVolumeDucking({ enabled: event.target.checked })}
+                />
+                {text.settings.outputVolumeDuckingEnabled}
+              </label>
+              <span className="form-note">
+                {canDuckOutputVolume
+                  ? text.settings.outputVolumeDuckingCurrent(defaultOutputDevice?.name ?? text.settings.outputVolumeDuckingNoOutputDevice)
+                  : text.settings.outputVolumeDuckingUnsupported}
+              </span>
+              <Field label={text.settings.outputVolumeDuckingReduction} className="field-wide">
+                <div className="range-with-value">
+                  <input
+                    className="range-input"
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={outputDucking.reduction_percent}
+                    onChange={(event) => updateOutputVolumeReduction(event.target.value)}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={outputDucking.reduction_percent}
+                    onChange={(event) => updateOutputVolumeReduction(event.target.value)}
+                  />
+                  <span>%</span>
+                </div>
+              </Field>
+              <Field label={text.settings.outputVolumeDuckingWhitelist} className="field-wide">
+                <div className="device-checklist">
+                  {audioOutputDevices.map((device) => (
+                    <label key={device.id} className="device-checklist-row">
+                      <input
+                        type="checkbox"
+                        checked={outputDucking.device_name_whitelist.includes(device.name)}
+                        onChange={(event) => toggleOutputDuckingDeviceName(device.name, event.target.checked)}
+                      />
+                      <span>{device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}</span>
+                    </label>
+                  ))}
+                  {missingOutputDuckingNames.map((name) => (
+                    <label key={name} className="device-checklist-row">
+                      <input
+                        type="checkbox"
+                        checked
+                        onChange={(event) => toggleOutputDuckingDeviceName(name, event.target.checked)}
+                      />
+                      <span>{text.settings.outputVolumeDuckingMissingDevice(name)}</span>
+                    </label>
+                  ))}
+                  {canDuckOutputVolume && audioOutputDevices.length === 0 ? <span>{text.settings.audioNoOutputDevices}</span> : null}
+                  {canDuckOutputVolume && outputDucking.device_name_whitelist.length === 0 ? <span>{text.settings.outputVolumeDuckingWhitelistAll}</span> : null}
+                </div>
+              </Field>
+            </fieldset>
+          </div>
         </div>
       </div>
 
@@ -311,6 +408,26 @@ function selectedAudioDevice(config: AppConfig, audioDevices: AudioInputDevice[]
 
 function selectedAudioDeviceMissing(config: AppConfig, audioDevices: AudioInputDevice[]) {
   return config.audio.input_device_mode === "manual" && Boolean(selectedAudioDeviceValue(config)) && !selectedAudioDevice(config, audioDevices);
+}
+
+function outputVolumeDuckingConfig(config: AppConfig): OutputVolumeDuckingConfig {
+  return config.audio.output_volume_ducking ?? {
+    enabled: false,
+    reduction_percent: 70,
+    device_name_whitelist: [],
+  };
+}
+
+function uniqueStrings(items: string[]) {
+  const values: string[] = [];
+  for (const item of items) {
+    const value = item.trim();
+    if (!value || values.includes(value)) {
+      continue;
+    }
+    values.push(value);
+  }
+  return values;
 }
 
 function clampInt(value: number, min: number, max: number) {

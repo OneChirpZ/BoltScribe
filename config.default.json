@@ -5,7 +5,12 @@
   "audio": {
     "input_device_mode": "system_default",
     "input_device_id": null,
-    "input_device_name": null
+    "input_device_name": null,
+    "output_volume_ducking": {
+      "enabled": false,
+      "reduction_percent": 70,
+      "device_name_whitelist": []
+    }
   },
   "asr": {
     "provider": "volcengine",
