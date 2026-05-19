@@ -25,5 +25,6 @@ export function supportsDockVisibilityControl() {
 }
 
 export function supportsOutputVolumeDucking() {
-  return runtimePlatform() === "macos";
+  const platform = runtimePlatform();
+  return platform === "macos" || platform === "windows";
 }
