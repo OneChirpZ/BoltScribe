@@ -36,6 +36,8 @@ export interface AudioOutputDevice {
   name: string;
   is_default: boolean;
   platform: string;
+  supports_volume_control: boolean;
+  supports_mute_control: boolean;
 }
 
 export interface AsrConfig {

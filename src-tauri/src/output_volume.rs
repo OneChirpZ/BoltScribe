@@ -8,6 +8,8 @@ pub struct AudioOutputDevice {
     pub name: String,
     pub is_default: bool,
     pub platform: String,
+    pub supports_volume_control: bool,
+    pub supports_mute_control: bool,
 }
 
 pub fn list_output_devices() -> Result<Vec<AudioOutputDevice>> {
@@ -48,18 +50,28 @@ mod platform {
     };
     use coreaudio_sys::{
         kAudioDevicePropertyDeviceNameCFString, kAudioDevicePropertyDeviceUID,
-        kAudioDevicePropertyStreamConfiguration, kAudioDevicePropertyVolumeScalar,
-        kAudioHardwareNoError, kAudioHardwarePropertyDefaultOutputDevice,
-        kAudioHardwarePropertyDevices, kAudioObjectPropertyElementMaster,
-        kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
-        AudioBuffer, AudioBufferList, AudioDeviceID, AudioObjectGetPropertyData,
-        AudioObjectGetPropertyDataSize, AudioObjectHasProperty, AudioObjectIsPropertySettable,
-        AudioObjectPropertyAddress, AudioObjectSetPropertyData, Boolean, CFStringRef, OSStatus,
+        kAudioDevicePropertyMute, kAudioDevicePropertyStreamConfiguration,
+        kAudioDevicePropertyVolumeScalar, kAudioHardwareNoError,
+        kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDevices,
+        kAudioObjectPropertyElementMaster, kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject, AudioBuffer, AudioBufferList,
+        AudioDeviceID, AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize,
+        AudioObjectHasProperty, AudioObjectIsPropertySettable, AudioObjectPropertyAddress,
+        AudioObjectSetPropertyData, Boolean, CFStringRef, OSStatus,
     };
     use std::ffi::CStr;
     use std::mem;
     use std::ptr::null;
     use std::slice;
+
+    const VIRTUAL_MASTER_VOLUME_SELECTOR: u32 = four_char_code(*b"vmvc");
+
+    const fn four_char_code(bytes: [u8; 4]) -> u32 {
+        ((bytes[0] as u32) << 24)
+            | ((bytes[1] as u32) << 16)
+            | ((bytes[2] as u32) << 8)
+            | (bytes[3] as u32)
+    }
 
     struct CoreAudioOutputDevice {
         id: AudioDeviceID,
@@ -67,28 +79,86 @@ mod platform {
         name: String,
     }
 
+    #[derive(Clone, Copy)]
+    struct VolumeControl {
+        selector: u32,
+        scope: u32,
+        element: u32,
+    }
+
+    impl VolumeControl {
+        fn address(self) -> AudioObjectPropertyAddress {
+            AudioObjectPropertyAddress {
+                mSelector: self.selector,
+                mScope: self.scope,
+                mElement: self.element,
+            }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct MuteControl {
+        scope: u32,
+        element: u32,
+    }
+
+    impl MuteControl {
+        fn address(self) -> AudioObjectPropertyAddress {
+            AudioObjectPropertyAddress {
+                mSelector: kAudioDevicePropertyMute,
+                mScope: self.scope,
+                mElement: self.element,
+            }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum DuckingControl {
+        Volume(VolumeControl),
+        Mute(MuteControl),
+    }
+
     pub struct OutputVolumeDuckingSession {
-        device_id: AudioDeviceID,
-        device_name: String,
-        original_volume: f32,
-        ducked_volume: f32,
+        state: DuckingSessionState,
+    }
+
+    enum DuckingSessionState {
+        Volume {
+            device_id: AudioDeviceID,
+            device_name: String,
+            control: VolumeControl,
+            original_volume: f32,
+            ducked_volume: f32,
+        },
+        Mute {
+            device_id: AudioDeviceID,
+            device_name: String,
+            control: MuteControl,
+        },
     }
 
     impl OutputVolumeDuckingSession {
         pub fn restore(self) -> Result<()> {
-            let current_volume = read_output_volume(self.device_id).with_context(|| {
-                format!("Failed to read output volume for {}", self.device_name)
-            })?;
-            if !volume_matches(current_volume, self.ducked_volume) {
-                eprintln!(
-                    "output volume changed during recording; skipping restore for {}",
-                    self.device_name
-                );
-                return Ok(());
+            match self.state {
+                DuckingSessionState::Volume {
+                    device_id,
+                    device_name,
+                    control,
+                    original_volume,
+                    ducked_volume,
+                } => restore_volume(
+                    device_id,
+                    &device_name,
+                    control,
+                    original_volume,
+                    ducked_volume,
+                ),
+                DuckingSessionState::Mute {
+                    device_id,
+                    device_name,
+                    control,
+                } => restore_mute(device_id, &device_name, control),
             }
-            write_output_volume(self.device_id, self.original_volume).with_context(|| {
-                format!("Failed to restore output volume for {}", self.device_name)
-            })
         }
     }
 
@@ -96,11 +166,23 @@ mod platform {
         let default_id = default_output_device_id();
         Ok(coreaudio_output_devices()?
             .into_iter()
-            .map(|device| AudioOutputDevice {
-                id: output_device_id(&device),
-                name: device.name,
-                is_default: default_id == Some(device.id),
-                platform: "macos".to_string(),
+            .map(|device| {
+                let supports_volume_control = match volume_control_for_device(device.id) {
+                    Ok(Some(_)) => true,
+                    _ => false,
+                };
+                let supports_mute_control = match mute_control_for_device(device.id) {
+                    Ok(Some(_)) => true,
+                    _ => false,
+                };
+                AudioOutputDevice {
+                    id: output_device_id(&device),
+                    name: device.name,
+                    is_default: default_id == Some(device.id),
+                    platform: "macos".to_string(),
+                    supports_volume_control,
+                    supports_mute_control,
+                }
             })
             .collect())
     }
@@ -116,18 +198,44 @@ mod platform {
             return Ok(None);
         }
 
-        let original_volume = read_output_volume(device_id)?;
-        let ducked_volume = ducked_volume(original_volume, config.reduction_percent);
-        if volume_matches(original_volume, ducked_volume) {
-            return Ok(None);
+        let control = volume_control_for_device(device_id)?
+            .map(DuckingControl::Volume)
+            .or(mute_control_for_device(device_id)?.map(DuckingControl::Mute))
+            .ok_or_else(|| {
+                anyhow!("Default output device does not expose writable volume or mute control")
+            })?;
+        match control {
+            DuckingControl::Volume(control) => {
+                let original_volume = read_output_volume(device_id, control)?;
+                let ducked_volume = ducked_volume(original_volume, config.reduction_percent);
+                if volume_matches(original_volume, ducked_volume) {
+                    return Ok(None);
+                }
+                write_output_volume(device_id, control, ducked_volume)?;
+                Ok(Some(OutputVolumeDuckingSession {
+                    state: DuckingSessionState::Volume {
+                        device_id,
+                        device_name,
+                        control,
+                        original_volume,
+                        ducked_volume,
+                    },
+                }))
+            }
+            DuckingControl::Mute(control) => {
+                if read_output_mute(device_id, control)? {
+                    return Ok(None);
+                }
+                write_output_mute(device_id, control, true)?;
+                Ok(Some(OutputVolumeDuckingSession {
+                    state: DuckingSessionState::Mute {
+                        device_id,
+                        device_name,
+                        control,
+                    },
+                }))
+            }
         }
-        write_output_volume(device_id, ducked_volume)?;
-        Ok(Some(OutputVolumeDuckingSession {
-            device_id,
-            device_name,
-            original_volume,
-            ducked_volume,
-        }))
     }
 
     fn coreaudio_output_devices() -> Result<Vec<CoreAudioOutputDevice>> {
@@ -232,8 +340,104 @@ mod platform {
             .any(|buffer: &AudioBuffer| buffer.mNumberChannels > 0))
     }
 
-    fn read_output_volume(device_id: AudioDeviceID) -> Result<f32> {
-        let address = output_volume_address();
+    fn restore_volume(
+        device_id: AudioDeviceID,
+        device_name: &str,
+        control: VolumeControl,
+        original_volume: f32,
+        ducked_volume: f32,
+    ) -> Result<()> {
+        let current_volume = read_output_volume(device_id, control)
+            .with_context(|| format!("Failed to read output volume for {device_name}"))?;
+        if !volume_matches(current_volume, ducked_volume) {
+            eprintln!("output volume changed during recording; skipping restore for {device_name}",);
+            return Ok(());
+        }
+        write_output_volume(device_id, control, original_volume)
+            .with_context(|| format!("Failed to restore output volume for {device_name}"))
+    }
+
+    fn restore_mute(
+        device_id: AudioDeviceID,
+        device_name: &str,
+        control: MuteControl,
+    ) -> Result<()> {
+        let current_muted = read_output_mute(device_id, control)
+            .with_context(|| format!("Failed to read output mute for {device_name}"))?;
+        if !current_muted {
+            eprintln!("output mute changed during recording; skipping restore for {device_name}",);
+            return Ok(());
+        }
+        write_output_mute(device_id, control, false)
+            .with_context(|| format!("Failed to restore output mute for {device_name}"))
+    }
+
+    fn volume_control_for_device(device_id: AudioDeviceID) -> Result<Option<VolumeControl>> {
+        for control in volume_control_candidates() {
+            let address = control.address();
+            if !has_property(device_id, &address) || !property_is_settable(device_id, &address)? {
+                continue;
+            }
+            if read_output_volume(device_id, control).is_ok() {
+                return Ok(Some(control));
+            }
+        }
+        Ok(None)
+    }
+
+    fn volume_control_candidates() -> [VolumeControl; 4] {
+        [
+            VolumeControl {
+                selector: kAudioDevicePropertyVolumeScalar,
+                scope: kAudioObjectPropertyScopeOutput,
+                element: kAudioObjectPropertyElementMaster,
+            },
+            VolumeControl {
+                selector: VIRTUAL_MASTER_VOLUME_SELECTOR,
+                scope: kAudioObjectPropertyScopeOutput,
+                element: kAudioObjectPropertyElementMaster,
+            },
+            VolumeControl {
+                selector: kAudioDevicePropertyVolumeScalar,
+                scope: kAudioObjectPropertyScopeGlobal,
+                element: kAudioObjectPropertyElementMaster,
+            },
+            VolumeControl {
+                selector: VIRTUAL_MASTER_VOLUME_SELECTOR,
+                scope: kAudioObjectPropertyScopeGlobal,
+                element: kAudioObjectPropertyElementMaster,
+            },
+        ]
+    }
+
+    fn mute_control_for_device(device_id: AudioDeviceID) -> Result<Option<MuteControl>> {
+        for control in mute_control_candidates() {
+            let address = control.address();
+            if !has_property(device_id, &address) || !property_is_settable(device_id, &address)? {
+                continue;
+            }
+            if read_output_mute(device_id, control).is_ok() {
+                return Ok(Some(control));
+            }
+        }
+        Ok(None)
+    }
+
+    fn mute_control_candidates() -> [MuteControl; 2] {
+        [
+            MuteControl {
+                scope: kAudioObjectPropertyScopeOutput,
+                element: kAudioObjectPropertyElementMaster,
+            },
+            MuteControl {
+                scope: kAudioObjectPropertyScopeGlobal,
+                element: kAudioObjectPropertyElementMaster,
+            },
+        ]
+    }
+
+    fn read_output_volume(device_id: AudioDeviceID, control: VolumeControl) -> Result<f32> {
+        let address = control.address();
         if !has_property(device_id, &address) {
             return Err(anyhow!(
                 "Default output device does not expose volume control"
@@ -255,8 +459,12 @@ mod platform {
         Ok(volume.clamp(0.0, 1.0))
     }
 
-    fn write_output_volume(device_id: AudioDeviceID, volume: f32) -> Result<()> {
-        let address = output_volume_address();
+    fn write_output_volume(
+        device_id: AudioDeviceID,
+        control: VolumeControl,
+        volume: f32,
+    ) -> Result<()> {
+        let address = control.address();
         if !has_property(device_id, &address) {
             return Err(anyhow!(
                 "Default output device does not expose volume control"
@@ -279,12 +487,55 @@ mod platform {
         check_status(status, "Failed to set output volume")
     }
 
-    fn output_volume_address() -> AudioObjectPropertyAddress {
-        AudioObjectPropertyAddress {
-            mSelector: kAudioDevicePropertyVolumeScalar,
-            mScope: kAudioObjectPropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMaster,
+    fn read_output_mute(device_id: AudioDeviceID, control: MuteControl) -> Result<bool> {
+        let address = control.address();
+        if !has_property(device_id, &address) {
+            return Err(anyhow!(
+                "Default output device does not expose mute control"
+            ));
         }
+        let mut muted = 0u32;
+        let mut data_size = mem::size_of::<u32>() as u32;
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                device_id,
+                &address,
+                0,
+                null(),
+                &mut data_size,
+                (&mut muted as *mut u32).cast(),
+            )
+        };
+        check_status(status, "Failed to read output mute")?;
+        Ok(muted != 0)
+    }
+
+    fn write_output_mute(
+        device_id: AudioDeviceID,
+        control: MuteControl,
+        muted: bool,
+    ) -> Result<()> {
+        let address = control.address();
+        if !has_property(device_id, &address) {
+            return Err(anyhow!(
+                "Default output device does not expose mute control"
+            ));
+        }
+        if !property_is_settable(device_id, &address)? {
+            return Err(anyhow!("Default output device mute is not settable"));
+        }
+        let muted = u32::from(muted);
+        let status = unsafe {
+            AudioObjectSetPropertyData(
+                device_id,
+                &address,
+                0,
+                null(),
+                mem::size_of::<u32>() as u32,
+                (&muted as *const u32).cast(),
+            )
+        };
+        check_status(status, "Failed to set output mute")
     }
 
     fn has_property(device_id: AudioDeviceID, address: &AudioObjectPropertyAddress) -> bool {

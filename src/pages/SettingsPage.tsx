@@ -42,6 +42,10 @@ export default function SettingsPage({
   const canDuckOutputVolume = supportsOutputVolumeDucking();
   const outputDucking = outputVolumeDuckingConfig(config);
   const defaultOutputDevice = audioOutputDevices.find((device) => device.is_default) ?? null;
+  const defaultOutputDeviceUsesMuteFallback =
+    canDuckOutputVolume && defaultOutputDevice !== null && !defaultOutputDevice.supports_volume_control && defaultOutputDevice.supports_mute_control;
+  const defaultOutputDeviceUnsupported =
+    canDuckOutputVolume && defaultOutputDevice !== null && !defaultOutputDevice.supports_volume_control && !defaultOutputDevice.supports_mute_control;
   const outputDeviceNames = uniqueStrings(audioOutputDevices.map((device) => device.name));
   const missingOutputDuckingNames = outputDucking.device_name_whitelist.filter((name) => !outputDeviceNames.includes(name));
 
@@ -201,6 +205,12 @@ export default function SettingsPage({
                   ? text.settings.outputVolumeDuckingCurrent(defaultOutputDevice?.name ?? text.settings.outputVolumeDuckingNoOutputDevice)
                   : text.settings.outputVolumeDuckingUnsupported}
               </span>
+              {defaultOutputDeviceUnsupported ? (
+                <span className="form-note">{text.settings.outputVolumeDuckingDeviceUnsupported}</span>
+              ) : null}
+              {defaultOutputDeviceUsesMuteFallback ? (
+                <span className="form-note">{text.settings.outputVolumeDuckingDeviceMuteFallback}</span>
+              ) : null}
               <Field label={text.settings.outputVolumeDuckingReduction} className="field-wide">
                 <div className="range-with-value">
                   <input
@@ -232,7 +242,10 @@ export default function SettingsPage({
                         checked={outputDucking.device_name_whitelist.includes(device.name)}
                         onChange={(event) => toggleOutputDuckingDeviceName(device.name, event.target.checked)}
                       />
-                      <span>{device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}</span>
+                      <span>
+                        {device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}
+                        {outputDuckingDeviceBadge(device, text)}
+                      </span>
                     </label>
                   ))}
                   {missingOutputDuckingNames.map((name) => (
@@ -416,6 +429,16 @@ function outputVolumeDuckingConfig(config: AppConfig): OutputVolumeDuckingConfig
     reduction_percent: 70,
     device_name_whitelist: [],
   };
+}
+
+function outputDuckingDeviceBadge(device: AudioOutputDevice, text: TextBundle) {
+  if (device.supports_volume_control) {
+    return "";
+  }
+  if (device.supports_mute_control) {
+    return ` (${text.settings.outputVolumeDuckingDeviceMuteFallbackBadge})`;
+  }
+  return ` (${text.settings.outputVolumeDuckingDeviceUnsupportedBadge})`;
 }
 
 function uniqueStrings(items: string[]) {
