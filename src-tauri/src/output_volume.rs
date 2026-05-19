@@ -59,20 +59,12 @@ mod platform {
         AudioObjectHasProperty, AudioObjectIsPropertySettable, AudioObjectPropertyAddress,
         AudioObjectSetPropertyData, Boolean, CFStringRef, OSStatus,
     };
-    use serde::Deserialize;
-    use serde_json::{json, Value};
     use std::ffi::CStr;
     use std::mem;
-    use std::process::{Command, Output, Stdio};
     use std::ptr::null;
     use std::slice;
-    use std::thread;
-    use std::time::{Duration, Instant};
 
     const VIRTUAL_MASTER_VOLUME_SELECTOR: u32 = four_char_code(*b"vmvc");
-    const SOUNDSOURCE_DUCK_SHORTCUT_NAME: &str = "BoltScribe SoundSource Duck";
-    const SOUNDSOURCE_RESTORE_SHORTCUT_NAME: &str = "BoltScribe SoundSource Restore";
-    const SOUNDSOURCE_SHORTCUT_TIMEOUT: Duration = Duration::from_secs(3);
 
     const fn four_char_code(bytes: [u8; 4]) -> u32 {
         ((bytes[0] as u32) << 24)
@@ -143,17 +135,6 @@ mod platform {
             device_name: String,
             control: MuteControl,
         },
-        SoundSource {
-            restore_payload: Value,
-        },
-    }
-
-    #[derive(Debug, Deserialize)]
-    struct SoundSourceDuckResponse {
-        #[serde(default)]
-        applied: bool,
-        #[serde(default)]
-        restore_payload: Option<Value>,
     }
 
     impl OutputVolumeDuckingSession {
@@ -177,9 +158,6 @@ mod platform {
                     device_name,
                     control,
                 } => restore_mute(device_id, &device_name, control),
-                DuckingSessionState::SoundSource { restore_payload } => {
-                    restore_soundsource_ducking(restore_payload)
-                }
             }
         }
     }
@@ -220,22 +198,6 @@ mod platform {
             return Ok(None);
         }
 
-        match start_native_ducking_session(device_id, device_name.clone(), config) {
-            Ok(session) => return Ok(session),
-            Err(err) if config.soundsource_enabled => {
-                eprintln!("native output volume ducking unavailable; trying SoundSource: {err:?}");
-            }
-            Err(err) => return Err(err),
-        }
-
-        start_soundsource_ducking_session(&device_name, config)
-    }
-
-    fn start_native_ducking_session(
-        device_id: AudioDeviceID,
-        device_name: String,
-        config: &OutputVolumeDuckingConfig,
-    ) -> Result<Option<OutputVolumeDuckingSession>> {
         let control = volume_control_for_device(device_id)?
             .map(DuckingControl::Volume)
             .or(mute_control_for_device(device_id)?.map(DuckingControl::Mute))
@@ -274,33 +236,6 @@ mod platform {
                 }))
             }
         }
-    }
-
-    fn start_soundsource_ducking_session(
-        device_name: &str,
-        config: &OutputVolumeDuckingConfig,
-    ) -> Result<Option<OutputVolumeDuckingSession>> {
-        let request = json!({
-            "action": "duck",
-            "backend": "soundsource-shortcuts",
-            "version": 1,
-            "source_name": "Output",
-            "device_name": device_name,
-            "reduction_percent": config.reduction_percent.clamp(0, 100),
-            "restore_shortcut": SOUNDSOURCE_RESTORE_SHORTCUT_NAME,
-        });
-        let output = run_shortcut(SOUNDSOURCE_DUCK_SHORTCUT_NAME, &request)
-            .with_context(|| format!("Failed to run {SOUNDSOURCE_DUCK_SHORTCUT_NAME}"))?;
-        let response = parse_soundsource_duck_response(&output)?;
-        if !response.applied {
-            return Ok(None);
-        }
-        let restore_payload = response
-            .restore_payload
-            .ok_or_else(|| anyhow!("SoundSource duck shortcut did not return restore_payload"))?;
-        Ok(Some(OutputVolumeDuckingSession {
-            state: DuckingSessionState::SoundSource { restore_payload },
-        }))
     }
 
     fn coreaudio_output_devices() -> Result<Vec<CoreAudioOutputDevice>> {
@@ -435,78 +370,6 @@ mod platform {
         }
         write_output_mute(device_id, control, false)
             .with_context(|| format!("Failed to restore output mute for {device_name}"))
-    }
-
-    fn restore_soundsource_ducking(restore_payload: Value) -> Result<()> {
-        run_shortcut(SOUNDSOURCE_RESTORE_SHORTCUT_NAME, &restore_payload)
-            .with_context(|| format!("Failed to run {SOUNDSOURCE_RESTORE_SHORTCUT_NAME}"))?;
-        Ok(())
-    }
-
-    fn parse_soundsource_duck_response(output: &str) -> Result<SoundSourceDuckResponse> {
-        let output = output.trim();
-        if output.is_empty() {
-            return Err(anyhow!("SoundSource duck shortcut returned empty output"));
-        }
-        serde_json::from_str(output)
-            .with_context(|| format!("SoundSource duck shortcut returned invalid JSON: {output}"))
-    }
-
-    fn run_shortcut(name: &str, payload: &Value) -> Result<String> {
-        let payload = serde_json::to_string(payload)?;
-        let script = r#"
-on run argv
-  set shortcutName to item 1 of argv
-  set shortcutInput to item 2 of argv
-  tell application "Shortcuts Events"
-    set shortcutResult to run shortcut shortcutName with input shortcutInput
-  end tell
-  return shortcutResult as text
-end run
-"#;
-        let mut command = Command::new("osascript");
-        command
-            .arg("-e")
-            .arg(script)
-            .arg(name)
-            .arg(payload)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let output = run_with_timeout(command, SOUNDSOURCE_SHORTCUT_TIMEOUT)?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(anyhow!(
-                "Shortcut {name} failed: {}",
-                if stderr.is_empty() {
-                    format!("exit status {}", output.status)
-                } else {
-                    stderr
-                }
-            ));
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    }
-
-    fn run_with_timeout(mut command: Command, timeout: Duration) -> Result<Output> {
-        let mut child = command.spawn().context("Failed to start shortcut runner")?;
-        let started = Instant::now();
-        loop {
-            if child.try_wait()?.is_some() {
-                return child
-                    .wait_with_output()
-                    .context("Failed to read shortcut runner output");
-            }
-            if started.elapsed() >= timeout {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(anyhow!(
-                    "Shortcut runner timed out after {}s",
-                    timeout.as_secs()
-                ));
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
     }
 
     fn volume_control_for_device(device_id: AudioDeviceID) -> Result<Option<VolumeControl>> {

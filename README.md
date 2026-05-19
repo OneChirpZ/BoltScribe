@@ -100,8 +100,6 @@ Configuration covers ASR, LLM providers, correction templates, language, audio i
 
 Mouse-button shortcuts are available on Windows. On macOS, use keyboard global shortcuts.
 
-Output volume ducking is available on macOS for output devices that expose system volume or mute controls. For devices controlled by Rogue Amoeba SoundSource, enable the SoundSource enhancement and provide two Shortcuts named `BoltScribe SoundSource Duck` and `BoltScribe SoundSource Restore`. The duck shortcut receives JSON text with `action`, `source_name`, `device_name`, `reduction_percent`, and `restore_shortcut`, and should return JSON text like `{"applied":true,"restore_payload":{...}}`. The restore shortcut receives that `restore_payload`; it should only restore when the current SoundSource state still matches the temporary state set by the duck shortcut.
-
 ## Permissions
 
 BoltScribe needs Microphone permission to record speech. On macOS, it also needs Accessibility permission to insert text into the active app. On Windows, text insertion uses the clipboard and a synthetic paste shortcut.

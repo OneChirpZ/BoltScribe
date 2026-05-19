@@ -100,8 +100,6 @@ config.example.json
 
 鼠标按键快捷键仅在 Windows 上可用。macOS 上请使用键盘全局快捷键。
 
-输出音量压低在 macOS 上支持暴露系统音量或静音控制的输出设备。对于由 Rogue Amoeba SoundSource 控制的设备，可以启用 SoundSource 增强，并提供两个名为 `BoltScribe SoundSource Duck` 和 `BoltScribe SoundSource Restore` 的快捷指令。Duck 快捷指令会收到包含 `action`、`source_name`、`device_name`、`reduction_percent` 和 `restore_shortcut` 的 JSON 文本，并应返回类似 `{"applied":true,"restore_payload":{...}}` 的 JSON 文本。Restore 快捷指令会收到这个 `restore_payload`；它应只在当前 SoundSource 状态仍等于 Duck 快捷指令设置的临时状态时恢复。
-
 ## 权限
 
 BoltScribe 需要麦克风权限来录音。在 macOS 上，它还需要辅助功能权限来把文本写入当前应用；在 Windows 上，文本写入使用剪贴板和模拟粘贴快捷键。

@@ -9,8 +9,7 @@
     "output_volume_ducking": {
       "enabled": false,
       "reduction_percent": 70,
-      "device_name_whitelist": [],
-      "soundsource_enabled": false
+      "device_name_whitelist": []
     }
   },
   "asr": {

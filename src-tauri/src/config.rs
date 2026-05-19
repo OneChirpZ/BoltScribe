@@ -49,8 +49,6 @@ pub struct OutputVolumeDuckingConfig {
     pub reduction_percent: u32,
     #[serde(default)]
     pub device_name_whitelist: Vec<String>,
-    #[serde(default)]
-    pub soundsource_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -389,7 +387,6 @@ impl Default for OutputVolumeDuckingConfig {
             enabled: false,
             reduction_percent: default_output_volume_ducking_reduction_percent(),
             device_name_whitelist: Vec::new(),
-            soundsource_enabled: false,
         }
     }
 }
@@ -1288,12 +1285,10 @@ mod tests {
             String::new(),
             "Display Audio".to_string(),
         ];
-        config.audio.output_volume_ducking.soundsource_enabled = true;
 
         config.normalize();
 
         assert!(config.audio.output_volume_ducking.enabled);
-        assert!(config.audio.output_volume_ducking.soundsource_enabled);
         assert_eq!(config.audio.output_volume_ducking.reduction_percent, 100);
         assert_eq!(
             config.audio.output_volume_ducking.device_name_whitelist,
@@ -1302,7 +1297,6 @@ mod tests {
 
         let default_ducking = OutputVolumeDuckingConfig::default();
         assert!(!default_ducking.enabled);
-        assert!(!default_ducking.soundsource_enabled);
         assert_eq!(default_ducking.reduction_percent, 70);
         assert!(default_ducking.device_name_whitelist.is_empty());
     }
