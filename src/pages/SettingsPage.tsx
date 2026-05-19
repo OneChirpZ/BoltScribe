@@ -211,6 +211,15 @@ export default function SettingsPage({
               {defaultOutputDeviceUsesMuteFallback ? (
                 <span className="form-note">{text.settings.outputVolumeDuckingDeviceMuteFallback}</span>
               ) : null}
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={outputDucking.soundsource_enabled}
+                  onChange={(event) => updateOutputVolumeDucking({ soundsource_enabled: event.target.checked })}
+                />
+                {text.settings.outputVolumeDuckingSoundSourceEnabled}
+              </label>
+              <span className="form-note">{text.settings.outputVolumeDuckingSoundSourceHint}</span>
               <Field label={text.settings.outputVolumeDuckingReduction} className="field-wide">
                 <div className="range-with-value">
                   <input
@@ -428,6 +437,7 @@ function outputVolumeDuckingConfig(config: AppConfig): OutputVolumeDuckingConfig
     enabled: false,
     reduction_percent: 70,
     device_name_whitelist: [],
+    soundsource_enabled: false,
   };
 }
 

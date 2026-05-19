@@ -22,6 +22,7 @@ export interface OutputVolumeDuckingConfig {
   enabled: boolean;
   reduction_percent: number;
   device_name_whitelist: string[];
+  soundsource_enabled: boolean;
 }
 
 export interface AudioInputDevice {
