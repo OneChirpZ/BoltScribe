@@ -19,6 +19,7 @@
   --danger: #e15e56;
   --danger-soft: #321916;
   --radius: 8px;
+  --app-min-width: 1120px;
   --shadow-panel: 0 22px 70px rgba(0, 0, 0, 0.26);
   color: var(--text);
   background: var(--bg);
@@ -42,7 +43,7 @@ body,
 
 body {
   margin: 0;
-  min-width: 940px;
+  min-width: var(--app-min-width);
   background: var(--bg);
 }
 

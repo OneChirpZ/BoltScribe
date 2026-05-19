@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { AppConfig, LlmProviderSettings, RaceModelTarget } from "../types";
 import Field from "../components/Field";
+import HelpTip from "../components/HelpTip";
 import PanelHeader from "../components/PanelHeader";
 import ShortcutPicker from "../components/ShortcutPicker";
 import type { TextBundle } from "../domain/i18n";
@@ -211,22 +212,24 @@ export default function ModelsPage({
           <h2>{text.models.interface}</h2>
         </div>
         <div className="form-grid">
-          <Field label={text.models.overlayScale(Math.round((config.ui.recording_overlay_scale ?? defaultRecordingOverlayScale) * 200))} className="field-wide">
-            <input
-              className="range-input"
-              type="range"
-              min={String(minRecordingOverlayScale)}
-              max={String(maxRecordingOverlayScale)}
-              step="0.05"
-              value={config.ui.recording_overlay_scale ?? defaultRecordingOverlayScale}
-              onChange={(event) => onChange({
-                ...config,
-                ui: {
-                  ...config.ui,
-                  recording_overlay_scale: Number(event.target.value),
-                },
-              })}
-            />
+          <Field label={text.models.overlayScale(Math.round((config.ui.recording_overlay_scale ?? defaultRecordingOverlayScale) * 200))} className="field-wide compact-range-field">
+            <div className="range-compact">
+              <input
+                className="range-input"
+                type="range"
+                min={String(minRecordingOverlayScale)}
+                max={String(maxRecordingOverlayScale)}
+                step="0.05"
+                value={config.ui.recording_overlay_scale ?? defaultRecordingOverlayScale}
+                onChange={(event) => onChange({
+                  ...config,
+                  ui: {
+                    ...config.ui,
+                    recording_overlay_scale: Number(event.target.value),
+                  },
+                })}
+              />
+            </div>
           </Field>
         </div>
       </div>
@@ -341,12 +344,7 @@ export default function ModelsPage({
         <div className="section-title">
           <h2>
             {text.models.raceMode}
-            <span
-              className="section-help"
-              title={text.models.raceHelp}
-            >
-              ?
-            </span>
+            <HelpTip content={text.models.raceHelp} />
           </h2>
         </div>
         <div className="form-grid">

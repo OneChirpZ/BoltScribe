@@ -1,6 +1,7 @@
 import { useRef, type ChangeEvent } from "react";
 import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, OutputVolumeDuckingConfig } from "../types";
 import Field from "../components/Field";
+import HelpTip from "../components/HelpTip";
 import PanelHeader from "../components/PanelHeader";
 import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrectionTemplates";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
@@ -190,7 +191,10 @@ export default function SettingsPage({
             {audioDevices.length === 0 ? <span>{text.settings.audioNoInputDevices}</span> : null}
           </Field>
           <div className="field-wide output-ducking-block">
-            <h3>{text.settings.audioOutputVolumeDucking}</h3>
+            <div className="output-ducking-heading">
+              <h3>{text.settings.audioOutputVolumeDucking}</h3>
+              <HelpTip content={canDuckOutputVolume ? text.settings.outputVolumeDuckingHelp : text.settings.outputVolumeDuckingUnsupported} />
+            </div>
             <fieldset className="output-ducking-controls" disabled={!canDuckOutputVolume}>
               <label className="toggle-row">
                 <input
@@ -198,28 +202,36 @@ export default function SettingsPage({
                   checked={outputDucking.enabled}
                   onChange={(event) => updateOutputVolumeDucking({ enabled: event.target.checked })}
                 />
-                {text.settings.outputVolumeDuckingEnabled}
+                <span>{text.settings.outputVolumeDuckingEnabled}</span>
               </label>
-              <span className="form-note">
-                {canDuckOutputVolume
-                  ? text.settings.outputVolumeDuckingCurrent(defaultOutputDevice?.name ?? text.settings.outputVolumeDuckingNoOutputDevice)
-                  : text.settings.outputVolumeDuckingUnsupported}
-              </span>
-              {defaultOutputDeviceUnsupported ? (
-                <span className="form-note">{text.settings.outputVolumeDuckingDeviceUnsupported}</span>
-              ) : null}
-              {defaultOutputDeviceUsesMuteFallback ? (
-                <span className="form-note">{text.settings.outputVolumeDuckingDeviceMuteFallback}</span>
-              ) : null}
+              <div className="output-ducking-status">
+                <span className="status-chip">
+                  {canDuckOutputVolume
+                    ? text.settings.outputVolumeDuckingCurrent(defaultOutputDevice?.name ?? text.settings.outputVolumeDuckingNoOutputDevice)
+                    : text.settings.outputVolumeDuckingUnsupported}
+                </span>
+                {defaultOutputDeviceUnsupported ? (
+                  <span className="status-chip warning">
+                    {text.settings.outputVolumeDuckingUnsupportedShort}
+                    <HelpTip content={text.settings.outputVolumeDuckingDeviceUnsupported} />
+                  </span>
+                ) : null}
+                {defaultOutputDeviceUsesMuteFallback ? (
+                  <span className="status-chip warning">
+                    {text.settings.outputVolumeDuckingMuteFallbackShort}
+                    <HelpTip content={text.settings.outputVolumeDuckingDeviceMuteFallback} />
+                  </span>
+                ) : null}
+              </div>
               <label className="toggle-row">
                 <input
                   type="checkbox"
                   checked={outputDucking.soundsource_enabled}
                   onChange={(event) => updateOutputVolumeDucking({ soundsource_enabled: event.target.checked })}
                 />
-                {text.settings.outputVolumeDuckingSoundSourceEnabled}
+                <span>{text.settings.outputVolumeDuckingSoundSourceEnabled}</span>
+                <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHint} />
               </label>
-              <span className="form-note">{text.settings.outputVolumeDuckingSoundSourceHint}</span>
               <Field label={text.settings.outputVolumeDuckingReduction} className="field-wide">
                 <div className="range-with-value">
                   <input

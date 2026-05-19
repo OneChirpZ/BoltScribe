@@ -50,7 +50,7 @@ export default function ShortcutPicker({
   return (
     <div className={enabled ? "shortcut-picker" : "shortcut-picker disabled"}>
       <div className="shortcut-picker-header">
-        <span>{label}</span>
+        <span className="shortcut-picker-title">{label}</span>
         <label className="shortcut-enable">
           <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} />
           {text.common.enabled}

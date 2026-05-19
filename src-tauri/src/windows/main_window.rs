@@ -3,8 +3,8 @@ use tauri::{LogicalSize, Manager, Size, WebviewUrl, WebviewWindow, WebviewWindow
 
 const MAIN_WINDOW_WIDTH: f64 = 1120.0;
 const MAIN_WINDOW_HEIGHT: f64 = 760.0;
-const MAIN_WINDOW_MIN_WIDTH: f64 = 940.0;
-const MAIN_WINDOW_MIN_HEIGHT: f64 = 640.0;
+const MAIN_WINDOW_MIN_WIDTH: f64 = 1120.0;
+const MAIN_WINDOW_MIN_HEIGHT: f64 = 680.0;
 
 pub(crate) fn ensure_main_window(app: &tauri::AppHandle<Wry>) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
