@@ -207,6 +207,7 @@ let previewConfig: AppConfig = {
     input_device_name: null,
     output_volume_ducking: {
       enabled: true,
+      mute_instead_of_reduce: false,
       reduction_percent: 70,
       device_name_whitelist: ["Audient iD4"],
       sound_source_hotkey_fallback_enabled: false,

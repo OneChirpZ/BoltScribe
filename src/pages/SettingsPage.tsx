@@ -234,28 +234,41 @@ export default function SettingsPage({
                   </span>
                 ) : null}
               </div>
-              <Field label={text.settings.outputVolumeDuckingReduction} className="field-wide">
-                <div className="range-with-value">
-                  <input
-                    className="range-input"
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={outputDucking.reduction_percent}
-                    onChange={(event) => updateOutputVolumeReduction(event.target.value)}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={outputDucking.reduction_percent}
-                    onChange={(event) => updateOutputVolumeReduction(event.target.value)}
-                  />
-                  <span>%</span>
-                </div>
-              </Field>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={outputDucking.mute_instead_of_reduce}
+                  onChange={(event) =>
+                    updateOutputVolumeDucking({ mute_instead_of_reduce: event.target.checked })
+                  }
+                />
+                <span>{text.settings.outputVolumeDuckingMuteInstead}</span>
+                <HelpTip content={text.settings.outputVolumeDuckingMuteInsteadHelp} />
+              </label>
+              {!outputDucking.mute_instead_of_reduce ? (
+                <Field label={text.settings.outputVolumeDuckingReduction} className="field-wide">
+                  <div className="range-with-value">
+                    <input
+                      className="range-input"
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={outputDucking.reduction_percent}
+                      onChange={(event) => updateOutputVolumeReduction(event.target.value)}
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={outputDucking.reduction_percent}
+                      onChange={(event) => updateOutputVolumeReduction(event.target.value)}
+                    />
+                    <span>%</span>
+                  </div>
+                </Field>
+              ) : null}
               {canUseSoundSourceFallback ? (
                 <div className="sound-source-fallback">
                   <label className="toggle-row">
@@ -473,6 +486,7 @@ function outputVolumeDuckingConfig(config: AppConfig): OutputVolumeDuckingConfig
   const ducking = config.audio.output_volume_ducking;
   return {
     enabled: ducking?.enabled ?? false,
+    mute_instead_of_reduce: ducking?.mute_instead_of_reduce ?? false,
     reduction_percent: ducking?.reduction_percent ?? 70,
     device_name_whitelist: ducking?.device_name_whitelist ?? [],
     sound_source_hotkey_fallback_enabled: ducking?.sound_source_hotkey_fallback_enabled ?? false,

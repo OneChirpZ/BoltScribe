@@ -36,6 +36,14 @@ fn ducked_volume(original_volume: f32, reduction_percent: u32) -> f32 {
     (original_volume * multiplier).clamp(0.0, 1.0)
 }
 
+fn target_volume(original_volume: f32, config: &OutputVolumeDuckingConfig) -> f32 {
+    if config.mute_instead_of_reduce {
+        0.0
+    } else {
+        ducked_volume(original_volume, config.reduction_percent)
+    }
+}
+
 fn volume_matches(left: f32, right: f32) -> bool {
     (left - right).abs() <= 0.01
 }
@@ -51,16 +59,29 @@ enum DuckingStrategy {
 fn ducking_strategy(
     supports_volume_control: bool,
     supports_mute_control: bool,
+    mute_instead_of_reduce: bool,
     sound_source_hotkey_fallback_enabled: bool,
 ) -> DuckingStrategy {
-    if supports_volume_control {
-        DuckingStrategy::Volume
-    } else if supports_mute_control {
-        DuckingStrategy::NativeMute
-    } else if sound_source_hotkey_fallback_enabled {
-        DuckingStrategy::SoundSourceHotkey
+    if mute_instead_of_reduce {
+        if supports_mute_control {
+            DuckingStrategy::NativeMute
+        } else if supports_volume_control {
+            DuckingStrategy::Volume
+        } else if sound_source_hotkey_fallback_enabled {
+            DuckingStrategy::SoundSourceHotkey
+        } else {
+            DuckingStrategy::Unsupported
+        }
     } else {
-        DuckingStrategy::Unsupported
+        if supports_volume_control {
+            DuckingStrategy::Volume
+        } else if supports_mute_control {
+            DuckingStrategy::NativeMute
+        } else if sound_source_hotkey_fallback_enabled {
+            DuckingStrategy::SoundSourceHotkey
+        } else {
+            DuckingStrategy::Unsupported
+        }
     }
 }
 
@@ -229,12 +250,13 @@ mod platform {
         match ducking_strategy(
             volume_control.is_some(),
             mute_control.is_some(),
+            config.mute_instead_of_reduce,
             config.sound_source_hotkey_fallback_enabled,
         ) {
             DuckingStrategy::Volume => {
                 let control = volume_control.expect("volume control exists for volume strategy");
                 let original_volume = read_output_volume(device_id, control)?;
-                let ducked_volume = ducked_volume(original_volume, config.reduction_percent);
+                let ducked_volume = target_volume(original_volume, config);
                 if volume_matches(original_volume, ducked_volume) {
                     return Ok(None);
                 }
@@ -821,8 +843,32 @@ mod platform {
         }
 
         let endpoint = endpoint_volume_for_device(&device)?;
+        if config.mute_instead_of_reduce {
+            match read_output_mute(&endpoint) {
+                Ok(true) => return Ok(None),
+                Ok(false) => match write_output_mute(&endpoint, true) {
+                    Ok(()) => {
+                        return Ok(Some(OutputVolumeDuckingSession {
+                            state: DuckingSessionState::Mute {
+                                device_id,
+                                device_name,
+                            },
+                        }));
+                    }
+                    Err(err) => {
+                        eprintln!("failed to mute Windows output, trying volume fallback: {err:?}");
+                    }
+                },
+                Err(err) => {
+                    eprintln!(
+                        "failed to read Windows output mute, trying volume fallback: {err:?}"
+                    );
+                }
+            }
+        }
+
         if let Ok(original_volume) = read_output_volume(&endpoint) {
-            let ducked_volume = ducked_volume(original_volume, config.reduction_percent);
+            let ducked_volume = target_volume(original_volume, config);
             if volume_matches(original_volume, ducked_volume) {
                 return Ok(None);
             }
@@ -1066,19 +1112,55 @@ mod tests {
     }
 
     #[test]
+    fn target_volume_can_mute_instead_of_reduce() {
+        let mut config = OutputVolumeDuckingConfig {
+            enabled: true,
+            mute_instead_of_reduce: false,
+            reduction_percent: 70,
+            device_name_whitelist: Vec::new(),
+            sound_source_hotkey_fallback_enabled: false,
+            sound_source_toggle_mute_hotkey: "Cmd+Opt+Ctrl+A".to_string(),
+        };
+
+        assert!(volume_matches(target_volume(0.8, &config), 0.24));
+
+        config.mute_instead_of_reduce = true;
+        assert!(volume_matches(target_volume(0.8, &config), 0.0));
+    }
+
+    #[test]
     fn ducking_strategy_prefers_native_controls() {
-        assert_eq!(ducking_strategy(true, true, true), DuckingStrategy::Volume);
         assert_eq!(
-            ducking_strategy(false, true, true),
+            ducking_strategy(true, true, false, true),
+            DuckingStrategy::Volume
+        );
+        assert_eq!(
+            ducking_strategy(false, true, false, true),
             DuckingStrategy::NativeMute
         );
         assert_eq!(
-            ducking_strategy(false, false, true),
+            ducking_strategy(false, false, false, true),
             DuckingStrategy::SoundSourceHotkey
         );
         assert_eq!(
-            ducking_strategy(false, false, false),
+            ducking_strategy(false, false, false, false),
             DuckingStrategy::Unsupported
+        );
+    }
+
+    #[test]
+    fn ducking_strategy_prefers_mute_when_requested() {
+        assert_eq!(
+            ducking_strategy(true, true, true, true),
+            DuckingStrategy::NativeMute
+        );
+        assert_eq!(
+            ducking_strategy(true, false, true, true),
+            DuckingStrategy::Volume
+        );
+        assert_eq!(
+            ducking_strategy(false, false, true, true),
+            DuckingStrategy::SoundSourceHotkey
         );
     }
 
@@ -1087,6 +1169,7 @@ mod tests {
     fn unsupported_platform_ducking_is_noop() {
         let config = OutputVolumeDuckingConfig {
             enabled: true,
+            mute_instead_of_reduce: false,
             reduction_percent: 70,
             device_name_whitelist: Vec::new(),
             sound_source_hotkey_fallback_enabled: true,

@@ -20,6 +20,7 @@ export interface AudioConfig {
 
 export interface OutputVolumeDuckingConfig {
   enabled: boolean;
+  mute_instead_of_reduce: boolean;
   reduction_percent: number;
   device_name_whitelist: string[];
   sound_source_hotkey_fallback_enabled: boolean;

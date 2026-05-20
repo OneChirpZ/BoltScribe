@@ -45,6 +45,8 @@ pub struct AudioConfig {
 pub struct OutputVolumeDuckingConfig {
     #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
+    pub mute_instead_of_reduce: bool,
     #[serde(default = "default_output_volume_ducking_reduction_percent")]
     pub reduction_percent: u32,
     #[serde(default)]
@@ -403,6 +405,7 @@ impl Default for OutputVolumeDuckingConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            mute_instead_of_reduce: false,
             reduction_percent: default_output_volume_ducking_reduction_percent(),
             device_name_whitelist: Vec::new(),
             sound_source_hotkey_fallback_enabled: false,
@@ -1318,6 +1321,7 @@ mod tests {
         config.normalize();
 
         assert!(config.audio.output_volume_ducking.enabled);
+        assert!(!config.audio.output_volume_ducking.mute_instead_of_reduce);
         assert_eq!(config.audio.output_volume_ducking.reduction_percent, 100);
         assert_eq!(
             config.audio.output_volume_ducking.device_name_whitelist,
@@ -1339,6 +1343,7 @@ mod tests {
 
         let default_ducking = OutputVolumeDuckingConfig::default();
         assert!(!default_ducking.enabled);
+        assert!(!default_ducking.mute_instead_of_reduce);
         assert_eq!(default_ducking.reduction_percent, 70);
         assert!(default_ducking.device_name_whitelist.is_empty());
         assert!(!default_ducking.sound_source_hotkey_fallback_enabled);
@@ -1595,6 +1600,10 @@ mod tests {
         config_value["audio"]["output_volume_ducking"]
             .as_object_mut()
             .unwrap()
+            .remove("mute_instead_of_reduce");
+        config_value["audio"]["output_volume_ducking"]
+            .as_object_mut()
+            .unwrap()
             .remove("sound_source_hotkey_fallback_enabled");
         config_value["audio"]["output_volume_ducking"]
             .as_object_mut()
@@ -1611,6 +1620,10 @@ mod tests {
 
         let result = ConfigStore::import_json(&raw).unwrap();
 
+        assert!(result
+            .report
+            .missing_fields
+            .contains(&"audio.output_volume_ducking.mute_instead_of_reduce".to_string()));
         assert!(result.report.missing_fields.contains(
             &"audio.output_volume_ducking.sound_source_hotkey_fallback_enabled".to_string()
         ));
@@ -1618,6 +1631,13 @@ mod tests {
             .report
             .missing_fields
             .contains(&"audio.output_volume_ducking.sound_source_toggle_mute_hotkey".to_string()));
+        assert!(
+            !result
+                .config
+                .audio
+                .output_volume_ducking
+                .mute_instead_of_reduce
+        );
         assert!(
             !result
                 .config
