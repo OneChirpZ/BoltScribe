@@ -380,6 +380,11 @@ textarea.dictionary-lines {
   gap: 8px;
 }
 
+.sound-source-fallback {
+  display: grid;
+  gap: 10px;
+}
+
 .status-chip {
   display: inline-flex;
   align-items: center;

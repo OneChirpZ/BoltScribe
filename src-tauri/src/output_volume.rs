@@ -1,4 +1,4 @@
-use crate::config::OutputVolumeDuckingConfig;
+use crate::{config::OutputVolumeDuckingConfig, keyboard_shortcut};
 use anyhow::Result;
 use serde::Serialize;
 
@@ -38,6 +38,30 @@ fn ducked_volume(original_volume: f32, reduction_percent: u32) -> f32 {
 
 fn volume_matches(left: f32, right: f32) -> bool {
     (left - right).abs() <= 0.01
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DuckingStrategy {
+    Volume,
+    NativeMute,
+    SoundSourceHotkey,
+    Unsupported,
+}
+
+fn ducking_strategy(
+    supports_volume_control: bool,
+    supports_mute_control: bool,
+    sound_source_hotkey_fallback_enabled: bool,
+) -> DuckingStrategy {
+    if supports_volume_control {
+        DuckingStrategy::Volume
+    } else if supports_mute_control {
+        DuckingStrategy::NativeMute
+    } else if sound_source_hotkey_fallback_enabled {
+        DuckingStrategy::SoundSourceHotkey
+    } else {
+        DuckingStrategy::Unsupported
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -112,12 +136,6 @@ mod platform {
         }
     }
 
-    #[derive(Clone, Copy)]
-    enum DuckingControl {
-        Volume(VolumeControl),
-        Mute(MuteControl),
-    }
-
     pub struct OutputVolumeDuckingSession {
         state: DuckingSessionState,
     }
@@ -134,6 +152,10 @@ mod platform {
             device_id: AudioDeviceID,
             device_name: String,
             control: MuteControl,
+        },
+        SoundSourceHotkey {
+            device_name: String,
+            hotkey: String,
         },
     }
 
@@ -158,6 +180,10 @@ mod platform {
                     device_name,
                     control,
                 } => restore_mute(device_id, &device_name, control),
+                DuckingSessionState::SoundSourceHotkey {
+                    device_name,
+                    hotkey,
+                } => restore_sound_source_hotkey(&device_name, &hotkey),
             }
         }
     }
@@ -198,14 +224,15 @@ mod platform {
             return Ok(None);
         }
 
-        let control = volume_control_for_device(device_id)?
-            .map(DuckingControl::Volume)
-            .or(mute_control_for_device(device_id)?.map(DuckingControl::Mute))
-            .ok_or_else(|| {
-                anyhow!("Default output device does not expose writable volume or mute control")
-            })?;
-        match control {
-            DuckingControl::Volume(control) => {
+        let volume_control = volume_control_for_device(device_id)?;
+        let mute_control = mute_control_for_device(device_id)?;
+        match ducking_strategy(
+            volume_control.is_some(),
+            mute_control.is_some(),
+            config.sound_source_hotkey_fallback_enabled,
+        ) {
+            DuckingStrategy::Volume => {
+                let control = volume_control.expect("volume control exists for volume strategy");
                 let original_volume = read_output_volume(device_id, control)?;
                 let ducked_volume = ducked_volume(original_volume, config.reduction_percent);
                 if volume_matches(original_volume, ducked_volume) {
@@ -222,7 +249,8 @@ mod platform {
                     },
                 }))
             }
-            DuckingControl::Mute(control) => {
+            DuckingStrategy::NativeMute => {
+                let control = mute_control.expect("mute control exists for mute strategy");
                 if read_output_mute(device_id, control)? {
                     return Ok(None);
                 }
@@ -235,6 +263,20 @@ mod platform {
                     },
                 }))
             }
+            DuckingStrategy::SoundSourceHotkey => {
+                keyboard_shortcut::send(&config.sound_source_toggle_mute_hotkey).with_context(
+                    || format!("Failed to send SoundSource mute shortcut for {device_name}"),
+                )?;
+                Ok(Some(OutputVolumeDuckingSession {
+                    state: DuckingSessionState::SoundSourceHotkey {
+                        device_name,
+                        hotkey: config.sound_source_toggle_mute_hotkey.clone(),
+                    },
+                }))
+            }
+            DuckingStrategy::Unsupported => Err(anyhow!(
+                "Default output device does not expose writable volume or mute control"
+            )),
         }
     }
 
@@ -370,6 +412,12 @@ mod platform {
         }
         write_output_mute(device_id, control, false)
             .with_context(|| format!("Failed to restore output mute for {device_name}"))
+    }
+
+    fn restore_sound_source_hotkey(device_name: &str, hotkey: &str) -> Result<()> {
+        keyboard_shortcut::send(hotkey).with_context(|| {
+            format!("Failed to restore SoundSource mute shortcut for {device_name}")
+        })
     }
 
     fn volume_control_for_device(device_id: AudioDeviceID) -> Result<Option<VolumeControl>> {
@@ -1017,6 +1065,23 @@ mod tests {
         assert!(volume_matches(ducked_volume(0.8, 150), 0.0));
     }
 
+    #[test]
+    fn ducking_strategy_prefers_native_controls() {
+        assert_eq!(ducking_strategy(true, true, true), DuckingStrategy::Volume);
+        assert_eq!(
+            ducking_strategy(false, true, true),
+            DuckingStrategy::NativeMute
+        );
+        assert_eq!(
+            ducking_strategy(false, false, true),
+            DuckingStrategy::SoundSourceHotkey
+        );
+        assert_eq!(
+            ducking_strategy(false, false, false),
+            DuckingStrategy::Unsupported
+        );
+    }
+
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     #[test]
     fn unsupported_platform_ducking_is_noop() {
@@ -1024,6 +1089,8 @@ mod tests {
             enabled: true,
             reduction_percent: 70,
             device_name_whitelist: Vec::new(),
+            sound_source_hotkey_fallback_enabled: true,
+            sound_source_toggle_mute_hotkey: "Cmd+Opt+Ctrl+A".to_string(),
         };
 
         assert!(start_ducking_session(&config).unwrap().is_none());

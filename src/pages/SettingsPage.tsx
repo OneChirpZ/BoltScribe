@@ -5,7 +5,7 @@ import HelpTip from "../components/HelpTip";
 import PanelHeader from "../components/PanelHeader";
 import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrectionTemplates";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
-import { supportsDockVisibilityControl, supportsOutputVolumeDucking } from "../domain/platform";
+import { supportsDockVisibilityControl, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback } from "../domain/platform";
 
 const maxHistoryRecords = 500;
 const bytesPerGb = 1024 * 1024 * 1024;
@@ -41,12 +41,15 @@ export default function SettingsPage({
   const storageGb = Number((config.retention.max_storage_bytes / bytesPerGb).toFixed(2));
   const canControlDockVisibility = supportsDockVisibilityControl();
   const canDuckOutputVolume = supportsOutputVolumeDucking();
+  const canUseSoundSourceFallback = supportsSoundSourceHotkeyFallback();
   const outputDucking = outputVolumeDuckingConfig(config);
   const defaultOutputDevice = audioOutputDevices.find((device) => device.is_default) ?? null;
   const defaultOutputDeviceUsesMuteFallback =
     canDuckOutputVolume && defaultOutputDevice !== null && !defaultOutputDevice.supports_volume_control && defaultOutputDevice.supports_mute_control;
   const defaultOutputDeviceUnsupported =
     canDuckOutputVolume && defaultOutputDevice !== null && !defaultOutputDevice.supports_volume_control && !defaultOutputDevice.supports_mute_control;
+  const defaultOutputDeviceUsesSoundSourceFallback =
+    outputDucking.enabled && canUseSoundSourceFallback && defaultOutputDeviceUnsupported && outputDucking.sound_source_hotkey_fallback_enabled;
   const outputDeviceNames = uniqueStrings(audioOutputDevices.map((device) => device.name));
   const missingOutputDuckingNames = outputDucking.device_name_whitelist.filter((name) => !outputDeviceNames.includes(name));
 
@@ -210,10 +213,16 @@ export default function SettingsPage({
                     ? text.settings.outputVolumeDuckingCurrent(defaultOutputDevice?.name ?? text.settings.outputVolumeDuckingNoOutputDevice)
                     : text.settings.outputVolumeDuckingUnsupported}
                 </span>
-                {defaultOutputDeviceUnsupported ? (
+                {defaultOutputDeviceUnsupported && !defaultOutputDeviceUsesSoundSourceFallback ? (
                   <span className="status-chip warning">
                     {text.settings.outputVolumeDuckingUnsupportedShort}
                     <HelpTip content={text.settings.outputVolumeDuckingDeviceUnsupported} />
+                  </span>
+                ) : null}
+                {defaultOutputDeviceUsesSoundSourceFallback ? (
+                  <span className="status-chip warning">
+                    {text.settings.outputVolumeDuckingSoundSourceFallbackShort}
+                    <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
                   </span>
                 ) : null}
                 {defaultOutputDeviceUsesMuteFallback ? (
@@ -245,6 +254,28 @@ export default function SettingsPage({
                   <span>%</span>
                 </div>
               </Field>
+              {canUseSoundSourceFallback ? (
+                <div className="sound-source-fallback">
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={outputDucking.sound_source_hotkey_fallback_enabled}
+                      onChange={(event) => updateOutputVolumeDucking({ sound_source_hotkey_fallback_enabled: event.target.checked })}
+                    />
+                    <span>{text.settings.outputVolumeDuckingSoundSourceFallback}</span>
+                    <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
+                  </label>
+                  <Field label={text.settings.outputVolumeDuckingSoundSourceHotkey} className="field-wide">
+                    <input
+                      type="text"
+                      disabled={!outputDucking.sound_source_hotkey_fallback_enabled}
+                      value={outputDucking.sound_source_toggle_mute_hotkey}
+                      placeholder="Cmd+Opt+Ctrl+A"
+                      onChange={(event) => updateOutputVolumeDucking({ sound_source_toggle_mute_hotkey: event.target.value })}
+                    />
+                  </Field>
+                </div>
+              ) : null}
               <Field label={text.settings.outputVolumeDuckingWhitelist} className="field-wide">
                 <div className="device-checklist">
                   {audioOutputDevices.map((device) => (
@@ -256,7 +287,7 @@ export default function SettingsPage({
                       />
                       <span>
                         {device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}
-                        {outputDuckingDeviceBadge(device, text)}
+                        {outputDuckingDeviceBadge(device, text, canUseSoundSourceFallback && outputDucking.sound_source_hotkey_fallback_enabled)}
                       </span>
                     </label>
                   ))}
@@ -436,19 +467,25 @@ function selectedAudioDeviceMissing(config: AppConfig, audioDevices: AudioInputD
 }
 
 function outputVolumeDuckingConfig(config: AppConfig): OutputVolumeDuckingConfig {
-  return config.audio.output_volume_ducking ?? {
-    enabled: false,
-    reduction_percent: 70,
-    device_name_whitelist: [],
+  const ducking = config.audio.output_volume_ducking;
+  return {
+    enabled: ducking?.enabled ?? false,
+    reduction_percent: ducking?.reduction_percent ?? 70,
+    device_name_whitelist: ducking?.device_name_whitelist ?? [],
+    sound_source_hotkey_fallback_enabled: ducking?.sound_source_hotkey_fallback_enabled ?? false,
+    sound_source_toggle_mute_hotkey: ducking?.sound_source_toggle_mute_hotkey ?? "Cmd+Opt+Ctrl+A",
   };
 }
 
-function outputDuckingDeviceBadge(device: AudioOutputDevice, text: TextBundle) {
+function outputDuckingDeviceBadge(device: AudioOutputDevice, text: TextBundle, soundSourceFallbackEnabled: boolean) {
   if (device.supports_volume_control) {
     return "";
   }
   if (device.supports_mute_control) {
     return ` (${text.settings.outputVolumeDuckingDeviceMuteFallbackBadge})`;
+  }
+  if (soundSourceFallbackEnabled) {
+    return ` (${text.settings.outputVolumeDuckingDeviceSoundSourceFallbackBadge})`;
   }
   return ` (${text.settings.outputVolumeDuckingDeviceUnsupportedBadge})`;
 }

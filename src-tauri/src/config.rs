@@ -49,6 +49,10 @@ pub struct OutputVolumeDuckingConfig {
     pub reduction_percent: u32,
     #[serde(default)]
     pub device_name_whitelist: Vec<String>,
+    #[serde(default)]
+    pub sound_source_hotkey_fallback_enabled: bool,
+    #[serde(default = "default_sound_source_toggle_mute_hotkey")]
+    pub sound_source_toggle_mute_hotkey: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -287,6 +291,10 @@ impl AppConfig {
             normalize_correction_rules(&self.correction.correction_rules);
     }
 
+    pub fn validate(&self) -> Result<()> {
+        self.audio.output_volume_ducking.validate()
+    }
+
     pub fn hotkey_slots(&self) -> Vec<String> {
         let mut slots = if self.hotkeys.iter().any(|hotkey| !hotkey.trim().is_empty()) {
             self.hotkeys
@@ -378,6 +386,16 @@ impl OutputVolumeDuckingConfig {
     pub fn normalize(&mut self) {
         self.reduction_percent = self.reduction_percent.clamp(0, 100);
         self.device_name_whitelist = normalize_string_list(&self.device_name_whitelist);
+        self.sound_source_toggle_mute_hotkey =
+            self.sound_source_toggle_mute_hotkey.trim().to_string();
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.sound_source_hotkey_fallback_enabled {
+            crate::keyboard_shortcut::parse(&self.sound_source_toggle_mute_hotkey)
+                .map_err(|err| anyhow::anyhow!("Invalid SoundSource mute shortcut: {err}"))?;
+        }
+        Ok(())
     }
 }
 
@@ -387,6 +405,8 @@ impl Default for OutputVolumeDuckingConfig {
             enabled: false,
             reduction_percent: default_output_volume_ducking_reduction_percent(),
             device_name_whitelist: Vec::new(),
+            sound_source_hotkey_fallback_enabled: false,
+            sound_source_toggle_mute_hotkey: default_sound_source_toggle_mute_hotkey(),
         }
     }
 }
@@ -397,6 +417,10 @@ fn default_input_device_mode() -> String {
 
 fn default_output_volume_ducking_reduction_percent() -> u32 {
     70
+}
+
+fn default_sound_source_toggle_mute_hotkey() -> String {
+    "Cmd+Opt+Ctrl+A".to_string()
 }
 
 fn default_hotkey() -> String {
@@ -796,6 +820,7 @@ impl ConfigStore {
         }
         let mut config = config.clone();
         config.normalize();
+        config.validate()?;
         let raw = serde_json::to_string_pretty(&config)?;
         fs::write(&path, raw).with_context(|| format!("Failed to write {}", path.display()))?;
         Ok(config)
@@ -1285,6 +1310,10 @@ mod tests {
             String::new(),
             "Display Audio".to_string(),
         ];
+        config
+            .audio
+            .output_volume_ducking
+            .sound_source_toggle_mute_hotkey = " Cmd+Opt+Ctrl+A ".to_string();
 
         config.normalize();
 
@@ -1294,11 +1323,50 @@ mod tests {
             config.audio.output_volume_ducking.device_name_whitelist,
             vec!["External Speaker".to_string(), "Display Audio".to_string()]
         );
+        assert!(
+            !config
+                .audio
+                .output_volume_ducking
+                .sound_source_hotkey_fallback_enabled
+        );
+        assert_eq!(
+            config
+                .audio
+                .output_volume_ducking
+                .sound_source_toggle_mute_hotkey,
+            "Cmd+Opt+Ctrl+A"
+        );
 
         let default_ducking = OutputVolumeDuckingConfig::default();
         assert!(!default_ducking.enabled);
         assert_eq!(default_ducking.reduction_percent, 70);
         assert!(default_ducking.device_name_whitelist.is_empty());
+        assert!(!default_ducking.sound_source_hotkey_fallback_enabled);
+        assert_eq!(
+            default_ducking.sound_source_toggle_mute_hotkey,
+            "Cmd+Opt+Ctrl+A"
+        );
+    }
+
+    #[test]
+    fn sound_source_hotkey_is_validated_only_when_enabled() {
+        let mut config = AppConfig::default();
+        config
+            .audio
+            .output_volume_ducking
+            .sound_source_toggle_mute_hotkey = "Cmd+Unknown".to_string();
+        config.normalize();
+        assert!(config.validate().is_ok());
+
+        config
+            .audio
+            .output_volume_ducking
+            .sound_source_hotkey_fallback_enabled = true;
+        assert!(config
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid SoundSource mute shortcut"));
     }
 
     #[test]
@@ -1519,6 +1587,52 @@ mod tests {
         );
         assert_eq!(result.config.llm.provider_settings.len(), 1);
         assert_eq!(result.config.llm.provider_settings[0].provider, "custom");
+    }
+
+    #[test]
+    fn config_import_fills_missing_soundsource_ducking_fields() {
+        let mut config_value = serde_json::to_value(AppConfig::default()).unwrap();
+        config_value["audio"]["output_volume_ducking"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sound_source_hotkey_fallback_enabled");
+        config_value["audio"]["output_volume_ducking"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sound_source_toggle_mute_hotkey");
+
+        let raw = serde_json::json!({
+            "format": CONFIG_EXPORT_FORMAT,
+            "version": CONFIG_EXPORT_VERSION,
+            "exported_at": "2026-05-20T00:00:00Z",
+            "config": config_value
+        })
+        .to_string();
+
+        let result = ConfigStore::import_json(&raw).unwrap();
+
+        assert!(result.report.missing_fields.contains(
+            &"audio.output_volume_ducking.sound_source_hotkey_fallback_enabled".to_string()
+        ));
+        assert!(result
+            .report
+            .missing_fields
+            .contains(&"audio.output_volume_ducking.sound_source_toggle_mute_hotkey".to_string()));
+        assert!(
+            !result
+                .config
+                .audio
+                .output_volume_ducking
+                .sound_source_hotkey_fallback_enabled
+        );
+        assert_eq!(
+            result
+                .config
+                .audio
+                .output_volume_ducking
+                .sound_source_toggle_mute_hotkey,
+            "Cmd+Opt+Ctrl+A"
+        );
     }
 
     #[test]

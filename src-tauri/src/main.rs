@@ -11,6 +11,7 @@ mod config;
 mod corrector;
 mod history;
 mod injector;
+mod keyboard_shortcut;
 mod mouse_shortcuts;
 mod output_volume;
 mod paths;

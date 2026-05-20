@@ -55,6 +55,7 @@ fn apply_and_save_config(
     let previous = config::ConfigStore::load().unwrap_or_default();
     let mut next = config;
     next.normalize();
+    next.validate().map_err(|err| err.to_string())?;
 
     shortcuts::apply_global_shortcuts(app, &next).inspect_err(|_| {
         if let Err(err) = shortcuts::apply_global_shortcuts(app, &previous) {

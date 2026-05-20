@@ -209,6 +209,8 @@ let previewConfig: AppConfig = {
       enabled: true,
       reduction_percent: 70,
       device_name_whitelist: ["Audient iD4"],
+      sound_source_hotkey_fallback_enabled: false,
+      sound_source_toggle_mute_hotkey: "Cmd+Opt+Ctrl+A",
     },
   },
   asr: {
