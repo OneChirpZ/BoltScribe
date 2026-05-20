@@ -46,10 +46,10 @@ export type ShortcutParts = {
 
 export function shortcutModifierOptions(platform: RuntimePlatform = runtimePlatform()) {
   const labels: Record<ShortcutModifier, string> = platform === "windows"
-    ? { Ctrl: "Control", Alt: "Alt", Cmd: "Win", Shift: "Shift" }
+    ? { Ctrl: "ctrl", Alt: "alt", Cmd: "win", Shift: "shift" }
     : platform === "macos"
-      ? { Ctrl: "Ctrl", Alt: "Option", Cmd: "Command", Shift: "Shift" }
-      : { Ctrl: "Ctrl", Alt: "Alt", Cmd: "Super", Shift: "Shift" };
+      ? { Ctrl: "ctrl", Alt: "opt", Cmd: "cmd", Shift: "shift" }
+      : { Ctrl: "ctrl", Alt: "alt", Cmd: "super", Shift: "shift" };
   return shortcutModifierValues.map((value) => ({ value, label: labels[value] }));
 }
 
