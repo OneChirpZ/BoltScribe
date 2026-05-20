@@ -36,6 +36,10 @@
   gap: 12px;
 }
 
+.shortcut-picker-header.no-enable {
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content);
+}
+
 .shortcut-picker-title,
 .field-label,
 .field span,

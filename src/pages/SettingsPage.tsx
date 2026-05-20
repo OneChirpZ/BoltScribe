@@ -3,7 +3,9 @@ import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport
 import Field from "../components/Field";
 import HelpTip from "../components/HelpTip";
 import PanelHeader from "../components/PanelHeader";
+import ShortcutPicker from "../components/ShortcutPicker";
 import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrectionTemplates";
+import { soundSourceShortcutKeyOptions } from "../domain/hotkeys";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
 import { supportsDockVisibilityControl, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback } from "../domain/platform";
 
@@ -265,15 +267,16 @@ export default function SettingsPage({
                     <span>{text.settings.outputVolumeDuckingSoundSourceFallback}</span>
                     <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
                   </label>
-                  <Field label={text.settings.outputVolumeDuckingSoundSourceHotkey} className="field-wide">
-                    <input
-                      type="text"
-                      disabled={!outputDucking.sound_source_hotkey_fallback_enabled}
-                      value={outputDucking.sound_source_toggle_mute_hotkey}
-                      placeholder="Cmd+Opt+Ctrl+A"
-                      onChange={(event) => updateOutputVolumeDucking({ sound_source_toggle_mute_hotkey: event.target.value })}
-                    />
-                  </Field>
+                  <ShortcutPicker
+                    label={text.settings.outputVolumeDuckingSoundSourceHotkey}
+                    enabled={outputDucking.sound_source_hotkey_fallback_enabled}
+                    value={outputDucking.sound_source_toggle_mute_hotkey}
+                    onChange={(value) => updateOutputVolumeDucking({ sound_source_toggle_mute_hotkey: value })}
+                    text={text}
+                    platform="macos"
+                    keyOptions={soundSourceShortcutKeyOptions}
+                    showEnabledToggle={false}
+                  />
                 </div>
               ) : null}
               <Field label={text.settings.outputVolumeDuckingWhitelist} className="field-wide">

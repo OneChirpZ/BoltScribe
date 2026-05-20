@@ -31,6 +31,15 @@ export const keyboardShortcutKeyOptions = [
   ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((key) => ({ value: key, label: key })),
   ..."0123456789".split("").map((key) => ({ value: key, label: key })),
 ];
+export const soundSourceShortcutKeyOptions = [
+  { value: "Space", label: "Space" },
+  ...Array.from({ length: 20 }, (_, index) => {
+    const key = `F${index + 1}`;
+    return { value: key, label: key };
+  }),
+  ..."ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((key) => ({ value: key, label: key })),
+  ..."0123456789".split("").map((key) => ({ value: key, label: key })),
+];
 export const mouseShortcutKeyOptions = [
   { value: "MouseMiddle", label: "Mouse Middle" },
   { value: "MouseBack", label: "Mouse Back" },

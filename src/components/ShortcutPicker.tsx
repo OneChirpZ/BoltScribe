@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import { displayShortcutParts, formatShortcut, parseShortcut, shortcutKeyOptions, shortcutModifierOptions } from "../domain/hotkeys";
 import type { ShortcutModifier } from "../domain/hotkeys";
 import type { TextBundle } from "../domain/i18n";
-import { runtimePlatform } from "../domain/platform";
+import { runtimePlatform, type RuntimePlatform } from "../domain/platform";
+
+type ShortcutKeyOption = {
+  value: string;
+  label: string;
+};
 
 export default function ShortcutPicker({
   label,
@@ -11,22 +16,28 @@ export default function ShortcutPicker({
   onEnabledChange,
   onChange,
   text,
+  platform: platformOverride,
+  keyOptions,
+  showEnabledToggle = true,
 }: {
   label: string;
   enabled: boolean;
   value: string;
-  onEnabledChange: (enabled: boolean) => void;
+  onEnabledChange?: (enabled: boolean) => void;
   onChange: (value: string) => void;
   text: TextBundle;
+  platform?: RuntimePlatform;
+  keyOptions?: ShortcutKeyOption[];
+  showEnabledToggle?: boolean;
 }) {
-  const platform = runtimePlatform();
+  const platform = platformOverride ?? runtimePlatform();
   const parts = parseShortcut(value, platform);
   const modifierOptions = shortcutModifierOptions(platform);
-  const platformKeyOptions = shortcutKeyOptions(platform);
+  const platformKeyOptions = keyOptions ?? shortcutKeyOptions(platform);
   const [draftModifiers, setDraftModifiers] = useState<ShortcutModifier[]>(parts.modifiers);
   useEffect(() => {
     setDraftModifiers(parts.modifiers);
-  }, [value]);
+  }, [value, platform]);
   const options = platformKeyOptions.some((option) => option.value === parts.key) || !parts.key
     ? platformKeyOptions
     : [{ value: parts.key, label: parts.key }, ...platformKeyOptions];
@@ -49,12 +60,14 @@ export default function ShortcutPicker({
 
   return (
     <div className={enabled ? "shortcut-picker" : "shortcut-picker disabled"}>
-      <div className="shortcut-picker-header">
+      <div className={showEnabledToggle ? "shortcut-picker-header" : "shortcut-picker-header no-enable"}>
         <span className="shortcut-picker-title">{label}</span>
-        <label className="shortcut-enable">
-          <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange(event.target.checked)} />
-          {text.common.enabled}
-        </label>
+        {showEnabledToggle ? (
+          <label className="shortcut-enable">
+            <input type="checkbox" checked={enabled} onChange={(event) => onEnabledChange?.(event.target.checked)} />
+            {text.common.enabled}
+          </label>
+        ) : null}
         <code>{enabled ? displayShortcutParts(activeModifiers, parts.key, platform) || text.common.unset : text.common.disabled}</code>
       </div>
       <div className="shortcut-controls">
