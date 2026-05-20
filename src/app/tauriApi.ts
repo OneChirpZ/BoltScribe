@@ -60,7 +60,7 @@ export function loadAudioOutputDevices() {
 
 export function getAppVersion() {
   if (browserPreviewEnabled()) {
-    return Promise.resolve("1.0.0");
+    return Promise.resolve("1.1.0");
   }
   return getVersion();
 }

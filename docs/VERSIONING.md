@@ -17,11 +17,11 @@ npm run version:check
 Release tags should use the same version with a `v` prefix, for example:
 
 ```text
-v1.0.0
+v1.1.0
 ```
 
 Release DMG files should include the same version in the filename, for example:
 
 ```text
-BoltScribe_1.0.0_aarch64.dmg
+BoltScribe_1.1.0_aarch64.dmg
 ```
