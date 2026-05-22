@@ -205,6 +205,12 @@ pub struct ConfigImportResult {
     pub report: ConfigImportReport,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct CorrectionTextFieldPresence {
+    dictionary_text: bool,
+    correction_rules_text: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct ConfigExportEnvelope {
     format: String,
@@ -648,6 +654,63 @@ fn trim_rule_part(value: &str) -> String {
         .to_string()
 }
 
+fn correction_text_field_presence(value: &serde_json::Value) -> CorrectionTextFieldPresence {
+    let correction = value
+        .get("correction")
+        .and_then(serde_json::Value::as_object);
+    CorrectionTextFieldPresence {
+        dictionary_text: correction
+            .is_some_and(|correction| correction.contains_key("dictionary_text")),
+        correction_rules_text: correction
+            .is_some_and(|correction| correction.contains_key("correction_rules_text")),
+    }
+}
+
+fn fill_missing_correction_text_fields(
+    config: &mut AppConfig,
+    presence: CorrectionTextFieldPresence,
+) {
+    if !presence.dictionary_text {
+        config.correction.dictionary_text =
+            legacy_dictionary_text_from_entries(&config.correction.dictionary);
+    }
+    if !presence.correction_rules_text {
+        config.correction.correction_rules_text =
+            legacy_correction_rules_text_from_rules(&config.correction.correction_rules);
+    }
+}
+
+fn legacy_dictionary_text_from_entries(dictionary: &[DictionaryEntry]) -> String {
+    dictionary
+        .iter()
+        .filter_map(|entry| {
+            let term = entry.term.trim();
+            (!term.is_empty()).then(|| term.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn legacy_correction_rules_text_from_rules(rules: &[CorrectionRule]) -> String {
+    rules
+        .iter()
+        .filter_map(|rule| {
+            let source = rule.source.trim();
+            let target = rule.target.trim();
+            if source.is_empty() || target.is_empty() {
+                return None;
+            }
+            let line = if rule.note.trim().is_empty() {
+                format!("\"{source}\" -> \"{target}\"")
+            } else {
+                format!("\"{source}\" -> \"{target}\"（{}）", rule.note.trim())
+            };
+            Some(line)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn is_removed_volc_model(model: &str) -> bool {
     matches!(
         model.trim(),
@@ -734,9 +797,13 @@ impl ConfigStore {
 
         let raw = fs::read_to_string(&path)
             .with_context(|| format!("Failed to read config {}", path.display()))?;
-        let mut config: AppConfig = serde_json::from_str(&raw)
+        let raw_value: serde_json::Value = serde_json::from_str(&raw)
+            .with_context(|| format!("Failed to parse config {}", path.display()))?;
+        let correction_text_presence = correction_text_field_presence(&raw_value);
+        let mut config: AppConfig = serde_json::from_value(raw_value)
             .with_context(|| format!("Failed to parse config {}", path.display()))?;
         config.normalize();
+        fill_missing_correction_text_fields(&mut config, correction_text_presence);
         Ok(config)
     }
 
@@ -770,6 +837,7 @@ impl ConfigStore {
             serde_json::from_str(raw).context("Failed to parse imported config JSON")?;
         let mut report = ConfigImportReport::default();
         let imported_config = extract_imported_config(value, &mut report)?;
+        let correction_text_presence = correction_text_field_presence(&imported_config);
         let default_config = serde_json::to_value(AppConfig::default())?;
         let schema = config_schema_value()?;
 
@@ -793,6 +861,7 @@ impl ConfigStore {
         let mut config: AppConfig = serde_json::from_value(merged_config)
             .context("Failed to apply imported configuration")?;
         config.normalize();
+        fill_missing_correction_text_fields(&mut config, correction_text_presence);
 
         Ok(ConfigImportResult { config, report })
     }
@@ -808,9 +877,13 @@ impl ConfigStore {
 
         let raw = fs::read_to_string(&legacy_path)
             .with_context(|| format!("Failed to read legacy config {}", legacy_path.display()))?;
-        let mut config: AppConfig = serde_json::from_str(&raw)
+        let raw_value: serde_json::Value = serde_json::from_str(&raw)
+            .with_context(|| format!("Failed to parse legacy config {}", legacy_path.display()))?;
+        let correction_text_presence = correction_text_field_presence(&raw_value);
+        let mut config: AppConfig = serde_json::from_value(raw_value)
             .with_context(|| format!("Failed to parse legacy config {}", legacy_path.display()))?;
         config.normalize();
+        fill_missing_correction_text_fields(&mut config, correction_text_presence);
 
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -1494,6 +1567,68 @@ mod tests {
                 note: "英文缩写".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn missing_correction_text_fields_are_migrated_from_legacy_arrays() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        let correction = value["correction"].as_object_mut().unwrap();
+        correction.remove("dictionary_text");
+        correction.remove("correction_rules_text");
+        correction.insert(
+            "dictionary".to_string(),
+            serde_json::json!([
+                {
+                    "term": "BoltScribe",
+                    "aliases": [],
+                    "note": ""
+                }
+            ]),
+        );
+        correction.insert(
+            "correction_rules".to_string(),
+            serde_json::json!([
+                {
+                    "source": "DocX",
+                    "target": "docx",
+                    "note": "文件格式"
+                }
+            ]),
+        );
+
+        let result = ConfigStore::import_json(&value.to_string()).unwrap();
+
+        assert_eq!(result.config.correction.dictionary_text, "BoltScribe");
+        assert_eq!(
+            result.config.correction.correction_rules_text,
+            "\"DocX\" -> \"docx\"（文件格式）"
+        );
+    }
+
+    #[test]
+    fn present_empty_correction_text_fields_are_not_backfilled() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value["correction"]["dictionary_text"] = serde_json::json!("");
+        value["correction"]["correction_rules_text"] = serde_json::json!("");
+        value["correction"]["dictionary"] = serde_json::json!([
+            {
+                "term": "BoltScribe",
+                "aliases": [],
+                "note": ""
+            }
+        ]);
+        value["correction"]["correction_rules"] = serde_json::json!([
+            {
+                "source": "DocX",
+                "target": "docx",
+                "note": ""
+            }
+        ]);
+
+        let result = ConfigStore::import_json(&value.to_string()).unwrap();
+
+        assert!(result.config.correction.dictionary_text.is_empty());
+        assert!(result.config.correction.correction_rules_text.is_empty());
     }
 
     #[test]
