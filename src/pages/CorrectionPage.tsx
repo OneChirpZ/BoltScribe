@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppConfig, PromptVariable } from "../types";
 import Field from "../components/Field";
 import PanelHeader from "../components/PanelHeader";
@@ -30,10 +30,25 @@ export default function CorrectionPage({
     [config.correction.user_requirements, config.correction.dictionary, config.correction.correction_rules, config.correction.variables, config.correction.prompt_template],
   );
   const templateRef = useRef<HTMLTextAreaElement>(null);
+  const [dictionaryLines, setDictionaryLines] = useState(() => dictionaryToLines(config.correction.dictionary));
+  const [correctionRuleLines, setCorrectionRuleLines] = useState(() => correctionRulesToLines(config.correction.correction_rules ?? []));
 
   const variables = config.correction.variables ?? [];
 
+  useEffect(() => {
+    if (!dictionaryLinesRepresentEntries(dictionaryLines, config.correction.dictionary)) {
+      setDictionaryLines(dictionaryToLines(config.correction.dictionary));
+    }
+  }, [config.correction.dictionary]);
+
+  useEffect(() => {
+    if (!correctionRuleLinesRepresentRules(correctionRuleLines, config.correction.correction_rules ?? [])) {
+      setCorrectionRuleLines(correctionRulesToLines(config.correction.correction_rules ?? []));
+    }
+  }, [config.correction.correction_rules]);
+
   function updateDictionaryLines(value: string) {
+    setDictionaryLines(value);
     onChange({
       ...config,
       correction: {
@@ -44,6 +59,7 @@ export default function CorrectionPage({
   }
 
   function updateCorrectionRuleLines(value: string) {
+    setCorrectionRuleLines(value);
     onChange({
       ...config,
       correction: {
@@ -172,7 +188,7 @@ export default function CorrectionPage({
         <Field label={text.correction.dictionaryHelp}>
           <textarea
             className="dictionary-lines"
-            value={dictionaryToLines(config.correction.dictionary)}
+            value={dictionaryLines}
             onChange={(event) => updateDictionaryLines(event.target.value)}
           />
         </Field>
@@ -184,7 +200,7 @@ export default function CorrectionPage({
         <Field label={text.correction.correctionRulesHelp}>
           <textarea
             className="dictionary-lines"
-            value={correctionRulesToLines(config.correction.correction_rules ?? [])}
+            value={correctionRuleLines}
             onChange={(event) => updateCorrectionRuleLines(event.target.value)}
           />
         </Field>
@@ -215,4 +231,12 @@ export default function CorrectionPage({
       </div>
     </section>
   );
+}
+
+function dictionaryLinesRepresentEntries(value: string, dictionary: AppConfig["correction"]["dictionary"]) {
+  return dictionaryToLines(dictionaryFromLines(value)) === dictionaryToLines(dictionary);
+}
+
+function correctionRuleLinesRepresentRules(value: string, rules: AppConfig["correction"]["correction_rules"]) {
+  return correctionRulesToLines(correctionRulesFromLines(value)) === correctionRulesToLines(rules);
 }

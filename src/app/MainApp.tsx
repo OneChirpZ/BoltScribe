@@ -46,6 +46,8 @@ export default function MainApp() {
   const [appVersion, setAppVersion] = useState("");
   const configRef = useRef<AppConfig | null>(null);
   const savedConfigRef = useRef<AppConfig | null>(null);
+  const pageRef = useRef(page);
+  const historyPageIndexRef = useRef(historyPageIndex);
 
   async function refreshHistory() {
     const records = await loadHistory(recentHistoryLimit);
@@ -77,6 +79,7 @@ export default function MainApp() {
 
   async function loadHistoryPage(pageIndex: number) {
     const records = await loadHistory(historyPageSize + 1, pageIndex * historyPageSize);
+    historyPageIndexRef.current = pageIndex;
     setHistoryPageIndex(pageIndex);
     setHistoryPageRecords(records.slice(0, historyPageSize));
     setHistoryHasOlder(records.length > historyPageSize);
@@ -108,6 +111,9 @@ export default function MainApp() {
     const unlistenHistory = listenHistoryUpdated(() => {
       refreshHistory().catch((error) => setNotice(String(error)));
       refreshStats().catch((error) => setNotice(String(error)));
+      if (pageRef.current === "history") {
+        loadHistoryPage(historyPageIndexRef.current).catch((error) => setNotice(String(error)));
+      }
     });
     const unlistenConfig = listenConfigUpdated((updatedConfig) => {
       if (isConfigDirty(configRef.current, savedConfigRef.current)) {
@@ -129,11 +135,16 @@ export default function MainApp() {
   }, []);
 
   useEffect(() => {
+    pageRef.current = page;
     if (page !== "history") {
       return;
     }
     loadHistoryPage(historyPageIndex).catch((error) => setNotice(String(error)));
   }, [page]);
+
+  useEffect(() => {
+    historyPageIndexRef.current = historyPageIndex;
+  }, [historyPageIndex]);
 
   useEffect(() => {
     if (!needsAccessibilityPermission || accessibilityGranted !== false) {
