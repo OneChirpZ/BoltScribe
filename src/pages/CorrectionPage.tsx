@@ -19,21 +19,21 @@ export default function CorrectionPage({
   canSave: boolean;
   text: TextBundle;
 }) {
+  const dictionaryText = config.correction.dictionary_text ?? "";
+  const correctionRulesText = config.correction.correction_rules_text ?? "";
   const promptPreview = useMemo(
     () => buildPromptPreview(
       config.correction.user_requirements,
-      config.correction.dictionary_text,
-      config.correction.correction_rules_text,
+      dictionaryText,
+      correctionRulesText,
       config.correction.variables,
       config.correction.prompt_template,
     ),
-    [config.correction.user_requirements, config.correction.dictionary_text, config.correction.correction_rules_text, config.correction.variables, config.correction.prompt_template],
+    [config.correction.user_requirements, dictionaryText, correctionRulesText, config.correction.variables, config.correction.prompt_template],
   );
   const templateRef = useRef<HTMLTextAreaElement>(null);
 
   const variables = config.correction.variables ?? [];
-  const dictionaryText = config.correction.dictionary_text ?? "";
-  const correctionRulesText = config.correction.correction_rules_text ?? "";
 
   function updateDictionaryLines(value: string) {
     onChange({
