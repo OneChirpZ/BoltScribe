@@ -154,6 +154,10 @@ pub struct CorrectionConfig {
     #[serde(default)]
     pub variables: Vec<PromptVariable>,
     #[serde(default)]
+    pub dictionary_text: String,
+    #[serde(default)]
+    pub correction_rules_text: String,
+    #[serde(default)]
     pub correction_rules: Vec<CorrectionRule>,
     #[serde(default)]
     pub dictionary: Vec<DictionaryEntry>,
@@ -249,6 +253,8 @@ impl Default for AppConfig {
                 user_requirements: String::new(),
                 prompt_template: default_prompt_template(),
                 variables: Vec::new(),
+                dictionary_text: String::new(),
+                correction_rules_text: String::new(),
                 correction_rules: Vec::new(),
                 dictionary: Vec::new(),
             },

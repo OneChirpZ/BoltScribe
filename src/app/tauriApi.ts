@@ -250,6 +250,8 @@ let previewConfig: AppConfig = {
     user_requirements: "",
     prompt_template: "纠错任务：\\n{{raw_text}}",
     variables: [],
+    dictionary_text: "",
+    correction_rules_text: "",
     correction_rules: [],
     dictionary: [],
   },

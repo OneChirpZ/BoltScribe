@@ -1,4 +1,4 @@
-use crate::config::{CorrectionConfig, CorrectionRule, DictionaryEntry, LlmConfig, PromptVariable};
+use crate::config::{CorrectionConfig, LlmConfig, PromptVariable};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -189,11 +189,8 @@ pub fn build_correction_prompt(raw_text: &str, correction: &CorrectionConfig) ->
     let prompt = correction
         .prompt_template
         .replace("{{user_requirements}}", correction.user_requirements.trim())
-        .replace("{{dictionary}}", &format_dictionary(&correction.dictionary))
-        .replace(
-            "{{correction_rules}}",
-            &format_correction_rules(&correction.correction_rules),
-        )
+        .replace("{{dictionary}}", &correction.dictionary_text)
+        .replace("{{correction_rules}}", &correction.correction_rules_text)
         .replace("{{raw_text}}", raw_text.trim());
 
     apply_prompt_variables(prompt, &correction.variables)
@@ -215,40 +212,6 @@ fn is_builtin_variable(name: &str) -> bool {
         name,
         "user_requirements" | "dictionary" | "correction_rules" | "raw_text"
     )
-}
-
-fn format_dictionary(dictionary: &[DictionaryEntry]) -> String {
-    if dictionary.is_empty() {
-        return "（空）".to_string();
-    }
-
-    dictionary
-        .iter()
-        .filter(|entry| !entry.term.trim().is_empty())
-        .map(|entry| entry.term.trim().to_string())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn format_correction_rules(rules: &[CorrectionRule]) -> String {
-    if rules.is_empty() {
-        return "（空）".to_string();
-    }
-
-    rules
-        .iter()
-        .filter(|rule| !rule.source.trim().is_empty() && !rule.target.trim().is_empty())
-        .map(|rule| {
-            let source = rule.source.trim();
-            let target = rule.target.trim();
-            if rule.note.trim().is_empty() {
-                format!("\"{source}\" -> \"{target}\"")
-            } else {
-                format!("\"{source}\" -> \"{target}\"（{}）", rule.note.trim())
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 fn endpoint_url(endpoint: &str, suffix: &str) -> String {
@@ -480,7 +443,7 @@ fn value_to_text(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{CorrectionConfig, CorrectionRule, DictionaryEntry, PromptVariable};
+    use crate::config::{CorrectionConfig, PromptVariable};
 
     #[test]
     fn prompt_contains_requirements_dictionary_and_raw_text() {
@@ -490,12 +453,10 @@ mod tests {
             prompt_template: "要求={{user_requirements}}\n词典={{dictionary}}\n原文={{raw_text}}"
                 .to_string(),
             variables: Vec::new(),
+            dictionary_text: "LDFC".to_string(),
+            correction_rules_text: String::new(),
             correction_rules: Vec::new(),
-            dictionary: vec![DictionaryEntry {
-                term: "LDFC".to_string(),
-                aliases: vec!["ldfc".to_string()],
-                note: "项目名".to_string(),
-            }],
+            dictionary: Vec::new(),
         };
         let prompt = build_correction_prompt("这是 ldfc", &correction);
         assert!(prompt.contains("不要扩写"));
@@ -515,23 +476,10 @@ mod tests {
                 name: "scene".to_string(),
                 value: "技术讨论".to_string(),
             }],
-            correction_rules: vec![CorrectionRule {
-                source: "艾迪".to_string(),
-                target: "ID".to_string(),
-                note: "英文缩写".to_string(),
-            }],
-            dictionary: vec![
-                DictionaryEntry {
-                    term: "LDFC".to_string(),
-                    aliases: vec!["ldfc".to_string()],
-                    note: "项目名".to_string(),
-                },
-                DictionaryEntry {
-                    term: "Codex".to_string(),
-                    aliases: Vec::new(),
-                    note: String::new(),
-                },
-            ],
+            dictionary_text: "LDFC\nCodex".to_string(),
+            correction_rules_text: "艾迪 -> ID".to_string(),
+            correction_rules: Vec::new(),
+            dictionary: Vec::new(),
         };
 
         let prompt = build_correction_prompt("这是 ldfc", &correction);
@@ -543,23 +491,21 @@ mod tests {
     }
 
     #[test]
-    fn prompt_formats_correction_rules() {
+    fn prompt_uses_raw_correction_rules_text() {
         let correction = CorrectionConfig {
             enabled: true,
             user_requirements: "保留口吻".to_string(),
             prompt_template: "规则={{correction_rules}}\n原文={{raw_text}}".to_string(),
             variables: Vec::new(),
-            correction_rules: vec![CorrectionRule {
-                source: "艾迪".to_string(),
-                target: "ID".to_string(),
-                note: "英文缩写".to_string(),
-            }],
+            dictionary_text: String::new(),
+            correction_rules_text: "艾迪 => ID # 英文缩写".to_string(),
+            correction_rules: Vec::new(),
             dictionary: Vec::new(),
         };
 
         let prompt = build_correction_prompt("这是艾迪", &correction);
 
-        assert!(prompt.contains("\"艾迪\" -> \"ID\"（英文缩写）"));
+        assert!(prompt.contains("艾迪 => ID # 英文缩写"));
     }
 
     #[test]

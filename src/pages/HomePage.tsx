@@ -65,13 +65,17 @@ export default function HomePage({
         <div className="summary-grid">
           <Summary label={text.home.asr} value="火山引擎 WebSocket" />
           <Summary label={text.home.llm} value={`${providerLabel(config.llm.provider)} / ${config.llm.model || text.home.unconfigured}`} />
-          <Summary label={text.home.dictionaryItems} value={text.home.itemCount(config.correction.dictionary.length)} />
+          <Summary label={text.home.dictionaryItems} value={text.home.itemCount(countNonEmptyLines(config.correction.dictionary_text))} />
           <Summary label="Thinking" value={config.llm.thinking_enabled ? config.llm.thinking_effort : text.common.closed} />
         </div>
       </section>
       <HistoryPage title={text.home.latestHistory} history={history} onRefresh={onRefreshHistory} onOpenFullHistory={onOpenHistoryPage} onCopy={onCopyHistory} text={text} />
     </div>
   );
+}
+
+function countNonEmptyLines(value: string) {
+  return value.split(/\r?\n/).filter((line) => line.trim()).length;
 }
 
 function Summary({ label, value }: { label: string; value: string }) {

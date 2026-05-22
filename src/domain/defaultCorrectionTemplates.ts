@@ -55,8 +55,8 @@ export function isDefaultCorrectionProfile(config: AppConfig) {
     builtinSystemPrompts.has(config.llm.system_prompt) &&
     builtinPromptTemplates.has(config.correction.prompt_template) &&
     config.correction.user_requirements.trim() === "" &&
-    config.correction.dictionary.length === 0 &&
-    config.correction.correction_rules.length === 0 &&
+    config.correction.dictionary_text.trim() === "" &&
+    config.correction.correction_rules_text.trim() === "" &&
     config.correction.variables.length === 0
   );
 }

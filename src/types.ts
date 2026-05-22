@@ -112,6 +112,8 @@ export interface CorrectionConfig {
   user_requirements: string;
   prompt_template: string;
   variables: PromptVariable[];
+  dictionary_text: string;
+  correction_rules_text: string;
   correction_rules: CorrectionRule[];
   dictionary: DictionaryEntry[];
 }

@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 import type { AppConfig, PromptVariable } from "../types";
 import Field from "../components/Field";
 import PanelHeader from "../components/PanelHeader";
 import TokenButton from "../components/TokenButton";
 import type { TextBundle } from "../domain/i18n";
-import { buildPromptPreview, correctionRulesFromLines, correctionRulesToLines, dictionaryFromLines, dictionaryToLines, normalizeVariableName, variableToken } from "../domain/promptTemplate";
+import { buildPromptPreview, normalizeVariableName, variableToken } from "../domain/promptTemplate";
 
 export default function CorrectionPage({
   config,
@@ -22,49 +22,35 @@ export default function CorrectionPage({
   const promptPreview = useMemo(
     () => buildPromptPreview(
       config.correction.user_requirements,
-      config.correction.dictionary,
-      config.correction.correction_rules ?? [],
+      config.correction.dictionary_text,
+      config.correction.correction_rules_text,
       config.correction.variables,
       config.correction.prompt_template,
     ),
-    [config.correction.user_requirements, config.correction.dictionary, config.correction.correction_rules, config.correction.variables, config.correction.prompt_template],
+    [config.correction.user_requirements, config.correction.dictionary_text, config.correction.correction_rules_text, config.correction.variables, config.correction.prompt_template],
   );
   const templateRef = useRef<HTMLTextAreaElement>(null);
-  const [dictionaryLines, setDictionaryLines] = useState(() => dictionaryToLines(config.correction.dictionary));
-  const [correctionRuleLines, setCorrectionRuleLines] = useState(() => correctionRulesToLines(config.correction.correction_rules ?? []));
 
   const variables = config.correction.variables ?? [];
-
-  useEffect(() => {
-    if (!dictionaryLinesRepresentEntries(dictionaryLines, config.correction.dictionary)) {
-      setDictionaryLines(dictionaryToLines(config.correction.dictionary));
-    }
-  }, [config.correction.dictionary]);
-
-  useEffect(() => {
-    if (!correctionRuleLinesRepresentRules(correctionRuleLines, config.correction.correction_rules ?? [])) {
-      setCorrectionRuleLines(correctionRulesToLines(config.correction.correction_rules ?? []));
-    }
-  }, [config.correction.correction_rules]);
+  const dictionaryText = config.correction.dictionary_text ?? "";
+  const correctionRulesText = config.correction.correction_rules_text ?? "";
 
   function updateDictionaryLines(value: string) {
-    setDictionaryLines(value);
     onChange({
       ...config,
       correction: {
         ...config.correction,
-        dictionary: dictionaryFromLines(value),
+        dictionary_text: value,
       },
     });
   }
 
   function updateCorrectionRuleLines(value: string) {
-    setCorrectionRuleLines(value);
     onChange({
       ...config,
       correction: {
         ...config.correction,
-        correction_rules: correctionRulesFromLines(value),
+        correction_rules_text: value,
       },
     });
   }
@@ -188,7 +174,7 @@ export default function CorrectionPage({
         <Field label={text.correction.dictionaryHelp}>
           <textarea
             className="dictionary-lines"
-            value={dictionaryLines}
+            value={dictionaryText}
             onChange={(event) => updateDictionaryLines(event.target.value)}
           />
         </Field>
@@ -200,7 +186,7 @@ export default function CorrectionPage({
         <Field label={text.correction.correctionRulesHelp}>
           <textarea
             className="dictionary-lines"
-            value={correctionRuleLines}
+            value={correctionRulesText}
             onChange={(event) => updateCorrectionRuleLines(event.target.value)}
           />
         </Field>
@@ -231,12 +217,4 @@ export default function CorrectionPage({
       </div>
     </section>
   );
-}
-
-function dictionaryLinesRepresentEntries(value: string, dictionary: AppConfig["correction"]["dictionary"]) {
-  return dictionaryToLines(dictionaryFromLines(value)) === dictionaryToLines(dictionary);
-}
-
-function correctionRuleLinesRepresentRules(value: string, rules: AppConfig["correction"]["correction_rules"]) {
-  return correctionRulesToLines(correctionRulesFromLines(value)) === correctionRulesToLines(rules);
 }
