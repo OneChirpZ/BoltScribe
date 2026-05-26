@@ -45,6 +45,7 @@ export interface AudioOutputDevice {
 
 export interface AsrConfig {
   provider: string;
+  auth_mode: "api_key" | "legacy" | string;
   app_key: string;
   access_key: string;
   resource_id: string;

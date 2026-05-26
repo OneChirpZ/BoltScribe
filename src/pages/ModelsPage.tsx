@@ -42,6 +42,7 @@ export default function ModelsPage({
   const raceTargets = selectedRaceTargets(config);
   const raceTargetKeys = new Set(raceTargets.map(raceTargetKey));
   const raceTargetOptions = allRaceTargetOptions(config);
+  const asrAuthMode = config.asr.auth_mode === "legacy" ? "legacy" : "api_key";
 
   useEffect(() => {
     setSelectedPresetModel(presetModels.some((model) => model === config.llm.model) ? config.llm.model : "__custom__");
@@ -175,6 +176,12 @@ export default function ModelsPage({
           <h2>{text.models.asr}</h2>
         </div>
         <div className="form-grid">
+          <Field label={text.models.asrAuthMode}>
+            <select value={asrAuthMode} onChange={(event) => onChange({ ...config, asr: { ...config.asr, auth_mode: event.target.value } })}>
+              <option value="api_key">{text.models.asrAuthModeNew}</option>
+              <option value="legacy">{text.models.asrAuthModeLegacy}</option>
+            </select>
+          </Field>
           <Field label={text.models.asrLanguage}>
             <input value={config.asr.language} onChange={(event) => onChange({ ...config, asr: { ...config.asr, language: event.target.value } })} />
           </Field>

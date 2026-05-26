@@ -367,7 +367,9 @@ fn stop_and_process_recording(
             Ok(())
         }
         Err(err) => {
-            if append_failed_history(recorded, err.to_string(), total_started_at, &retention).is_ok() {
+            if append_failed_history(recorded, err.to_string(), total_started_at, &retention)
+                .is_ok()
+            {
                 let _ = app.emit("history://updated", ());
             }
             Err(err)

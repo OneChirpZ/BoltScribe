@@ -60,6 +60,8 @@ pub struct OutputVolumeDuckingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AsrConfig {
     pub provider: String,
+    #[serde(default)]
+    pub auth_mode: String,
     pub app_key: String,
     pub access_key: String,
     pub resource_id: String,
@@ -228,6 +230,7 @@ impl Default for AppConfig {
             audio: AudioConfig::default(),
             asr: AsrConfig {
                 provider: "volcengine".to_string(),
+                auth_mode: default_asr_auth_mode(),
                 app_key: String::new(),
                 access_key: String::new(),
                 resource_id: "volc.seedasr.sauc.duration".to_string(),
@@ -280,6 +283,7 @@ impl AppConfig {
 
     pub fn normalize(&mut self) {
         self.normalize_hotkeys();
+        self.asr.normalize();
         self.audio.normalize();
         self.ui.recording_overlay_scale = self.ui.recording_overlay_scale.clamp(0.25, 1.0);
         self.ui.recording_overlay_offset_x = self.ui.recording_overlay_offset_x.clamp(-4000, 4000);
@@ -361,6 +365,12 @@ impl AppConfig {
             enabled.push(false);
         }
         enabled
+    }
+}
+
+impl AsrConfig {
+    pub fn normalize(&mut self) {
+        self.auth_mode = normalize_asr_auth_mode(&self.auth_mode, &self.app_key);
     }
 }
 
@@ -571,6 +581,15 @@ fn normalize_app_language(language: &str) -> String {
     }
 }
 
+fn normalize_asr_auth_mode(auth_mode: &str, app_key: &str) -> String {
+    match auth_mode.trim() {
+        "api_key" | "new_console" | "x_api_key" => "api_key".to_string(),
+        "legacy" | "old_console" => "legacy".to_string(),
+        "" if !app_key.trim().is_empty() => "legacy".to_string(),
+        _ => default_asr_auth_mode(),
+    }
+}
+
 fn normalize_dictionary(dictionary: &[DictionaryEntry]) -> Vec<DictionaryEntry> {
     let mut normalized = Vec::new();
     for entry in dictionary {
@@ -664,6 +683,13 @@ fn correction_text_field_presence(value: &serde_json::Value) -> CorrectionTextFi
         correction_rules_text: correction
             .is_some_and(|correction| correction.contains_key("correction_rules_text")),
     }
+}
+
+fn asr_auth_mode_field_present(value: &serde_json::Value) -> bool {
+    value
+        .get("asr")
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|asr| asr.contains_key("auth_mode"))
 }
 
 fn fill_missing_correction_text_fields(
@@ -781,6 +807,10 @@ fn default_query_url() -> String {
     "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query".to_string()
 }
 
+fn default_asr_auth_mode() -> String {
+    "api_key".to_string()
+}
+
 pub struct ConfigStore;
 
 impl ConfigStore {
@@ -800,8 +830,12 @@ impl ConfigStore {
         let raw_value: serde_json::Value = serde_json::from_str(&raw)
             .with_context(|| format!("Failed to parse config {}", path.display()))?;
         let correction_text_presence = correction_text_field_presence(&raw_value);
+        let asr_auth_mode_present = asr_auth_mode_field_present(&raw_value);
         let mut config: AppConfig = serde_json::from_value(raw_value)
             .with_context(|| format!("Failed to parse config {}", path.display()))?;
+        if !asr_auth_mode_present {
+            config.asr.auth_mode.clear();
+        }
         config.normalize();
         fill_missing_correction_text_fields(&mut config, correction_text_presence);
         Ok(config)
@@ -838,6 +872,7 @@ impl ConfigStore {
         let mut report = ConfigImportReport::default();
         let imported_config = extract_imported_config(value, &mut report)?;
         let correction_text_presence = correction_text_field_presence(&imported_config);
+        let asr_auth_mode_present = asr_auth_mode_field_present(&imported_config);
         let default_config = serde_json::to_value(AppConfig::default())?;
         let schema = config_schema_value()?;
 
@@ -860,6 +895,9 @@ impl ConfigStore {
         );
         let mut config: AppConfig = serde_json::from_value(merged_config)
             .context("Failed to apply imported configuration")?;
+        if !asr_auth_mode_present {
+            config.asr.auth_mode.clear();
+        }
         config.normalize();
         fill_missing_correction_text_fields(&mut config, correction_text_presence);
 
@@ -880,8 +918,12 @@ impl ConfigStore {
         let raw_value: serde_json::Value = serde_json::from_str(&raw)
             .with_context(|| format!("Failed to parse legacy config {}", legacy_path.display()))?;
         let correction_text_presence = correction_text_field_presence(&raw_value);
+        let asr_auth_mode_present = asr_auth_mode_field_present(&raw_value);
         let mut config: AppConfig = serde_json::from_value(raw_value)
             .with_context(|| format!("Failed to parse legacy config {}", legacy_path.display()))?;
+        if !asr_auth_mode_present {
+            config.asr.auth_mode.clear();
+        }
         config.normalize();
         fill_missing_correction_text_fields(&mut config, correction_text_presence);
 
@@ -1257,6 +1299,7 @@ mod tests {
         assert_eq!(config.hotkeys, vec!["PageUp".to_string(), String::new()]);
         assert_eq!(config.hotkey_enabled, vec![true, false]);
         assert_eq!(config.asr.provider, "volcengine");
+        assert_eq!(config.asr.auth_mode, "api_key");
         assert_eq!(config.llm.endpoint, "https://api.openai.com/v1");
         assert_eq!(config.llm.api_format, "responses");
         assert!(config.asr.app_key.is_empty());
@@ -1284,6 +1327,30 @@ mod tests {
         assert_eq!(config.hotkeys, vec!["F8".to_string(), String::new()]);
         assert_eq!(config.hotkey_enabled, vec![true, false]);
         assert_eq!(config.active_hotkeys(), vec!["F8".to_string()]);
+    }
+
+    #[test]
+    fn missing_asr_auth_mode_with_app_key_uses_legacy_console() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value["asr"].as_object_mut().unwrap().remove("auth_mode");
+        value["asr"]["app_key"] = serde_json::json!("legacy-app-id");
+        value["asr"]["access_key"] = serde_json::json!("legacy-access-token");
+
+        let mut config: AppConfig = serde_json::from_value(value).unwrap();
+        config.normalize();
+
+        assert_eq!(config.asr.auth_mode, "legacy");
+    }
+
+    #[test]
+    fn missing_asr_auth_mode_without_app_key_uses_new_console() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value["asr"].as_object_mut().unwrap().remove("auth_mode");
+
+        let mut config: AppConfig = serde_json::from_value(value).unwrap();
+        config.normalize();
+
+        assert_eq!(config.asr.auth_mode, "api_key");
     }
 
     #[test]
@@ -1733,6 +1800,28 @@ mod tests {
         );
         assert_eq!(result.config.llm.provider_settings.len(), 1);
         assert_eq!(result.config.llm.provider_settings[0].provider, "custom");
+    }
+
+    #[test]
+    fn config_import_infers_legacy_asr_auth_mode_for_old_exports() {
+        let mut config_value = serde_json::to_value(AppConfig::default()).unwrap();
+        config_value["asr"]
+            .as_object_mut()
+            .unwrap()
+            .remove("auth_mode");
+        config_value["asr"]["app_key"] = serde_json::json!("legacy-app-id");
+        config_value["asr"]["access_key"] = serde_json::json!("legacy-access-token");
+        let raw = serde_json::json!({
+            "format": CONFIG_EXPORT_FORMAT,
+            "version": CONFIG_EXPORT_VERSION,
+            "exported_at": "2026-05-16T00:00:00Z",
+            "config": config_value
+        })
+        .to_string();
+
+        let result = ConfigStore::import_json(&raw).unwrap();
+
+        assert_eq!(result.config.asr.auth_mode, "legacy");
     }
 
     #[test]

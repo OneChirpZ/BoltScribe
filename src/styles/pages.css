@@ -100,6 +100,7 @@
 }
 
 .modifier-button:hover:not(:disabled) {
+  color: var(--text);
   border-color: var(--line-strong);
   background: #171b15;
 }
@@ -109,6 +110,12 @@
   border-color: rgba(245, 184, 75, 0.86);
   background: var(--amber);
   font-weight: 700;
+}
+
+.modifier-button.active:hover:not(:disabled) {
+  color: #151204;
+  border-color: rgba(255, 203, 99, 0.94);
+  background: linear-gradient(180deg, #ffd46b, #f5b84b);
 }
 
 .modifier-button:disabled {

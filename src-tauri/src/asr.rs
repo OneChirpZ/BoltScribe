@@ -223,7 +223,7 @@ fn live_asr_worker(
 
 fn build_full_request(config: &AsrConfig, audio_format: &str) -> Value {
     json!({
-        "user": { "uid": config.app_key },
+        "user": { "uid": request_uid(config) },
         "audio": {
             "format": audio_format,
             "codec": "raw",
@@ -240,6 +240,16 @@ fn build_full_request(config: &AsrConfig, audio_format: &str) -> Value {
             "show_utterances": true
         }
     })
+}
+
+fn request_uid(config: &AsrConfig) -> &str {
+    if uses_legacy_auth(config) {
+        let uid = config.app_key.trim();
+        if !uid.is_empty() {
+            return uid;
+        }
+    }
+    "boltscribe"
 }
 
 #[derive(Default)]
@@ -369,11 +379,13 @@ impl LiveAudioFramer {
 }
 
 fn validate_config(config: &AsrConfig) -> Result<()> {
-    if config.app_key.trim().is_empty() {
-        return Err(anyhow!("Volcengine app_key is required"));
+    if uses_legacy_auth(config) && config.app_key.trim().is_empty() {
+        return Err(anyhow!(
+            "Volcengine app_key is required for legacy ASR auth"
+        ));
     }
     if config.access_key.trim().is_empty() {
-        return Err(anyhow!("Volcengine access_key is required"));
+        return Err(anyhow!("Volcengine access_key/X-Api-Key is required"));
     }
     if config.resource_id.trim().is_empty() {
         return Err(anyhow!("Volcengine resource_id is required"));
@@ -393,19 +405,38 @@ fn build_ws_request(config: &AsrConfig, task_id: &str) -> Result<tungstenite::ht
         .into_client_request()
         .context("Invalid Volcengine ASR websocket URL")?;
     let headers = request.headers_mut();
-    headers.insert("X-Api-App-Key", HeaderValue::from_str(&config.app_key)?);
-    headers.insert(
-        "X-Api-Access-Key",
-        HeaderValue::from_str(&config.access_key)?,
-    );
+    if uses_legacy_auth(config) {
+        headers.insert(
+            "X-Api-App-Key",
+            HeaderValue::from_str(config.app_key.trim())?,
+        );
+        headers.insert(
+            "X-Api-Access-Key",
+            HeaderValue::from_str(config.access_key.trim())?,
+        );
+    } else {
+        headers.insert(
+            "X-Api-Key",
+            HeaderValue::from_str(config.access_key.trim())?,
+        );
+    }
     headers.insert(
         "X-Api-Resource-Id",
-        HeaderValue::from_str(&config.resource_id)?,
+        HeaderValue::from_str(config.resource_id.trim())?,
     );
     headers.insert("X-Api-Request-Id", HeaderValue::from_str(task_id)?);
     headers.insert("X-Api-Connect-Id", HeaderValue::from_str(task_id)?);
     headers.insert("X-Api-Sequence", HeaderValue::from_static("-1"));
     Ok(request)
+}
+
+fn uses_legacy_auth(config: &AsrConfig) -> bool {
+    match config.auth_mode.trim() {
+        "legacy" | "old_console" => true,
+        "api_key" | "new_console" | "x_api_key" => false,
+        "" => !config.app_key.trim().is_empty(),
+        _ => false,
+    }
 }
 
 fn set_socket_read_timeout(socket: &mut VolcengineSocket, timeout: Option<Duration>) -> Result<()> {
@@ -752,6 +783,51 @@ mod tests {
     }
 
     #[test]
+    fn validates_new_console_api_key_without_app_key() {
+        let config = test_asr_config("api_key", "", "new-api-key");
+        assert!(validate_config(&config).is_ok());
+    }
+
+    #[test]
+    fn legacy_console_auth_requires_app_key() {
+        let config = test_asr_config("legacy", "", "legacy-access-token");
+        assert!(validate_config(&config)
+            .unwrap_err()
+            .to_string()
+            .contains("app_key is required"));
+    }
+
+    #[test]
+    fn builds_new_console_api_key_headers_when_app_key_is_empty() {
+        let config = test_asr_config("api_key", "", "new-api-key");
+        let request = build_ws_request(&config, "task-id").unwrap();
+        let headers = request.headers();
+
+        assert_eq!(headers.get("X-Api-Key").unwrap(), "new-api-key");
+        assert!(headers.get("X-Api-App-Key").is_none());
+        assert!(headers.get("X-Api-Access-Key").is_none());
+        assert_eq!(
+            headers.get("X-Api-Resource-Id").unwrap(),
+            "volc.seedasr.sauc.duration"
+        );
+        assert_eq!(headers.get("X-Api-Sequence").unwrap(), "-1");
+    }
+
+    #[test]
+    fn builds_legacy_console_headers_when_app_key_is_present() {
+        let config = test_asr_config("legacy", "legacy-app-id", "legacy-access-token");
+        let request = build_ws_request(&config, "task-id").unwrap();
+        let headers = request.headers();
+
+        assert_eq!(headers.get("X-Api-App-Key").unwrap(), "legacy-app-id");
+        assert_eq!(
+            headers.get("X-Api-Access-Key").unwrap(),
+            "legacy-access-token"
+        );
+        assert!(headers.get("X-Api-Key").is_none());
+    }
+
+    #[test]
     fn response_state_waits_for_protocol_final_frame() {
         let mut state = AsrResponseState::default();
         let partial = json!({"result": {"text": "中间结果"}});
@@ -779,6 +855,20 @@ mod tests {
         assert!(state.apply_result(&final_value, true));
         assert_eq!(state.best_text, "最终结果");
         assert_eq!(state.service_duration_ms, Some(2400));
+    }
+
+    fn test_asr_config(auth_mode: &str, app_key: &str, access_key: &str) -> AsrConfig {
+        AsrConfig {
+            provider: "volcengine".to_string(),
+            auth_mode: auth_mode.to_string(),
+            app_key: app_key.to_string(),
+            access_key: access_key.to_string(),
+            resource_id: "volc.seedasr.sauc.duration".to_string(),
+            stream_url: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream".to_string(),
+            submit_url: String::new(),
+            query_url: String::new(),
+            language: "zh-CN".to_string(),
+        }
     }
 
     #[test]

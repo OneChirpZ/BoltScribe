@@ -14,6 +14,7 @@
   },
   "asr": {
     "provider": "volcengine",
+    "auth_mode": "api_key",
     "app_key": "",
     "access_key": "",
     "resource_id": "volc.seedasr.sauc.duration",

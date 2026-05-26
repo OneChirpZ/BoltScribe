@@ -216,6 +216,7 @@ let previewConfig: AppConfig = {
   },
   asr: {
     provider: "volcengine",
+    auth_mode: "api_key",
     app_key: "1575344452",
     access_key: "preview-access-key",
     resource_id: "volc.seedasr.sauc.duration",
