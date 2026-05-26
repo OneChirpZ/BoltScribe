@@ -106,6 +106,7 @@ export interface RetentionConfig {
 export interface SystemConfig {
   launch_at_login: boolean;
   hide_dock_icon: boolean;
+  fn_long_press_enabled: boolean;
 }
 
 export interface CorrectionConfig {

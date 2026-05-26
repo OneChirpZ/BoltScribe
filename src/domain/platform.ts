@@ -32,3 +32,7 @@ export function supportsOutputVolumeDucking() {
 export function supportsSoundSourceHotkeyFallback() {
   return runtimePlatform() === "macos";
 }
+
+export function supportsFnLongPressTrigger() {
+  return runtimePlatform() === "macos";
+}

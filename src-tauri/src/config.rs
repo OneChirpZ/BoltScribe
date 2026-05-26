@@ -139,12 +139,14 @@ pub struct RetentionConfig {
     pub max_storage_bytes: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SystemConfig {
     #[serde(default)]
     pub launch_at_login: bool,
     #[serde(default)]
     pub hide_dock_icon: bool,
+    #[serde(default = "default_fn_long_press_enabled")]
+    pub fn_long_press_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -436,6 +438,16 @@ impl Default for OutputVolumeDuckingConfig {
     }
 }
 
+impl Default for SystemConfig {
+    fn default() -> Self {
+        Self {
+            launch_at_login: false,
+            hide_dock_icon: false,
+            fn_long_press_enabled: default_fn_long_press_enabled(),
+        }
+    }
+}
+
 fn default_input_device_mode() -> String {
     "system_default".to_string()
 }
@@ -458,6 +470,10 @@ fn default_hotkey_slots() -> Vec<String> {
 
 fn default_hotkey_enabled_slots() -> Vec<bool> {
     vec![true, false]
+}
+
+fn default_fn_long_press_enabled() -> bool {
+    true
 }
 
 fn default_llm_provider() -> String {
@@ -1300,6 +1316,7 @@ mod tests {
         assert_eq!(config.hotkey_enabled, vec![true, false]);
         assert_eq!(config.asr.provider, "volcengine");
         assert_eq!(config.asr.auth_mode, "api_key");
+        assert!(config.system.fn_long_press_enabled);
         assert_eq!(config.llm.endpoint, "https://api.openai.com/v1");
         assert_eq!(config.llm.api_format, "responses");
         assert!(config.asr.app_key.is_empty());
@@ -1327,6 +1344,19 @@ mod tests {
         assert_eq!(config.hotkeys, vec!["F8".to_string(), String::new()]);
         assert_eq!(config.hotkey_enabled, vec![true, false]);
         assert_eq!(config.active_hotkeys(), vec!["F8".to_string()]);
+    }
+
+    #[test]
+    fn missing_fn_long_press_enabled_defaults_to_enabled() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value["system"]
+            .as_object_mut()
+            .unwrap()
+            .remove("fn_long_press_enabled");
+
+        let config: AppConfig = serde_json::from_value(value).unwrap();
+
+        assert!(config.system.fn_long_press_enabled);
     }
 
     #[test]

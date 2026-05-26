@@ -7,7 +7,7 @@ import ShortcutPicker from "../components/ShortcutPicker";
 import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrectionTemplates";
 import { soundSourceShortcutKeyOptions } from "../domain/hotkeys";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
-import { supportsDockVisibilityControl, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback } from "../domain/platform";
+import { supportsDockVisibilityControl, supportsFnLongPressTrigger, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback } from "../domain/platform";
 
 const maxHistoryRecords = 500;
 const bytesPerGb = 1024 * 1024 * 1024;
@@ -42,6 +42,7 @@ export default function SettingsPage({
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const storageGb = Number((config.retention.max_storage_bytes / bytesPerGb).toFixed(2));
   const canControlDockVisibility = supportsDockVisibilityControl();
+  const canUseFnLongPressTrigger = supportsFnLongPressTrigger();
   const canDuckOutputVolume = supportsOutputVolumeDucking();
   const canUseSoundSourceFallback = supportsSoundSourceHotkeyFallback();
   const outputDucking = outputVolumeDuckingConfig(config);
@@ -410,6 +411,16 @@ export default function SettingsPage({
               onChange={(event) => onChange({ ...config, system: { ...config.system, hide_dock_icon: event.target.checked } })}
             />
             {text.settings.hideDockIcon}
+          </label>
+        ) : null}
+        {canUseFnLongPressTrigger ? (
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={config.system.fn_long_press_enabled ?? true}
+              onChange={(event) => onChange({ ...config, system: { ...config.system, fn_long_press_enabled: event.target.checked } })}
+            />
+            {text.settings.fnLongPressTrigger}
           </label>
         ) : null}
       </div>
