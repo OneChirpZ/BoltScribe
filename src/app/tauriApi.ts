@@ -153,6 +153,13 @@ export function requestInputMonitoringPermission() {
   return invoke<boolean>("request_input_monitoring_permission");
 }
 
+export function applyFnTrigger(enabled: boolean, longPressDurationMs: number) {
+  if (browserPreviewEnabled()) {
+    return Promise.resolve();
+  }
+  return invoke("apply_fn_trigger", { enabled, longPressDurationMs });
+}
+
 export function openInputMonitoringSettings() {
   if (browserPreviewEnabled()) {
     return Promise.resolve();

@@ -30,6 +30,7 @@ export default function SettingsPage({
   inputMonitoringPermission,
   onRefreshInputMonitoring,
   onRequestInputMonitoring,
+  onApplyFnTrigger,
   importReport,
   canSave,
   text,
@@ -46,6 +47,7 @@ export default function SettingsPage({
   inputMonitoringPermission: PermissionRequestState;
   onRefreshInputMonitoring: () => void;
   onRequestInputMonitoring: () => void;
+  onApplyFnTrigger: (enabled: boolean) => void;
   importReport: ConfigImportReport | null;
   canSave: boolean;
   text: TextBundle;
@@ -110,6 +112,8 @@ export default function SettingsPage({
     onChange({ ...config, system: { ...config.system, fn_long_press_enabled: enabled } });
     if (enabled) {
       onRequestInputMonitoring();
+    } else {
+      onApplyFnTrigger(false);
     }
   }
 

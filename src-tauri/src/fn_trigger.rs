@@ -61,8 +61,6 @@ mod platform {
     const K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
     const K_CG_EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
     const K_CG_EVENT_FLAG_MASK_SECONDARY_FN: u64 = 0x0080_0000;
-    const K_IOHID_REQUEST_TYPE_LISTEN_EVENT: u32 = 1;
-    const K_IOHID_ACCESS_TYPE_GRANTED: i32 = 0;
 
     type CGEventRef = *mut c_void;
     type CGEventTapProxy = *mut c_void;
@@ -81,6 +79,7 @@ mod platform {
         ) -> CFMachPortRef;
         fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
         fn CGEventGetFlags(event: CGEventRef) -> u64;
+        fn CGEventTapIsEnabled(tap: CFMachPortRef) -> bool;
     }
 
     #[link(name = "CoreFoundation", kind = "framework")]
@@ -88,17 +87,13 @@ mod platform {
         fn CFMachPortInvalidate(port: CFMachPortRef);
     }
 
-    #[link(name = "IOKit", kind = "framework")]
+    #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
-        fn IOHIDCheckAccess(request_type: u32) -> i32;
-        fn IOHIDRequestAccess(request_type: u32) -> bool;
+        fn CGPreflightListenEventAccess() -> bool;
+        fn CGRequestListenEventAccess() -> bool;
     }
 
-    pub(super) fn apply(
-        app: &AppHandle,
-        enabled: bool,
-        long_press_duration_ms: u64,
-    ) -> Result<()> {
+    pub(super) fn apply(app: &AppHandle, enabled: bool, long_press_duration_ms: u64) -> Result<()> {
         if let Some(state) = STATE.get() {
             state.enabled.store(enabled, Ordering::SeqCst);
             state
@@ -134,15 +129,11 @@ mod platform {
     }
 
     pub(super) fn input_monitoring_permission_granted() -> bool {
-        unsafe {
-            IOHIDCheckAccess(K_IOHID_REQUEST_TYPE_LISTEN_EVENT) == K_IOHID_ACCESS_TYPE_GRANTED
-                || event_tap_available()
-        }
+        unsafe { CGPreflightListenEventAccess() }
     }
 
     pub(super) fn request_input_monitoring_permission() -> bool {
-        input_monitoring_permission_granted()
-            || unsafe { IOHIDRequestAccess(K_IOHID_REQUEST_TYPE_LISTEN_EVENT) }
+        input_monitoring_permission_granted() || unsafe { CGRequestListenEventAccess() }
     }
 
     pub(super) fn open_input_monitoring_settings() -> Result<()> {
@@ -151,24 +142,6 @@ mod platform {
             .status()
             .map(|_| ())
             .map_err(anyhow::Error::from)
-    }
-
-    unsafe fn event_tap_available() -> bool {
-        let event_mask = 1u64 << K_CG_EVENT_FLAGS_CHANGED;
-        let tap = CGEventTapCreate(
-            K_CG_HID_EVENT_TAP,
-            K_CG_HEAD_INSERT_EVENT_TAP,
-            K_CG_EVENT_TAP_OPTION_LISTEN_ONLY,
-            event_mask,
-            fn_event_callback,
-            std::ptr::null_mut(),
-        );
-        if tap.is_null() {
-            return false;
-        }
-        CFMachPortInvalidate(tap);
-        CFRelease(tap as *const c_void);
-        true
     }
 
     fn start_event_thread(state: Arc<FnTriggerState>) -> Result<()> {
@@ -214,6 +187,16 @@ mod platform {
 
             CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
             CGEventTapEnable(tap, true);
+            if !CGEventTapIsEnabled(tap) {
+                CFRelease(source as *const c_void);
+                CFMachPortInvalidate(tap);
+                CFRelease(tap as *const c_void);
+                drop(Arc::from_raw(state_ptr as *const FnTriggerState));
+                let _ = startup.send(Err(anyhow!(
+                    "Fn trigger event tap is disabled; re-enable Input Monitoring permission"
+                )));
+                return;
+            }
             let _ = startup.send(Ok(()));
             CFRunLoopRun();
 

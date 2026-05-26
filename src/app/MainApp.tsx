@@ -13,7 +13,7 @@ import HistoryRecordsPage from "../pages/HistoryRecordsPage";
 import ModelsPage from "../pages/ModelsPage";
 import CorrectionPage from "../pages/CorrectionPage";
 import SettingsPage from "../pages/SettingsPage";
-import { accessibilityPermissionGranted, copyTextToClipboard, exportConfig as exportConfigCommand, getAppVersion, getStatus, hideMainWindow, importConfig as importConfigCommand, inputMonitoringPermissionGranted, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadAudioInputDevices, loadAudioOutputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, openInputMonitoringSettings, requestAccessibilityPermission, requestInputMonitoringPermission as requestInputMonitoringPermissionCommand, requestMicrophonePermission as requestMicrophonePermissionCommand, saveConfig, toggleRecording as toggleRecordingCommand } from "./tauriApi";
+import { accessibilityPermissionGranted, applyFnTrigger, copyTextToClipboard, exportConfig as exportConfigCommand, getAppVersion, getStatus, hideMainWindow, importConfig as importConfigCommand, inputMonitoringPermissionGranted, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadAudioInputDevices, loadAudioOutputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, openInputMonitoringSettings, requestAccessibilityPermission, requestInputMonitoringPermission as requestInputMonitoringPermissionCommand, requestMicrophonePermission as requestMicrophonePermissionCommand, saveConfig, toggleRecording as toggleRecordingCommand } from "./tauriApi";
 
 const appIconUrl = new URL("../assets/app-icon.png", import.meta.url).href;
 const recentHistoryLimit = 6;
@@ -297,10 +297,30 @@ export default function MainApp() {
   }
 
   async function refreshInputMonitoring() {
+    setInputMonitoringPermission("checking");
     const granted = await inputMonitoringPermissionGranted();
-    setInputMonitoringGranted(granted);
-    setInputMonitoringPermission(granted ? "granted" : "denied");
-    return granted;
+    if (!granted) {
+      setInputMonitoringGranted(false);
+      setInputMonitoringPermission("denied");
+      return false;
+    }
+    if (configRef.current?.system.fn_long_press_enabled) {
+      let active = false;
+      try {
+        active = await applyCurrentFnTrigger(true);
+      } catch {
+        active = false;
+      }
+      setInputMonitoringGranted(active);
+      setInputMonitoringPermission(active ? "granted" : "denied");
+      if (!active) {
+        setNotice(text.permission.inputMonitoringNotice);
+      }
+      return active;
+    }
+    setInputMonitoringGranted(true);
+    setInputMonitoringPermission("granted");
+    return true;
   }
 
   async function openAccessibilityPermission() {
@@ -324,18 +344,47 @@ export default function MainApp() {
     try {
       const granted = await requestInputMonitoringPermissionCommand();
       const latest = granted || await refreshInputMonitoring();
-      setInputMonitoringGranted(latest);
-      setInputMonitoringPermission(latest ? "granted" : "denied");
       if (!latest) {
+        setInputMonitoringGranted(false);
+        setInputMonitoringPermission("denied");
         await openInputMonitoringSettings();
         setNotice(text.permission.inputMonitoringNotice);
-      } else {
-        setNotice(text.permission.inputMonitoringGranted);
+        return;
       }
+
+      if (configRef.current?.system.fn_long_press_enabled) {
+        let active = false;
+        try {
+          active = await applyCurrentFnTrigger(true);
+        } catch {
+          active = false;
+        }
+        setInputMonitoringGranted(active);
+        setInputMonitoringPermission(active ? "granted" : "denied");
+        if (!active) {
+          await openInputMonitoringSettings();
+          setNotice(text.permission.inputMonitoringNotice);
+          return;
+        }
+      } else {
+        setInputMonitoringGranted(true);
+        setInputMonitoringPermission("granted");
+      }
+      setNotice(text.permission.inputMonitoringGranted);
     } catch (error) {
+      setInputMonitoringGranted(false);
       setInputMonitoringPermission("denied");
       setNotice(String(error));
     }
+  }
+
+  async function applyCurrentFnTrigger(enabled = configRef.current?.system.fn_long_press_enabled ?? false) {
+    const currentConfig = configRef.current;
+    if (!currentConfig) {
+      return false;
+    }
+    await applyFnTrigger(enabled, currentConfig.system.fn_long_press_duration_ms ?? 200);
+    return true;
   }
 
   async function requestMicrophonePermission() {
@@ -504,6 +553,7 @@ export default function MainApp() {
             inputMonitoringPermission={inputMonitoringPermission}
             onRefreshInputMonitoring={() => { void refreshInputMonitoring().catch((error) => setNotice(String(error))); }}
             onRequestInputMonitoring={() => { void requestInputMonitoringPermission(); }}
+            onApplyFnTrigger={(enabled) => { void applyCurrentFnTrigger(enabled).catch((error) => setNotice(String(error))); }}
             importReport={configImportReport}
             canSave={canSave}
             text={text}
