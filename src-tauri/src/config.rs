@@ -1343,6 +1343,17 @@ mod tests {
     }
 
     #[test]
+    fn explicit_api_key_auth_mode_survives_leftover_app_key() {
+        let mut config = AppConfig::default();
+        config.asr.auth_mode = "api_key".to_string();
+        config.asr.app_key = "legacy-app-id".to_string();
+
+        config.normalize();
+
+        assert_eq!(config.asr.auth_mode, "api_key");
+    }
+
+    #[test]
     fn missing_asr_auth_mode_without_app_key_uses_new_console() {
         let mut value = serde_json::to_value(AppConfig::default()).unwrap();
         value["asr"].as_object_mut().unwrap().remove("auth_mode");

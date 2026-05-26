@@ -814,6 +814,17 @@ mod tests {
     }
 
     #[test]
+    fn explicit_new_console_auth_ignores_leftover_app_key() {
+        let config = test_asr_config("api_key", "legacy-app-id", "new-api-key");
+        let request = build_ws_request(&config, "task-id").unwrap();
+        let headers = request.headers();
+
+        assert_eq!(headers.get("X-Api-Key").unwrap(), "new-api-key");
+        assert!(headers.get("X-Api-App-Key").is_none());
+        assert!(headers.get("X-Api-Access-Key").is_none());
+    }
+
+    #[test]
     fn builds_legacy_console_headers_when_app_key_is_present() {
         let config = test_asr_config("legacy", "legacy-app-id", "legacy-access-token");
         let request = build_ws_request(&config, "task-id").unwrap();
