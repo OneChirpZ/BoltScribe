@@ -15,6 +15,39 @@
   gap: 10px;
 }
 
+.trigger-permission-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.trigger-permission-row > span {
+  min-width: 0;
+}
+
+.trigger-permission-row > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.permission-ok {
+  color: var(--green);
+}
+
+.permission-missing {
+  color: var(--amber);
+}
+
 .shortcut-picker {
   display: grid;
   gap: 10px;

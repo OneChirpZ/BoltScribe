@@ -483,7 +483,7 @@ fn default_hotkey_enabled_slots() -> Vec<bool> {
 }
 
 fn default_fn_long_press_enabled() -> bool {
-    true
+    false
 }
 
 fn default_fn_long_press_duration_ms() -> u64 {
@@ -1330,7 +1330,7 @@ mod tests {
         assert_eq!(config.hotkey_enabled, vec![true, false]);
         assert_eq!(config.asr.provider, "volcengine");
         assert_eq!(config.asr.auth_mode, "api_key");
-        assert!(config.system.fn_long_press_enabled);
+        assert!(!config.system.fn_long_press_enabled);
         assert_eq!(config.system.fn_long_press_duration_ms, 200);
         assert_eq!(config.llm.endpoint, "https://api.openai.com/v1");
         assert_eq!(config.llm.api_format, "responses");
@@ -1362,7 +1362,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_fn_long_press_enabled_defaults_to_enabled() {
+    fn missing_fn_long_press_enabled_defaults_to_disabled() {
         let mut value = serde_json::to_value(AppConfig::default()).unwrap();
         value["system"]
             .as_object_mut()
@@ -1371,7 +1371,7 @@ mod tests {
 
         let config: AppConfig = serde_json::from_value(value).unwrap();
 
-        assert!(config.system.fn_long_press_enabled);
+        assert!(!config.system.fn_long_press_enabled);
     }
 
     #[test]

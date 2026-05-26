@@ -176,18 +176,40 @@ pub(crate) fn open_accessibility_settings() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) fn input_monitoring_permission_granted() -> bool {
-    fn_trigger::input_monitoring_permission_granted()
+pub(crate) fn input_monitoring_permission_granted(app: tauri::AppHandle<Wry>) -> bool {
+    let granted = fn_trigger::input_monitoring_permission_granted();
+    if granted {
+        apply_saved_fn_trigger(&app);
+    }
+    granted
 }
 
 #[tauri::command]
-pub(crate) fn request_input_monitoring_permission() -> bool {
-    fn_trigger::request_input_monitoring_permission()
+pub(crate) fn request_input_monitoring_permission(app: tauri::AppHandle<Wry>) -> bool {
+    let granted = fn_trigger::request_input_monitoring_permission();
+    if granted {
+        apply_saved_fn_trigger(&app);
+    }
+    granted
 }
 
 #[tauri::command]
 pub(crate) fn open_input_monitoring_settings() -> Result<(), String> {
     fn_trigger::open_input_monitoring_settings().map_err(|err| err.to_string())
+}
+
+fn apply_saved_fn_trigger(app: &tauri::AppHandle<Wry>) {
+    let config = config::ConfigStore::load().unwrap_or_default();
+    if !config.system.fn_long_press_enabled {
+        return;
+    }
+    if let Err(err) = fn_trigger::apply(
+        app,
+        true,
+        config.system.fn_long_press_duration_ms,
+    ) {
+        eprintln!("failed to apply Fn long-press trigger after permission grant: {err:?}");
+    }
 }
 
 #[tauri::command]

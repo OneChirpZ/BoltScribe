@@ -136,6 +136,7 @@ mod platform {
     pub(super) fn input_monitoring_permission_granted() -> bool {
         unsafe {
             IOHIDCheckAccess(K_IOHID_REQUEST_TYPE_LISTEN_EVENT) == K_IOHID_ACCESS_TYPE_GRANTED
+                || event_tap_available()
         }
     }
 
@@ -150,6 +151,24 @@ mod platform {
             .status()
             .map(|_| ())
             .map_err(anyhow::Error::from)
+    }
+
+    unsafe fn event_tap_available() -> bool {
+        let event_mask = 1u64 << K_CG_EVENT_FLAGS_CHANGED;
+        let tap = CGEventTapCreate(
+            K_CG_HID_EVENT_TAP,
+            K_CG_HEAD_INSERT_EVENT_TAP,
+            K_CG_EVENT_TAP_OPTION_LISTEN_ONLY,
+            event_mask,
+            fn_event_callback,
+            std::ptr::null_mut(),
+        );
+        if tap.is_null() {
+            return false;
+        }
+        CFMachPortInvalidate(tap);
+        CFRelease(tap as *const c_void);
+        true
     }
 
     fn start_event_thread(state: Arc<FnTriggerState>) -> Result<()> {

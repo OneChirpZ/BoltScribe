@@ -5,37 +5,24 @@ import type { TextBundle } from "../domain/i18n";
 export default function PermissionGuide({
   accessibilityGranted,
   requiresAccessibility,
-  inputMonitoringGranted,
-  requiresInputMonitoring,
-  inputMonitoringPermission,
   microphonePermission,
   onClose,
   onRefreshAccessibility,
   onOpenAccessibility,
-  onRefreshInputMonitoring,
-  onRequestInputMonitoring,
-  onOpenInputMonitoring,
   onRequestMicrophone,
   text,
 }: {
   accessibilityGranted: boolean | null;
   requiresAccessibility: boolean;
-  inputMonitoringGranted: boolean | null;
-  requiresInputMonitoring: boolean;
-  inputMonitoringPermission: PermissionRequestState;
   microphonePermission: PermissionRequestState;
   onClose: () => void;
   onRefreshAccessibility: () => void;
   onOpenAccessibility: () => void;
-  onRefreshInputMonitoring: () => void;
-  onRequestInputMonitoring: () => void;
-  onOpenInputMonitoring: () => void;
   onRequestMicrophone: () => void;
   text: TextBundle;
 }) {
   const allPermissionsGranted =
     (!requiresAccessibility || accessibilityGranted === true)
-    && (!requiresInputMonitoring || inputMonitoringGranted === true)
     && microphonePermission === "granted";
 
   return (
@@ -66,28 +53,6 @@ export default function PermissionGuide({
               )}
             />
           ) : null}
-          {requiresInputMonitoring ? (
-            <PermissionCard
-              title={text.permission.inputMonitoring}
-              status={inputMonitoringStatusLabel(inputMonitoringPermission, inputMonitoringGranted, text)}
-              tone={inputMonitoringGranted ? "ok" : inputMonitoringPermission === "checking" ? "muted" : "danger"}
-              description={text.permission.inputMonitoringDescription}
-              actions={(
-                <>
-                  <button className="secondary small" type="button" onClick={onRefreshInputMonitoring}>{text.permission.recheck}</button>
-                  <button
-                    className="primary small"
-                    type="button"
-                    disabled={inputMonitoringPermission === "checking"}
-                    onClick={onRequestInputMonitoring}
-                  >
-                    {inputMonitoringPermission === "checking" ? text.common.checking : text.permission.requestInputMonitoring}
-                  </button>
-                  <button className="secondary small" type="button" onClick={onOpenInputMonitoring}>{text.permission.openSettings}</button>
-                </>
-              )}
-            />
-          ) : null}
           <PermissionCard
             title={text.permission.microphone}
             status={microphoneStatusLabel(microphonePermission, text)}
@@ -111,20 +76,6 @@ export default function PermissionGuide({
       </section>
     </div>
   );
-}
-
-function inputMonitoringStatusLabel(status: PermissionRequestState, granted: boolean | null, text: TextBundle) {
-  if (granted === true) {
-    return text.permission.statusEnabled;
-  }
-  switch (status) {
-    case "checking":
-      return text.common.checking;
-    case "denied":
-      return text.permission.statusDisabled;
-    default:
-      return text.permission.statusNotRequested;
-  }
 }
 
 function microphoneStatusLabel(status: PermissionRequestState, text: TextBundle) {

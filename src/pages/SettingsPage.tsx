@@ -7,6 +7,7 @@ import ShortcutPicker from "../components/ShortcutPicker";
 import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrectionTemplates";
 import { hotkeyEnabledSlots, hotkeySlots, soundSourceShortcutKeyOptions, updateHotkey, updateHotkeyEnabled } from "../domain/hotkeys";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
+import type { PermissionRequestState } from "../domain/permissions";
 import { supportsDockVisibilityControl, supportsFnLongPressTrigger, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback } from "../domain/platform";
 
 const maxHistoryRecords = 500;
@@ -25,6 +26,10 @@ export default function SettingsPage({
   onExportConfig,
   onImportConfig,
   onRefreshAudioDevices,
+  inputMonitoringGranted,
+  inputMonitoringPermission,
+  onRefreshInputMonitoring,
+  onRequestInputMonitoring,
   importReport,
   canSave,
   text,
@@ -37,6 +42,10 @@ export default function SettingsPage({
   onExportConfig: () => void;
   onImportConfig: (file: File) => void;
   onRefreshAudioDevices: () => void;
+  inputMonitoringGranted: boolean | null;
+  inputMonitoringPermission: PermissionRequestState;
+  onRefreshInputMonitoring: () => void;
+  onRequestInputMonitoring: () => void;
   importReport: ConfigImportReport | null;
   canSave: boolean;
   text: TextBundle;
@@ -95,6 +104,13 @@ export default function SettingsPage({
   function updateFnLongPressDuration(value: string) {
     const fn_long_press_duration_ms = clampInt(Number(value), minFnLongPressDurationMs, maxFnLongPressDurationMs);
     onChange({ ...config, system: { ...config.system, fn_long_press_duration_ms } });
+  }
+
+  function updateFnLongPressEnabled(enabled: boolean) {
+    onChange({ ...config, system: { ...config.system, fn_long_press_enabled: enabled } });
+    if (enabled) {
+      onRequestInputMonitoring();
+    }
   }
 
   function updateAudioInputDevice(value: string) {
@@ -203,8 +219,8 @@ export default function SettingsPage({
             <label className="toggle-row">
               <input
                 type="checkbox"
-                checked={config.system.fn_long_press_enabled ?? true}
-                onChange={(event) => onChange({ ...config, system: { ...config.system, fn_long_press_enabled: event.target.checked } })}
+                checked={config.system.fn_long_press_enabled ?? false}
+                onChange={(event) => updateFnLongPressEnabled(event.target.checked)}
               />
               {text.settings.fnLongPressTrigger}
             </label>
@@ -222,6 +238,22 @@ export default function SettingsPage({
                 <span>{text.common.milliseconds}</span>
               </div>
             </Field>
+            {config.system.fn_long_press_enabled ? (
+              <div className="trigger-permission-row">
+                <span>
+                  {text.permission.inputMonitoring}：
+                  <strong className={inputMonitoringGranted ? "permission-ok" : "permission-missing"}>
+                    {inputMonitoringPermissionLabel(inputMonitoringPermission, inputMonitoringGranted, text)}
+                  </strong>
+                </span>
+                <div>
+                  <button className="secondary small" type="button" onClick={onRefreshInputMonitoring}>{text.permission.recheck}</button>
+                  <button className="secondary small" type="button" onClick={onRequestInputMonitoring} disabled={inputMonitoringPermission === "checking"}>
+                    {inputMonitoringPermission === "checking" ? text.common.checking : text.permission.requestInputMonitoring}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -503,6 +535,19 @@ function ConfigImportReportView({
       <ReportList title={text.settings.importNotes} items={report.notes} />
     </div>
   );
+}
+
+function inputMonitoringPermissionLabel(status: PermissionRequestState, granted: boolean | null, text: TextBundle) {
+  if (granted === true) {
+    return text.permission.statusEnabled;
+  }
+  if (status === "checking") {
+    return text.common.checking;
+  }
+  if (status === "denied") {
+    return text.permission.statusDisabled;
+  }
+  return text.permission.statusNotRequested;
 }
 
 function ReportList({ title, items }: { title: string; items: string[] }) {

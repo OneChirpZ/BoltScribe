@@ -20,10 +20,6 @@ export function requiresAccessibilityPermission() {
   return runtimePlatform() === "macos";
 }
 
-export function requiresInputMonitoringPermission() {
-  return runtimePlatform() === "macos";
-}
-
 export function supportsDockVisibilityControl() {
   return runtimePlatform() === "macos";
 }
