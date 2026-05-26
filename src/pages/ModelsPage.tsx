@@ -3,10 +3,8 @@ import type { AppConfig, LlmProviderSettings, RaceModelTarget } from "../types";
 import Field from "../components/Field";
 import HelpTip from "../components/HelpTip";
 import PanelHeader from "../components/PanelHeader";
-import ShortcutPicker from "../components/ShortcutPicker";
 import type { TextBundle } from "../domain/i18n";
 import { defaultRecordingOverlayScale, maxRecordingOverlayScale, minRecordingOverlayScale } from "../domain/overlay";
-import { hotkeyEnabledSlots, hotkeySlots, updateHotkey, updateHotkeyEnabled } from "../domain/hotkeys";
 import { optionalNumber } from "../domain/numbers";
 import { builtInModelsForProvider, deleteModelPreset, modelsForProvider, providerLabel, providerPresets, saveModelPreset, thinkingEfforts } from "../domain/providers";
 
@@ -34,8 +32,6 @@ export default function ModelsPage({
   );
   const [showAsrAccessKey, setShowAsrAccessKey] = useState(false);
   const [showLlmApiKey, setShowLlmApiKey] = useState(false);
-  const shortcutSlots = hotkeySlots(config);
-  const shortcutEnabledSlots = hotkeyEnabledSlots(config);
   const builtInModels = builtInModelsForProvider(providerKey);
   const canDeletePreset = selectedPresetModel !== "__custom__" && !builtInModels.includes(selectedPresetModel);
   const raceModels = config.llm.race_models ?? [];
@@ -151,30 +147,6 @@ export default function ModelsPage({
   return (
     <section className="panel page-stack">
       <PanelHeader title={text.models.title} action={<button className="primary small" disabled={!canSave} onClick={onSave}>{text.common.save}</button>} />
-
-      <div className="settings-section">
-        <div className="section-title">
-          <h2>{text.models.shortcuts}</h2>
-        </div>
-        <div className="shortcut-grid">
-          <ShortcutPicker
-            label={text.models.shortcut1}
-            enabled={shortcutEnabledSlots[0]}
-            value={shortcutSlots[0]}
-            onEnabledChange={(enabled) => onChange(updateHotkeyEnabled(config, 0, enabled))}
-            onChange={(value) => onChange(updateHotkey(config, 0, value))}
-            text={text}
-          />
-          <ShortcutPicker
-            label={text.models.shortcut2}
-            enabled={shortcutEnabledSlots[1]}
-            value={shortcutSlots[1]}
-            onEnabledChange={(enabled) => onChange(updateHotkeyEnabled(config, 1, enabled))}
-            onChange={(value) => onChange(updateHotkey(config, 1, value))}
-            text={text}
-          />
-        </div>
-      </div>
 
       <div className="settings-section">
         <div className="section-title">

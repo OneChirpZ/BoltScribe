@@ -42,6 +42,8 @@ mod platform {
     const K_CG_EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
     const K_CG_EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
     const K_CG_EVENT_FLAG_MASK_SECONDARY_FN: u64 = 0x0080_0000;
+    const K_IOHID_REQUEST_TYPE_LISTEN_EVENT: u32 = 1;
+    const K_IOHID_ACCESS_TYPE_GRANTED: i32 = 0;
 
     type CGEventRef = *mut c_void;
     type CGEventTapProxy = *mut c_void;
@@ -67,6 +69,12 @@ mod platform {
         fn CFMachPortInvalidate(port: CFMachPortRef);
     }
 
+    #[link(name = "IOKit", kind = "framework")]
+    extern "C" {
+        fn IOHIDCheckAccess(request_type: u32) -> i32;
+        fn IOHIDRequestAccess(request_type: u32) -> bool;
+    }
+
     pub(super) fn apply(app: &AppHandle, enabled: bool) -> Result<()> {
         if let Some(state) = STATE.get() {
             state.enabled.store(enabled, Ordering::SeqCst);
@@ -76,6 +84,7 @@ mod platform {
             return Ok(());
         }
 
+        request_input_monitoring_access()?;
         let state = Arc::new(FnTriggerState {
             app: app.clone(),
             enabled: AtomicBool::new(true),
@@ -86,6 +95,22 @@ mod platform {
         start_event_thread(state.clone())?;
         let _ = STATE.set(state);
         Ok(())
+    }
+
+    fn request_input_monitoring_access() -> Result<()> {
+        unsafe {
+            if IOHIDCheckAccess(K_IOHID_REQUEST_TYPE_LISTEN_EVENT)
+                == K_IOHID_ACCESS_TYPE_GRANTED
+            {
+                return Ok(());
+            }
+            if IOHIDRequestAccess(K_IOHID_REQUEST_TYPE_LISTEN_EVENT) {
+                return Ok(());
+            }
+        }
+        Err(anyhow!(
+            "Input Monitoring permission is required for Fn long-press trigger"
+        ))
     }
 
     fn start_event_thread(state: Arc<FnTriggerState>) -> Result<()> {

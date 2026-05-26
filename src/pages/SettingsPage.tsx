@@ -5,7 +5,7 @@ import HelpTip from "../components/HelpTip";
 import PanelHeader from "../components/PanelHeader";
 import ShortcutPicker from "../components/ShortcutPicker";
 import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrectionTemplates";
-import { soundSourceShortcutKeyOptions } from "../domain/hotkeys";
+import { hotkeyEnabledSlots, hotkeySlots, soundSourceShortcutKeyOptions, updateHotkey, updateHotkeyEnabled } from "../domain/hotkeys";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
 import { supportsDockVisibilityControl, supportsFnLongPressTrigger, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback } from "../domain/platform";
 
@@ -45,6 +45,8 @@ export default function SettingsPage({
   const canUseFnLongPressTrigger = supportsFnLongPressTrigger();
   const canDuckOutputVolume = supportsOutputVolumeDucking();
   const canUseSoundSourceFallback = supportsSoundSourceHotkeyFallback();
+  const shortcutSlots = hotkeySlots(config);
+  const shortcutEnabledSlots = hotkeyEnabledSlots(config);
   const outputDucking = outputVolumeDuckingConfig(config);
   const defaultOutputDevice = audioOutputDevices.find((device) => device.is_default) ?? null;
   const defaultOutputDeviceUsesMuteFallback =
@@ -165,6 +167,42 @@ export default function SettingsPage({
             </select>
           </Field>
         </div>
+      </div>
+
+      <div className="settings-section">
+        <div className="section-title">
+          <h2>{text.settings.inputTriggers}</h2>
+        </div>
+        <div className="shortcut-grid">
+          <ShortcutPicker
+            label={text.settings.shortcut1}
+            enabled={shortcutEnabledSlots[0]}
+            value={shortcutSlots[0]}
+            onEnabledChange={(enabled) => onChange(updateHotkeyEnabled(config, 0, enabled))}
+            onChange={(value) => onChange(updateHotkey(config, 0, value))}
+            text={text}
+          />
+          <ShortcutPicker
+            label={text.settings.shortcut2}
+            enabled={shortcutEnabledSlots[1]}
+            value={shortcutSlots[1]}
+            onEnabledChange={(enabled) => onChange(updateHotkeyEnabled(config, 1, enabled))}
+            onChange={(value) => onChange(updateHotkey(config, 1, value))}
+            text={text}
+          />
+        </div>
+        {canUseFnLongPressTrigger ? (
+          <div className="trigger-options">
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={config.system.fn_long_press_enabled ?? true}
+                onChange={(event) => onChange({ ...config, system: { ...config.system, fn_long_press_enabled: event.target.checked } })}
+              />
+              {text.settings.fnLongPressTrigger}
+            </label>
+          </div>
+        ) : null}
       </div>
 
       <div className="settings-section">
@@ -411,16 +449,6 @@ export default function SettingsPage({
               onChange={(event) => onChange({ ...config, system: { ...config.system, hide_dock_icon: event.target.checked } })}
             />
             {text.settings.hideDockIcon}
-          </label>
-        ) : null}
-        {canUseFnLongPressTrigger ? (
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={config.system.fn_long_press_enabled ?? true}
-              onChange={(event) => onChange({ ...config, system: { ...config.system, fn_long_press_enabled: event.target.checked } })}
-            />
-            {text.settings.fnLongPressTrigger}
           </label>
         ) : null}
       </div>

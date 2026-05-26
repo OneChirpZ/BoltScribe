@@ -4,6 +4,8 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>BoltScribe 需要麦克风权限来录制语音并转写为文本。</string>
+  <key>NSInputMonitoringUsageDescription</key>
+  <string>BoltScribe 需要输入监控权限来监听 Fn 长按并开始或停止语音输入。</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>BoltScribe 需要自动化权限来把纠错后的文本粘贴到当前应用。</string>
 </dict>

@@ -10,6 +10,11 @@
   gap: 14px;
 }
 
+.trigger-options {
+  display: grid;
+  gap: 10px;
+}
+
 .shortcut-picker {
   display: grid;
   gap: 10px;
