@@ -43,6 +43,7 @@ export default function ModelsPage({
   const raceTargetKeys = new Set(raceTargets.map(raceTargetKey));
   const raceTargetOptions = allRaceTargetOptions(config);
   const asrAuthMode = config.asr.auth_mode === "legacy" ? "legacy" : "api_key";
+  const asrAccessKeyLabel = asrAuthMode === "legacy" ? text.models.accessKeyLegacy : text.models.accessKeyApiKey;
 
   useEffect(() => {
     setSelectedPresetModel(presetModels.some((model) => model === config.llm.model) ? config.llm.model : "__custom__");
@@ -92,6 +93,10 @@ export default function ModelsPage({
       ? [currentTarget]
       : raceTargets;
     onChange({ ...config, llm: { ...config.llm, race_enabled: enabled, race_targets: nextRaceTargets, race_models: legacyRaceModels(providerKey, nextRaceTargets) } });
+  }
+
+  function updateAsrAuthMode(auth_mode: string) {
+    onChange({ ...config, asr: { ...config.asr, auth_mode } });
   }
 
   function toggleRaceTarget(target: RaceModelTarget, checked: boolean) {
@@ -177,7 +182,7 @@ export default function ModelsPage({
         </div>
         <div className="form-grid">
           <Field label={text.models.asrAuthMode}>
-            <select value={asrAuthMode} onChange={(event) => onChange({ ...config, asr: { ...config.asr, auth_mode: event.target.value } })}>
+            <select value={asrAuthMode} onChange={(event) => updateAsrAuthMode(event.target.value)}>
               <option value="api_key">{text.models.asrAuthModeNew}</option>
               <option value="legacy">{text.models.asrAuthModeLegacy}</option>
             </select>
@@ -185,10 +190,12 @@ export default function ModelsPage({
           <Field label={text.models.asrLanguage}>
             <input value={config.asr.language} onChange={(event) => onChange({ ...config, asr: { ...config.asr, language: event.target.value } })} />
           </Field>
-          <Field label={text.models.appKey}>
-            <input value={config.asr.app_key} onChange={(event) => onChange({ ...config, asr: { ...config.asr, app_key: event.target.value } })} />
-          </Field>
-          <Field label={text.models.accessKey}>
+          {asrAuthMode === "legacy" ? (
+            <Field label={text.models.appKey}>
+              <input value={config.asr.app_key} onChange={(event) => onChange({ ...config, asr: { ...config.asr, app_key: event.target.value } })} />
+            </Field>
+          ) : null}
+          <Field label={asrAccessKeyLabel}>
             <div className="secret-field">
               <input
                 type={showAsrAccessKey ? "text" : "password"}
@@ -199,7 +206,7 @@ export default function ModelsPage({
                 className={`icon-button secret-toggle${showAsrAccessKey ? " visible" : ""}`}
                 type="button"
                 onClick={() => setShowAsrAccessKey((visible) => !visible)}
-                aria-label={showAsrAccessKey ? text.models.hideAccessKey : text.models.showAccessKey}
+                aria-label={showAsrAccessKey ? text.models.hideAccessKey(asrAccessKeyLabel) : text.models.showAccessKey(asrAccessKeyLabel)}
               >
                 <SecretEyeIcon visible={showAsrAccessKey} />
               </button>

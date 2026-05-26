@@ -18,11 +18,13 @@
   border-radius: var(--radius);
   padding: 14px;
   background: rgba(255, 255, 255, 0.025);
-  transition: border-color 140ms ease, background 140ms ease;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
 }
 
-.shortcut-picker:hover {
-  border-color: var(--line-strong);
+.shortcut-picker:hover:not(.disabled) {
+  border-color: rgba(245, 184, 75, 0.36);
+  box-shadow: 0 10px 26px rgba(245, 184, 75, 0.12);
+  transform: translateY(-1px);
 }
 
 .shortcut-picker.disabled {
@@ -96,13 +98,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
 }
 
 .modifier-button:hover:not(:disabled) {
-  color: var(--text);
-  border-color: var(--line-strong);
-  background: #171b15;
+  border-color: rgba(245, 184, 75, 0.32);
+  box-shadow: 0 8px 18px rgba(245, 184, 75, 0.12);
+  transform: translateY(-1px);
 }
 
 .modifier-button.active {
@@ -114,8 +116,9 @@
 
 .modifier-button.active:hover:not(:disabled) {
   color: #151204;
-  border-color: rgba(255, 203, 99, 0.94);
-  background: linear-gradient(180deg, #ffd46b, #f5b84b);
+  border-color: rgba(245, 184, 75, 0.86);
+  background: var(--amber);
+  box-shadow: 0 8px 20px rgba(245, 184, 75, 0.18);
 }
 
 .modifier-button:disabled {
