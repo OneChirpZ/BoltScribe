@@ -24,10 +24,11 @@ mod workflow;
 
 use commands::{
     accessibility_permission_granted, cancel_current_workflow, copy_text_to_clipboard,
-    export_config, get_status, hide_main_window, import_config, load_audio_input_devices,
-    load_audio_output_devices, load_config, load_history, load_stats, open_accessibility_settings,
-    open_app_dir, request_accessibility_permission, request_microphone_permission, save_config,
-    toggle_recording,
+    export_config, get_status, hide_main_window, import_config, input_monitoring_permission_granted,
+    load_audio_input_devices, load_audio_output_devices, load_config, load_history, load_stats,
+    open_accessibility_settings, open_app_dir, open_input_monitoring_settings,
+    request_accessibility_permission, request_input_monitoring_permission,
+    request_microphone_permission, save_config, toggle_recording,
 };
 use tauri::{Emitter, RunEvent};
 
@@ -85,6 +86,9 @@ fn main() {
             accessibility_permission_granted,
             request_accessibility_permission,
             open_accessibility_settings,
+            input_monitoring_permission_granted,
+            request_input_monitoring_permission,
+            open_input_monitoring_settings,
             request_microphone_permission,
             copy_text_to_clipboard
         ])

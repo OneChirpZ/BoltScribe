@@ -3,7 +3,7 @@ import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport
 import type { Page } from "../domain/navigation";
 import type { PermissionRequestState } from "../domain/permissions";
 import { appLanguage, translations } from "../domain/i18n";
-import { requiresAccessibilityPermission } from "../domain/platform";
+import { requiresAccessibilityPermission, requiresInputMonitoringPermission } from "../domain/platform";
 import { emptyStatus } from "../domain/workflow";
 import NavButton from "../components/NavButton";
 import InputStatsCard from "../components/InputStatsCard";
@@ -13,7 +13,7 @@ import HistoryRecordsPage from "../pages/HistoryRecordsPage";
 import ModelsPage from "../pages/ModelsPage";
 import CorrectionPage from "../pages/CorrectionPage";
 import SettingsPage from "../pages/SettingsPage";
-import { accessibilityPermissionGranted, copyTextToClipboard, exportConfig as exportConfigCommand, getAppVersion, getStatus, hideMainWindow, importConfig as importConfigCommand, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadAudioInputDevices, loadAudioOutputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, requestAccessibilityPermission, requestMicrophonePermission as requestMicrophonePermissionCommand, saveConfig, toggleRecording as toggleRecordingCommand } from "./tauriApi";
+import { accessibilityPermissionGranted, copyTextToClipboard, exportConfig as exportConfigCommand, getAppVersion, getStatus, hideMainWindow, importConfig as importConfigCommand, inputMonitoringPermissionGranted, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadAudioInputDevices, loadAudioOutputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, openInputMonitoringSettings, requestAccessibilityPermission, requestInputMonitoringPermission as requestInputMonitoringPermissionCommand, requestMicrophonePermission as requestMicrophonePermissionCommand, saveConfig, toggleRecording as toggleRecordingCommand } from "./tauriApi";
 
 const appIconUrl = new URL("../assets/app-icon.png", import.meta.url).href;
 const recentHistoryLimit = 6;
@@ -25,6 +25,7 @@ type PendingConfigAction =
 
 export default function MainApp() {
   const needsAccessibilityPermission = requiresAccessibilityPermission();
+  const needsInputMonitoringPermission = requiresInputMonitoringPermission();
   const [page, setPage] = useState<Page>("home");
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [savedConfig, setSavedConfig] = useState<AppConfig | null>(null);
@@ -41,6 +42,8 @@ export default function MainApp() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [accessibilityGranted, setAccessibilityGranted] = useState<boolean | null>(null);
+  const [inputMonitoringGranted, setInputMonitoringGranted] = useState<boolean | null>(null);
+  const [inputMonitoringPermission, setInputMonitoringPermission] = useState<PermissionRequestState>("unknown");
   const [microphonePermission, setMicrophonePermission] = useState<PermissionRequestState>("unknown");
   const [showPermissionGuide, setShowPermissionGuide] = useState(false);
   const [pendingConfigAction, setPendingConfigAction] = useState<PendingConfigAction | null>(null);
@@ -94,19 +97,22 @@ export default function MainApp() {
   }
 
   async function refreshAll() {
-    const [loadedConfig, loadedStatus, records, loadedStats, hasAccessibility] = await Promise.all([
+    const [loadedConfig, loadedStatus, records, loadedStats, hasAccessibility, hasInputMonitoring] = await Promise.all([
       loadConfig(),
       getStatus(),
       loadHistory(recentHistoryLimit),
       loadStats(),
       accessibilityPermissionGranted(),
+      inputMonitoringPermissionGranted(),
     ]);
     applyLoadedConfig(loadedConfig);
     setStatus(loadedStatus);
     setHistory(records);
     setStats(loadedStats);
     setAccessibilityGranted(hasAccessibility);
-    if (needsAccessibilityPermission && !hasAccessibility) {
+    setInputMonitoringGranted(hasInputMonitoring);
+    setInputMonitoringPermission(hasInputMonitoring ? "granted" : "denied");
+    if ((needsAccessibilityPermission && !hasAccessibility) || (needsInputMonitoringPermission && !hasInputMonitoring)) {
       setShowPermissionGuide(true);
     }
   }
@@ -164,6 +170,17 @@ export default function MainApp() {
     }, 2000);
     return () => window.clearInterval(timer);
   }, [accessibilityGranted]);
+
+  useEffect(() => {
+    if (!needsInputMonitoringPermission || inputMonitoringGranted !== false) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      refreshInputMonitoring().catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [inputMonitoringGranted]);
 
   useEffect(() => {
     if (!notice) {
@@ -282,6 +299,13 @@ export default function MainApp() {
     return granted;
   }
 
+  async function refreshInputMonitoring() {
+    const granted = await inputMonitoringPermissionGranted();
+    setInputMonitoringGranted(granted);
+    setInputMonitoringPermission(granted ? "granted" : "denied");
+    return granted;
+  }
+
   async function openAccessibilityPermission() {
     try {
       const granted = await requestAccessibilityPermission();
@@ -293,6 +317,34 @@ export default function MainApp() {
       } else {
         setNotice(text.permission.accessibilityGranted);
       }
+    } catch (error) {
+      setNotice(String(error));
+    }
+  }
+
+  async function requestInputMonitoringPermission() {
+    setInputMonitoringPermission("checking");
+    try {
+      const granted = await requestInputMonitoringPermissionCommand();
+      const latest = granted || await refreshInputMonitoring();
+      setInputMonitoringGranted(latest);
+      setInputMonitoringPermission(latest ? "granted" : "denied");
+      if (!latest) {
+        await openInputMonitoringSettings();
+        setNotice(text.permission.inputMonitoringNotice);
+      } else {
+        setNotice(text.permission.inputMonitoringGranted);
+      }
+    } catch (error) {
+      setInputMonitoringPermission("denied");
+      setNotice(String(error));
+    }
+  }
+
+  async function openInputMonitoringPermission() {
+    try {
+      await openInputMonitoringSettings();
+      setNotice(text.permission.inputMonitoringNotice);
     } catch (error) {
       setNotice(String(error));
     }
@@ -407,6 +459,19 @@ export default function MainApp() {
             </div>
           </div>
         ) : null}
+        {needsInputMonitoringPermission && inputMonitoringGranted === false ? (
+          <div className="permission-banner">
+            <div>
+              <strong>{text.permission.inputMonitoringBannerTitle}</strong>
+              <span>{text.permission.inputMonitoringBannerText}</span>
+            </div>
+            <div className="permission-actions">
+              <button className="secondary small" onClick={() => refreshInputMonitoring().catch((error) => setNotice(String(error)))}>{text.permission.recheck}</button>
+              <button className="secondary small" onClick={() => setShowPermissionGuide(true)}>{text.home.permissionGuide}</button>
+              <button className="secondary small" onClick={requestInputMonitoringPermission}>{inputMonitoringPermission === "checking" ? text.common.checking : text.permission.requestInputMonitoring}</button>
+            </div>
+          </div>
+        ) : null}
         {!config ? (
           <section className="panel">
             <h1>{language === "zh-CN" ? "正在加载配置" : "Loading configuration"}</h1>
@@ -485,10 +550,16 @@ export default function MainApp() {
         <PermissionGuide
           accessibilityGranted={accessibilityGranted}
           requiresAccessibility={needsAccessibilityPermission}
+          inputMonitoringGranted={inputMonitoringGranted}
+          requiresInputMonitoring={needsInputMonitoringPermission}
+          inputMonitoringPermission={inputMonitoringPermission}
           microphonePermission={microphonePermission}
           onClose={() => setShowPermissionGuide(false)}
           onRefreshAccessibility={() => refreshAccessibility().catch((error) => setNotice(String(error)))}
           onOpenAccessibility={openAccessibilityPermission}
+          onRefreshInputMonitoring={() => refreshInputMonitoring().catch((error) => setNotice(String(error)))}
+          onRequestInputMonitoring={requestInputMonitoringPermission}
+          onOpenInputMonitoring={openInputMonitoringPermission}
           onRequestMicrophone={requestMicrophonePermission}
           text={text}
         />

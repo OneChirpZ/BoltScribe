@@ -6,6 +6,8 @@ use anyhow::Result;
 #[cfg(target_os = "macos")]
 use std::os::raw::c_void;
 #[cfg(target_os = "macos")]
+use std::process::Command;
+#[cfg(target_os = "macos")]
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc, Arc, OnceLock,
@@ -29,6 +31,18 @@ struct FnTriggerState {
 
 pub(crate) fn apply(app: &AppHandle, enabled: bool, long_press_duration_ms: u64) -> Result<()> {
     platform::apply(app, enabled, long_press_duration_ms)
+}
+
+pub(crate) fn input_monitoring_permission_granted() -> bool {
+    platform::input_monitoring_permission_granted()
+}
+
+pub(crate) fn request_input_monitoring_permission() -> bool {
+    platform::request_input_monitoring_permission()
+}
+
+pub(crate) fn open_input_monitoring_settings() -> Result<()> {
+    platform::open_input_monitoring_settings()
 }
 
 #[cfg(target_os = "macos")]
@@ -111,19 +125,31 @@ mod platform {
     }
 
     fn request_input_monitoring_access() -> Result<()> {
-        unsafe {
-            if IOHIDCheckAccess(K_IOHID_REQUEST_TYPE_LISTEN_EVENT)
-                == K_IOHID_ACCESS_TYPE_GRANTED
-            {
-                return Ok(());
-            }
-            if IOHIDRequestAccess(K_IOHID_REQUEST_TYPE_LISTEN_EVENT) {
-                return Ok(());
-            }
+        if input_monitoring_permission_granted() || request_input_monitoring_permission() {
+            return Ok(());
         }
         Err(anyhow!(
             "Input Monitoring permission is required for Fn long-press trigger"
         ))
+    }
+
+    pub(super) fn input_monitoring_permission_granted() -> bool {
+        unsafe {
+            IOHIDCheckAccess(K_IOHID_REQUEST_TYPE_LISTEN_EVENT) == K_IOHID_ACCESS_TYPE_GRANTED
+        }
+    }
+
+    pub(super) fn request_input_monitoring_permission() -> bool {
+        input_monitoring_permission_granted()
+            || unsafe { IOHIDRequestAccess(K_IOHID_REQUEST_TYPE_LISTEN_EVENT) }
+    }
+
+    pub(super) fn open_input_monitoring_settings() -> Result<()> {
+        Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
+            .status()
+            .map(|_| ())
+            .map_err(anyhow::Error::from)
     }
 
     fn start_event_thread(state: Arc<FnTriggerState>) -> Result<()> {
@@ -251,6 +277,18 @@ mod platform {
         _enabled: bool,
         _long_press_duration_ms: u64,
     ) -> Result<()> {
+        Ok(())
+    }
+
+    pub(super) fn input_monitoring_permission_granted() -> bool {
+        true
+    }
+
+    pub(super) fn request_input_monitoring_permission() -> bool {
+        true
+    }
+
+    pub(super) fn open_input_monitoring_settings() -> Result<()> {
         Ok(())
     }
 }

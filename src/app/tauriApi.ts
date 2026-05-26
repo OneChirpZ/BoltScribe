@@ -139,6 +139,27 @@ export function openAccessibilitySettings() {
   return invoke("open_accessibility_settings");
 }
 
+export function inputMonitoringPermissionGranted() {
+  if (browserPreviewEnabled()) {
+    return Promise.resolve(true);
+  }
+  return invoke<boolean>("input_monitoring_permission_granted");
+}
+
+export function requestInputMonitoringPermission() {
+  if (browserPreviewEnabled()) {
+    return Promise.resolve(true);
+  }
+  return invoke<boolean>("request_input_monitoring_permission");
+}
+
+export function openInputMonitoringSettings() {
+  if (browserPreviewEnabled()) {
+    return Promise.resolve();
+  }
+  return invoke("open_input_monitoring_settings");
+}
+
 export function requestMicrophonePermission() {
   if (browserPreviewEnabled()) {
     return Promise.resolve(true);

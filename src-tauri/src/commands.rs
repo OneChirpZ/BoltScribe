@@ -176,6 +176,21 @@ pub(crate) fn open_accessibility_settings() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub(crate) fn input_monitoring_permission_granted() -> bool {
+    fn_trigger::input_monitoring_permission_granted()
+}
+
+#[tauri::command]
+pub(crate) fn request_input_monitoring_permission() -> bool {
+    fn_trigger::request_input_monitoring_permission()
+}
+
+#[tauri::command]
+pub(crate) fn open_input_monitoring_settings() -> Result<(), String> {
+    fn_trigger::open_input_monitoring_settings().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub(crate) fn request_microphone_permission() -> Result<bool, String> {
     recorder::request_microphone_permission().map_err(|err| err.to_string())
 }
