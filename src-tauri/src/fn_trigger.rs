@@ -110,7 +110,7 @@ mod platform {
             return Ok(());
         }
 
-        request_input_monitoring_access()?;
+        ensure_input_monitoring_access()?;
         let state = Arc::new(FnTriggerState {
             app: app.clone(),
             enabled: AtomicBool::new(true),
@@ -124,8 +124,8 @@ mod platform {
         Ok(())
     }
 
-    fn request_input_monitoring_access() -> Result<()> {
-        if input_monitoring_permission_granted() || request_input_monitoring_permission() {
+    fn ensure_input_monitoring_access() -> Result<()> {
+        if input_monitoring_permission_granted() {
             return Ok(());
         }
         Err(anyhow!(
