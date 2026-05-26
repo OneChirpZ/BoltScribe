@@ -33,6 +33,8 @@ export default function MainApp() {
   const [stats, setStats] = useState<InputStats | null>(null);
   const [audioDevices, setAudioDevices] = useState<AudioInputDevice[]>([]);
   const [audioOutputDevices, setAudioOutputDevices] = useState<AudioOutputDevice[]>([]);
+  const [audioInputDevicesChecked, setAudioInputDevicesChecked] = useState(false);
+  const [audioDevicesRefreshing, setAudioDevicesRefreshing] = useState(false);
   const [historyPageRecords, setHistoryPageRecords] = useState<HistoryRecord[]>([]);
   const [historyPageIndex, setHistoryPageIndex] = useState(0);
   const [historyHasOlder, setHistoryHasOlder] = useState(false);
@@ -59,21 +61,27 @@ export default function MainApp() {
   }
 
   async function refreshAudioDevices() {
-    const [inputResult, outputResult] = await Promise.allSettled([
-      loadAudioInputDevices(),
-      loadAudioOutputDevices(),
-    ]);
-    if (inputResult.status === "fulfilled") {
-      setAudioDevices(inputResult.value);
-    }
-    if (outputResult.status === "fulfilled") {
-      setAudioOutputDevices(outputResult.value);
-    }
-    const errors = [inputResult, outputResult]
-      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-      .map((result) => String(result.reason));
-    if (errors.length > 0) {
-      throw new Error(errors.join("; "));
+    setAudioDevicesRefreshing(true);
+    try {
+      const [inputResult, outputResult] = await Promise.allSettled([
+        loadAudioInputDevices(),
+        loadAudioOutputDevices(),
+      ]);
+      if (inputResult.status === "fulfilled") {
+        setAudioDevices(inputResult.value);
+        setAudioInputDevicesChecked(true);
+      }
+      if (outputResult.status === "fulfilled") {
+        setAudioOutputDevices(outputResult.value);
+      }
+      const errors = [inputResult, outputResult]
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => String(result.reason));
+      if (errors.length > 0) {
+        throw new Error(errors.join("; "));
+      }
+    } finally {
+      setAudioDevicesRefreshing(false);
     }
   }
 
@@ -410,8 +418,12 @@ export default function MainApp() {
             status={status}
             busy={busy}
             history={history}
+            inputDevicesChecked={audioInputDevicesChecked}
+            hasInputDevice={audioDevices.length > 0}
+            audioDevicesRefreshing={audioDevicesRefreshing}
             onToggle={toggleRecording}
             onOpenPermissionGuide={() => setShowPermissionGuide(true)}
+            onRefreshAudioDevices={() => { void refreshAudioDevices().catch((error) => setNotice(String(error))); }}
             onRefreshHistory={refreshHistory}
             onOpenHistoryPage={openHistoryPage}
             onCopyHistory={copyHistoryText}

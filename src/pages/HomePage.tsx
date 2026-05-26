@@ -10,8 +10,12 @@ export default function HomePage({
   status,
   busy,
   history,
+  inputDevicesChecked,
+  hasInputDevice,
+  audioDevicesRefreshing,
   onToggle,
   onOpenPermissionGuide,
+  onRefreshAudioDevices,
   onRefreshHistory,
   onOpenHistoryPage,
   onCopyHistory,
@@ -22,8 +26,12 @@ export default function HomePage({
   status: WorkflowStatus;
   busy: boolean;
   history: HistoryRecord[];
+  inputDevicesChecked: boolean;
+  hasInputDevice: boolean;
+  audioDevicesRefreshing: boolean;
   onToggle: () => void;
   onOpenPermissionGuide: () => void;
+  onRefreshAudioDevices: () => void;
   onRefreshHistory: () => void;
   onOpenHistoryPage: () => void;
   onCopyHistory: (text: string, label: string) => void;
@@ -32,6 +40,17 @@ export default function HomePage({
 }) {
   return (
     <div className="home-stack">
+      {inputDevicesChecked && !hasInputDevice ? (
+        <div className="device-warning-banner">
+          <div>
+            <strong>{text.home.noInputDeviceTitle}</strong>
+            <span>{text.home.noInputDeviceText}</span>
+          </div>
+          <button className="secondary small" type="button" disabled={audioDevicesRefreshing} onClick={onRefreshAudioDevices}>
+            {audioDevicesRefreshing ? text.common.checking : text.home.refreshInputDevices}
+          </button>
+        </div>
+      ) : null}
       <section className={`panel hero-panel status-${status.mode}`}>
         <div className="hero-status-row">
           <div>

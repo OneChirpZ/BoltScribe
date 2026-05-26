@@ -13,6 +13,8 @@ const maxHistoryRecords = 500;
 const bytesPerGb = 1024 * 1024 * 1024;
 const maxStorageGb = 2;
 const maxOverlayOffset = 4000;
+const minFnLongPressDurationMs = 50;
+const maxFnLongPressDurationMs = 5000;
 
 export default function SettingsPage({
   config,
@@ -88,6 +90,11 @@ export default function SettingsPage({
   function updateLanguage(value: string) {
     const language: AppLanguage = value === "en-US" ? "en-US" : "zh-CN";
     onChange(applyLanguageDefaultCorrectionTemplate(config, language));
+  }
+
+  function updateFnLongPressDuration(value: string) {
+    const fn_long_press_duration_ms = clampInt(Number(value), minFnLongPressDurationMs, maxFnLongPressDurationMs);
+    onChange({ ...config, system: { ...config.system, fn_long_press_duration_ms } });
   }
 
   function updateAudioInputDevice(value: string) {
@@ -201,6 +208,20 @@ export default function SettingsPage({
               />
               {text.settings.fnLongPressTrigger}
             </label>
+            <Field label={text.settings.fnLongPressDuration}>
+              <div className="number-with-unit">
+                <input
+                  type="number"
+                  min={minFnLongPressDurationMs}
+                  max={maxFnLongPressDurationMs}
+                  step="50"
+                  value={config.system.fn_long_press_duration_ms ?? 200}
+                  disabled={!config.system.fn_long_press_enabled}
+                  onChange={(event) => updateFnLongPressDuration(event.target.value)}
+                />
+                <span>{text.common.milliseconds}</span>
+              </div>
+            </Field>
           </div>
         ) : null}
       </div>

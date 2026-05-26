@@ -12,7 +12,7 @@ mod corrector;
 mod history;
 mod injector;
 mod keyboard_shortcut;
-mod mac_fn_trigger;
+mod fn_trigger;
 mod mouse_shortcuts;
 mod output_volume;
 mod paths;
@@ -46,7 +46,11 @@ fn main() {
                 eprintln!("failed to apply startup mouse shortcuts: {err}");
             }
             if let Err(err) =
-                mac_fn_trigger::apply(app.handle(), config.system.fn_long_press_enabled)
+                fn_trigger::apply(
+                    app.handle(),
+                    config.system.fn_long_press_enabled,
+                    config.system.fn_long_press_duration_ms,
+                )
             {
                 eprintln!("failed to apply Fn long-press trigger: {err:?}");
             }

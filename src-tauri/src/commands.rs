@@ -1,5 +1,5 @@
 use crate::{
-    audio_devices, autostart, config, history, injector, mac_fn_trigger, output_volume, paths,
+    audio_devices, autostart, config, fn_trigger, history, injector, output_volume, paths,
     recorder, shortcuts, tray, windows, workflow,
 };
 use std::path::Path;
@@ -83,7 +83,11 @@ fn apply_and_save_config(
     })?;
     history::HistoryStore::prune(&saved.retention).map_err(|err| err.to_string())?;
     windows::sync_dock_visibility(app).map_err(|err| err.to_string())?;
-    if let Err(err) = mac_fn_trigger::apply(app, saved.system.fn_long_press_enabled) {
+    if let Err(err) = fn_trigger::apply(
+        app,
+        saved.system.fn_long_press_enabled,
+        saved.system.fn_long_press_duration_ms,
+    ) {
         eprintln!("failed to apply Fn long-press trigger: {err:?}");
     }
     if let Err(err) = tray::sync_llm_correction_label(app, saved.correction.enabled) {

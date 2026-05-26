@@ -107,6 +107,7 @@ export interface SystemConfig {
   launch_at_login: boolean;
   hide_dock_icon: boolean;
   fn_long_press_enabled: boolean;
+  fn_long_press_duration_ms: number;
 }
 
 export interface CorrectionConfig {

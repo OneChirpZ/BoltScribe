@@ -1,14 +1,18 @@
+#[cfg(target_os = "macos")]
 use crate::workflow;
-use anyhow::{anyhow, Result};
+#[cfg(target_os = "macos")]
+use anyhow::anyhow;
+use anyhow::Result;
+#[cfg(target_os = "macos")]
 use std::os::raw::c_void;
+#[cfg(target_os = "macos")]
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc, Arc, OnceLock,
 };
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 use tauri::AppHandle;
-
-const LONG_PRESS_DURATION: Duration = Duration::from_millis(300);
 
 #[cfg(target_os = "macos")]
 static STATE: OnceLock<Arc<FnTriggerState>> = OnceLock::new();
@@ -17,13 +21,14 @@ static STATE: OnceLock<Arc<FnTriggerState>> = OnceLock::new();
 struct FnTriggerState {
     app: AppHandle,
     enabled: AtomicBool,
+    long_press_duration_ms: AtomicU64,
     pressed: AtomicBool,
     sequence: AtomicU64,
     triggered_in_press: AtomicBool,
 }
 
-pub(crate) fn apply(app: &AppHandle, enabled: bool) -> Result<()> {
-    platform::apply(app, enabled)
+pub(crate) fn apply(app: &AppHandle, enabled: bool, long_press_duration_ms: u64) -> Result<()> {
+    platform::apply(app, enabled, long_press_duration_ms)
 }
 
 #[cfg(target_os = "macos")]
@@ -75,9 +80,16 @@ mod platform {
         fn IOHIDRequestAccess(request_type: u32) -> bool;
     }
 
-    pub(super) fn apply(app: &AppHandle, enabled: bool) -> Result<()> {
+    pub(super) fn apply(
+        app: &AppHandle,
+        enabled: bool,
+        long_press_duration_ms: u64,
+    ) -> Result<()> {
         if let Some(state) = STATE.get() {
             state.enabled.store(enabled, Ordering::SeqCst);
+            state
+                .long_press_duration_ms
+                .store(long_press_duration_ms, Ordering::SeqCst);
             return Ok(());
         }
         if !enabled {
@@ -88,6 +100,7 @@ mod platform {
         let state = Arc::new(FnTriggerState {
             app: app.clone(),
             enabled: AtomicBool::new(true),
+            long_press_duration_ms: AtomicU64::new(long_press_duration_ms),
             pressed: AtomicBool::new(false),
             sequence: AtomicU64::new(0),
             triggered_in_press: AtomicBool::new(false),
@@ -213,7 +226,8 @@ mod platform {
     }
 
     fn trigger_after_long_press(state: Arc<FnTriggerState>, sequence: u64) {
-        std::thread::sleep(LONG_PRESS_DURATION);
+        let duration_ms = state.long_press_duration_ms.load(Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(duration_ms));
         if !state.enabled.load(Ordering::SeqCst)
             || !state.pressed.load(Ordering::SeqCst)
             || state.sequence.load(Ordering::SeqCst) != sequence
@@ -232,7 +246,11 @@ mod platform {
 mod platform {
     use super::*;
 
-    pub(super) fn apply(_app: &AppHandle, _enabled: bool) -> Result<()> {
+    pub(super) fn apply(
+        _app: &AppHandle,
+        _enabled: bool,
+        _long_press_duration_ms: u64,
+    ) -> Result<()> {
         Ok(())
     }
 }

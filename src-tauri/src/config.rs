@@ -147,6 +147,8 @@ pub struct SystemConfig {
     pub hide_dock_icon: bool,
     #[serde(default = "default_fn_long_press_enabled")]
     pub fn_long_press_enabled: bool,
+    #[serde(default = "default_fn_long_press_duration_ms")]
+    pub fn_long_press_duration_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -291,6 +293,7 @@ impl AppConfig {
         self.ui.recording_overlay_offset_x = self.ui.recording_overlay_offset_x.clamp(-4000, 4000);
         self.ui.recording_overlay_offset_y = self.ui.recording_overlay_offset_y.clamp(-4000, 4000);
         self.retention.normalize();
+        self.system.normalize();
         self.ui.app_language = normalize_app_language(&self.ui.app_language);
         self.llm.model_presets = normalize_model_presets(&self.llm.model_presets);
         self.llm.provider_settings = normalize_provider_settings(&self.llm.provider_settings);
@@ -444,7 +447,14 @@ impl Default for SystemConfig {
             launch_at_login: false,
             hide_dock_icon: false,
             fn_long_press_enabled: default_fn_long_press_enabled(),
+            fn_long_press_duration_ms: default_fn_long_press_duration_ms(),
         }
+    }
+}
+
+impl SystemConfig {
+    pub fn normalize(&mut self) {
+        self.fn_long_press_duration_ms = self.fn_long_press_duration_ms.clamp(50, 5_000);
     }
 }
 
@@ -474,6 +484,10 @@ fn default_hotkey_enabled_slots() -> Vec<bool> {
 
 fn default_fn_long_press_enabled() -> bool {
     true
+}
+
+fn default_fn_long_press_duration_ms() -> u64 {
+    200
 }
 
 fn default_llm_provider() -> String {
@@ -1317,6 +1331,7 @@ mod tests {
         assert_eq!(config.asr.provider, "volcengine");
         assert_eq!(config.asr.auth_mode, "api_key");
         assert!(config.system.fn_long_press_enabled);
+        assert_eq!(config.system.fn_long_press_duration_ms, 200);
         assert_eq!(config.llm.endpoint, "https://api.openai.com/v1");
         assert_eq!(config.llm.api_format, "responses");
         assert!(config.asr.app_key.is_empty());
@@ -1357,6 +1372,31 @@ mod tests {
         let config: AppConfig = serde_json::from_value(value).unwrap();
 
         assert!(config.system.fn_long_press_enabled);
+    }
+
+    #[test]
+    fn missing_fn_long_press_duration_defaults_to_200_ms() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value["system"]
+            .as_object_mut()
+            .unwrap()
+            .remove("fn_long_press_duration_ms");
+
+        let config: AppConfig = serde_json::from_value(value).unwrap();
+
+        assert_eq!(config.system.fn_long_press_duration_ms, 200);
+    }
+
+    #[test]
+    fn fn_long_press_duration_is_clamped() {
+        let mut config = AppConfig::default();
+        config.system.fn_long_press_duration_ms = 0;
+        config.normalize();
+        assert_eq!(config.system.fn_long_press_duration_ms, 50);
+
+        config.system.fn_long_press_duration_ms = 10_000;
+        config.normalize();
+        assert_eq!(config.system.fn_long_press_duration_ms, 5_000);
     }
 
     #[test]

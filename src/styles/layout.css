@@ -299,6 +299,37 @@ nav {
   flex-wrap: wrap;
 }
 
+.device-warning-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid rgba(245, 184, 75, 0.42);
+  border-radius: var(--radius);
+  padding: 13px 14px;
+  color: #f6ddb0;
+  background: rgba(50, 38, 18, 0.92);
+}
+
+.device-warning-banner div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.device-warning-banner strong {
+  color: var(--text);
+}
+
+.device-warning-banner span {
+  color: #ddbe80;
+  font-size: 13px;
+}
+
+.device-warning-banner button {
+  flex: 0 0 auto;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

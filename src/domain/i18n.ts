@@ -67,6 +67,7 @@ export const translations = {
       ready: "就绪",
       later: "稍后处理",
       checking: "请求中",
+      milliseconds: "毫秒",
       version: (version: string) => `版本 ${version}`,
     },
     unsaved: {
@@ -94,6 +95,9 @@ export const translations = {
       asr: "ASR",
       llm: "LLM",
       unconfigured: "未配置",
+      noInputDeviceTitle: "未检测到输入设备",
+      noInputDeviceText: "目前没有可用的麦克风或音频输入设备，接入设备后可以手动刷新检查。",
+      refreshInputDevices: "刷新输入设备",
     },
     history: {
       title: "历史记录",
@@ -164,6 +168,7 @@ export const translations = {
       launchAtLogin: "开机自启动",
       hideDockIcon: "在 macOS Dock 栏隐藏",
       fnLongPressTrigger: "长按 Fn 开始/停止语音输入",
+      fnLongPressDuration: "Fn 长按持续时间",
       configPortability: "配置导入导出",
       exportConfig: "导出配置",
       importConfig: "导入配置",
@@ -311,6 +316,7 @@ export const translations = {
       ready: "Ready",
       later: "Later",
       checking: "Requesting",
+      milliseconds: "ms",
       version: (version: string) => `Version ${version}`,
     },
     unsaved: {
@@ -338,6 +344,9 @@ export const translations = {
       asr: "ASR",
       llm: "LLM",
       unconfigured: "Not configured",
+      noInputDeviceTitle: "No input device detected",
+      noInputDeviceText: "No microphone or audio input device is currently available. Connect a device and refresh to check again.",
+      refreshInputDevices: "Refresh Input Devices",
     },
     history: {
       title: "History",
@@ -408,6 +417,7 @@ export const translations = {
       launchAtLogin: "Launch at login",
       hideDockIcon: "Hide in macOS Dock",
       fnLongPressTrigger: "Long-press Fn to start/stop voice input",
+      fnLongPressDuration: "Fn long-press duration",
       configPortability: "Config Import and Export",
       exportConfig: "Export Config",
       importConfig: "Import Config",
