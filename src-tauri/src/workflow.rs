@@ -195,8 +195,10 @@ pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStat
                 current_audio_path: None,
                 last_record_id: runtime.status.last_record_id.clone(),
             };
-            emit_status(&app, &runtime.status);
-            return Ok(runtime.status.clone());
+            let status = runtime.status.clone();
+            drop(runtime);
+            emit_status(&app, &status);
+            return Ok(status);
         }
     };
 
