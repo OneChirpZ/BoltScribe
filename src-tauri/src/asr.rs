@@ -195,14 +195,24 @@ fn live_asr_worker(
         }
     }
 
-    let final_frame = delayed_frame.or_else(|| framer.finish());
-    let Some(final_frame) = final_frame else {
+    let final_frames = finish_live_audio_frames(delayed_frame, &mut framer);
+    if final_frames.is_empty() {
         bail!("No audio samples captured for live ASR");
-    };
+    }
 
-    socket
-        .send(Message::Binary(audio_request(&final_frame, true)?.into()))
-        .context("Failed to send Volcengine live ASR final audio chunk")?;
+    for (frame, is_final) in final_frames {
+        let context = if is_final {
+            "Failed to send Volcengine live ASR final audio chunk"
+        } else {
+            "Failed to send Volcengine live ASR audio chunk"
+        };
+        socket
+            .send(Message::Binary(audio_request(&frame, is_final)?.into()))
+            .context(context)?;
+        if !is_final {
+            drain_available_responses(&mut socket, &mut response_state, &log_id)?;
+        }
+    }
     set_socket_read_timeout(&mut socket, Some(FINAL_READ_TIMEOUT))?;
     wait_for_final_response(&mut socket, &mut response_state, &log_id)?;
 
@@ -375,6 +385,18 @@ impl LiveAudioFramer {
         let frame = pcm_bytes(&self.pending_samples);
         self.pending_samples.clear();
         Some(frame)
+    }
+}
+
+fn finish_live_audio_frames(
+    delayed_frame: Option<Vec<u8>>,
+    framer: &mut LiveAudioFramer,
+) -> Vec<(Vec<u8>, bool)> {
+    let partial_frame = framer.finish();
+    match (delayed_frame, partial_frame) {
+        (Some(delayed), Some(final_frame)) => vec![(delayed, false), (final_frame, true)],
+        (Some(final_frame), None) | (None, Some(final_frame)) => vec![(final_frame, true)],
+        (None, None) => Vec::new(),
     }
 }
 
@@ -926,6 +948,52 @@ mod tests {
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].len(), STREAM_CHUNK_BYTES);
         assert_eq!(framer.finish().unwrap().len(), 20);
+    }
+
+    #[test]
+    fn live_audio_finish_sends_partial_tail_after_delayed_frame() {
+        let mut framer = LiveAudioFramer::default();
+        let samples = vec![7; STREAM_FRAME_SAMPLES + 10];
+        let frames = framer.push_samples(&samples);
+        assert_eq!(frames.len(), 1);
+
+        let outgoing = finish_live_audio_frames(Some(frames[0].clone()), &mut framer);
+
+        assert_eq!(outgoing.len(), 2);
+        assert_eq!(outgoing[0].0.len(), STREAM_CHUNK_BYTES);
+        assert!(!outgoing[0].1);
+        assert_eq!(outgoing[1].0.len(), 20);
+        assert!(outgoing[1].1);
+        assert!(framer.finish().is_none());
+    }
+
+    #[test]
+    fn live_audio_finish_marks_single_available_frame_final() {
+        let mut empty_framer = LiveAudioFramer::default();
+        let outgoing =
+            finish_live_audio_frames(Some(vec![7; STREAM_CHUNK_BYTES]), &mut empty_framer);
+
+        assert_eq!(outgoing, vec![(vec![7; STREAM_CHUNK_BYTES], true)]);
+
+        let mut partial_framer = LiveAudioFramer::default();
+        let frames = partial_framer.push_samples(&[7; 10]);
+        assert!(frames.is_empty());
+
+        let outgoing = finish_live_audio_frames(None, &mut partial_framer);
+        let expected_partial = [7i16; 10]
+            .into_iter()
+            .flat_map(i16::to_le_bytes)
+            .collect::<Vec<_>>();
+
+        assert_eq!(outgoing, vec![(expected_partial, true)]);
+        assert!(partial_framer.finish().is_none());
+    }
+
+    #[test]
+    fn live_audio_finish_returns_empty_without_audio() {
+        let mut framer = LiveAudioFramer::default();
+
+        assert!(finish_live_audio_frames(None, &mut framer).is_empty());
     }
 
     #[test]
