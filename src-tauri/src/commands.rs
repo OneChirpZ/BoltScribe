@@ -3,7 +3,16 @@ use crate::{
     recorder, shortcuts, tray, windows, workflow,
 };
 use std::path::Path;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
+use std::time::Duration;
 use tauri::{Emitter, State, Wry};
+
+const AUDIO_DEVICE_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
+static AUDIO_INPUT_DEVICE_REFRESH_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+static AUDIO_OUTPUT_DEVICE_REFRESH_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 pub(crate) fn load_config() -> Result<config::AppConfig, String> {
@@ -40,12 +49,84 @@ pub(crate) fn import_config(
 
 #[tauri::command]
 pub(crate) fn load_audio_input_devices() -> Result<Vec<audio_devices::AudioInputDevice>, String> {
-    audio_devices::list_input_devices().map_err(|err| err.to_string())
+    run_audio_device_refresh_with_timeout(
+        "Audio input device refresh",
+        "audio-input-device-refresh",
+        &AUDIO_INPUT_DEVICE_REFRESH_IN_PROGRESS,
+        AUDIO_DEVICE_REFRESH_TIMEOUT,
+        audio_devices::list_input_devices,
+    )
 }
 
 #[tauri::command]
 pub(crate) fn load_audio_output_devices() -> Result<Vec<output_volume::AudioOutputDevice>, String> {
-    output_volume::list_output_devices().map_err(|err| err.to_string())
+    run_audio_device_refresh_with_timeout(
+        "Audio output device refresh",
+        "audio-output-device-refresh",
+        &AUDIO_OUTPUT_DEVICE_REFRESH_IN_PROGRESS,
+        AUDIO_DEVICE_REFRESH_TIMEOUT,
+        output_volume::list_output_devices,
+    )
+}
+
+fn run_audio_device_refresh_with_timeout<T, F>(
+    label: &'static str,
+    thread_name: &'static str,
+    in_progress: &'static AtomicBool,
+    timeout: Duration,
+    refresh: F,
+) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> anyhow::Result<T> + Send + 'static,
+{
+    if in_progress.swap(true, Ordering::AcqRel) {
+        return Err(format!(
+            "{label} is already waiting for the system audio service; try again after it finishes or restart the audio service."
+        ));
+    }
+
+    let (sender, receiver) = mpsc::channel();
+    let spawn_result = std::thread::Builder::new()
+        .name(thread_name.to_string())
+        .spawn(move || {
+            let reset = AudioDeviceRefreshInProgressReset(in_progress);
+            let result = refresh();
+            drop(reset);
+            let _ = sender.send(result);
+        });
+
+    if let Err(err) = spawn_result {
+        in_progress.store(false, Ordering::Release);
+        return Err(format!("{label} worker failed to start: {err}"));
+    }
+
+    match receiver.recv_timeout(timeout) {
+        Ok(result) => result.map_err(|err| err.to_string()),
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(format!(
+            "{label} timed out after {}. The system audio service may be unresponsive; try again later or restart the audio service.",
+            format_duration(timeout)
+        )),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(format!("{label} worker exited before returning"))
+        }
+    }
+}
+
+struct AudioDeviceRefreshInProgressReset(&'static AtomicBool);
+
+impl Drop for AudioDeviceRefreshInProgressReset {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+fn format_duration(duration: Duration) -> String {
+    if duration.subsec_millis() == 0 {
+        format!("{}s", duration.as_secs())
+    } else {
+        format!("{}ms", duration.as_millis())
+    }
 }
 
 fn apply_and_save_config(
@@ -225,4 +306,68 @@ pub(crate) fn request_microphone_permission() -> Result<bool, String> {
 #[tauri::command]
 pub(crate) fn copy_text_to_clipboard(text: String) -> Result<(), String> {
     injector::copy_text(&text).map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_device_refresh_timeout_returns_error() {
+        static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+        IN_PROGRESS.store(false, Ordering::Release);
+
+        let error = run_audio_device_refresh_with_timeout(
+            "Test audio device refresh",
+            "test-audio-device-refresh-timeout",
+            &IN_PROGRESS,
+            Duration::from_millis(5),
+            || {
+                std::thread::sleep(Duration::from_millis(40));
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.contains("timed out"));
+        assert!(IN_PROGRESS.load(Ordering::Acquire));
+        std::thread::sleep(Duration::from_millis(60));
+        assert!(!IN_PROGRESS.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn audio_device_refresh_rejects_duplicate_waiter() {
+        static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+        IN_PROGRESS.store(true, Ordering::Release);
+
+        let error = run_audio_device_refresh_with_timeout(
+            "Test audio device refresh",
+            "test-audio-device-refresh-duplicate",
+            &IN_PROGRESS,
+            Duration::from_secs(1),
+            || Ok::<_, anyhow::Error>(()),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("already waiting"));
+        IN_PROGRESS.store(false, Ordering::Release);
+    }
+
+    #[test]
+    fn audio_device_refresh_success_clears_in_progress_marker() {
+        static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+        IN_PROGRESS.store(false, Ordering::Release);
+
+        let value = run_audio_device_refresh_with_timeout(
+            "Test audio device refresh",
+            "test-audio-device-refresh-success",
+            &IN_PROGRESS,
+            Duration::from_secs(1),
+            || Ok::<_, anyhow::Error>(7),
+        )
+        .unwrap();
+
+        assert_eq!(value, 7);
+        assert!(!IN_PROGRESS.load(Ordering::Acquire));
+    }
 }
