@@ -1,5 +1,3 @@
-use anyhow::{anyhow, Result};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct KeyboardShortcut {
     command: bool,
@@ -64,9 +62,10 @@ pub(crate) fn parse(value: &str) -> std::result::Result<KeyboardShortcut, String
     })
 }
 
-pub(crate) fn send(value: &str) -> Result<()> {
+#[cfg(target_os = "macos")]
+pub(crate) fn send(value: &str) -> anyhow::Result<()> {
     let shortcut =
-        parse(value).map_err(|err| anyhow!("Invalid SoundSource mute shortcut: {err}"))?;
+        parse(value).map_err(|err| anyhow::anyhow!("Invalid SoundSource mute shortcut: {err}"))?;
     platform::send(shortcut)
 }
 
@@ -236,18 +235,6 @@ mod platform {
             ShortcutKey::Function(20) => Ok(0x5A),
             _ => Err(anyhow!("Unsupported macOS shortcut key")),
         }
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-mod platform {
-    use super::KeyboardShortcut;
-    use anyhow::{anyhow, Result};
-
-    pub(super) fn send(_shortcut: KeyboardShortcut) -> Result<()> {
-        Err(anyhow!(
-            "SoundSource shortcut fallback is supported on macOS only"
-        ))
     }
 }
 

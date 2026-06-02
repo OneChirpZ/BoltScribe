@@ -1,4 +1,4 @@
-use crate::{config::OutputVolumeDuckingConfig, keyboard_shortcut};
+use crate::config::OutputVolumeDuckingConfig;
 use anyhow::Result;
 use serde::Serialize;
 
@@ -48,6 +48,7 @@ fn volume_matches(left: f32, right: f32) -> bool {
     (left - right).abs() <= 0.01
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DuckingStrategy {
     Volume,
@@ -56,6 +57,7 @@ enum DuckingStrategy {
     Unsupported,
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn ducking_strategy(
     supports_volume_control: bool,
     supports_mute_control: bool,
@@ -88,6 +90,7 @@ fn ducking_strategy(
 #[cfg(target_os = "macos")]
 mod platform {
     use super::*;
+    use crate::keyboard_shortcut;
     use anyhow::{anyhow, Context, Result};
     use core_foundation_sys::string::{
         kCFStringEncodingUTF8, CFStringGetCString, CFStringGetCStringPtr,
