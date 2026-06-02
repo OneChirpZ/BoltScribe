@@ -331,7 +331,7 @@ mod tests {
 
         assert!(error.contains("timed out"));
         assert!(IN_PROGRESS.load(Ordering::Acquire));
-        std::thread::sleep(Duration::from_millis(60));
+        wait_until_not_in_progress(&IN_PROGRESS);
         assert!(!IN_PROGRESS.load(Ordering::Acquire));
     }
 
@@ -369,5 +369,33 @@ mod tests {
 
         assert_eq!(value, 7);
         assert!(!IN_PROGRESS.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn audio_device_refresh_error_clears_in_progress_marker() {
+        static IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+        IN_PROGRESS.store(false, Ordering::Release);
+
+        let error = run_audio_device_refresh_with_timeout::<(), _>(
+            "Test audio device refresh",
+            "test-audio-device-refresh-error",
+            &IN_PROGRESS,
+            Duration::from_secs(1),
+            || Err(anyhow::anyhow!("system audio service failed")),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("system audio service failed"));
+        assert!(!IN_PROGRESS.load(Ordering::Acquire));
+    }
+
+    fn wait_until_not_in_progress(in_progress: &AtomicBool) {
+        let started_at = std::time::Instant::now();
+        while in_progress.load(Ordering::Acquire) {
+            if started_at.elapsed() > Duration::from_secs(1) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 }
