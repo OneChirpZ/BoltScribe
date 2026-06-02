@@ -195,8 +195,10 @@ pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStat
                 current_audio_path: None,
                 last_record_id: runtime.status.last_record_id.clone(),
             };
-            emit_status(&app, &runtime.status);
-            return Ok(runtime.status.clone());
+            let status = runtime.status.clone();
+            drop(runtime);
+            emit_status(&app, &status);
+            return Ok(status);
         }
     };
 
@@ -822,6 +824,9 @@ fn set_status_for_task(
 
 fn emit_status(app: &AppHandle, status: &WorkflowStatus) {
     crate::windows::sync_overlay_window(app, status);
+    if let Err(err) = crate::tray::sync_voice_input_label(app, status) {
+        eprintln!("failed to sync tray voice input item: {err}");
+    }
     let _ = app.emit("workflow://status", status);
 }
 
