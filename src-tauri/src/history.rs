@@ -10,6 +10,7 @@ use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 const HISTORY_READ_CHUNK_SIZE: u64 = 16 * 1024;
+const STATS_SCHEMA_VERSION: u8 = 1;
 
 struct HistoryPage {
     records: Vec<HistoryRecord>,
@@ -58,25 +59,23 @@ pub struct DailyInputStats {
     pub audio_duration_ms: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct InputStatsEvent {
+    schema_version: u8,
+    record_id: String,
+    date: String,
+    character_count: u64,
+    audio_duration_ms: u64,
+}
+
 pub struct HistoryStore;
 
 impl HistoryStore {
     pub fn append(record: &HistoryRecord, retention: &RetentionConfig) -> Result<()> {
         let path = paths::history_path()?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create {}", parent.display()))?;
-        }
-
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .with_context(|| format!("Failed to open {}", path.display()))?;
-        writeln!(file, "{}", serde_json::to_string(record)?)
-            .with_context(|| format!("Failed to append {}", path.display()))?;
-        Self::prune(retention)?;
-        Ok(())
+        let stats_path = paths::input_stats_path()?;
+        let recordings_dir = paths::recordings_dir()?;
+        append_to_paths(record, retention, &path, &stats_path, &recordings_dir)
     }
 
     pub fn load(limit: usize, offset: usize) -> Result<Vec<HistoryRecord>> {
@@ -84,45 +83,180 @@ impl HistoryStore {
     }
 
     pub fn stats() -> Result<InputStats> {
-        load_stats_from_paths(&history_read_paths()?)
+        let stats_path = paths::input_stats_path()?;
+        let history_paths = history_read_paths()?;
+        backfill_stats_from_history(&stats_path, &history_paths)?;
+        load_stats_from_sources(&stats_path, &history_paths)
     }
 
     pub fn prune(retention: &RetentionConfig) -> Result<()> {
         let path = paths::history_path()?;
-        if !path.exists() {
-            return Ok(());
-        }
-
         let recordings_dir = paths::recordings_dir()?;
-        let mut records = read_records_in_file_order(&path)?;
-        records.sort_by_key(|record| record.created_at);
-
-        let mut keep_start = records.len().saturating_sub(retention.max_history_records);
-        while keep_start < records.len()
-            && storage_bytes(&records[keep_start..], &recordings_dir)? > retention.max_storage_bytes
-        {
-            keep_start += 1;
-        }
-
-        if keep_start == 0 {
-            return Ok(());
-        }
-
-        let removed = records[..keep_start].to_vec();
-        let kept = records[keep_start..].to_vec();
-        write_records_atomically(&path, &kept)?;
-        delete_recording_files(&removed, &recordings_dir)?;
-        Ok(())
+        prune_path(&path, retention, &recordings_dir)
     }
 }
 
-fn load_stats_from_paths(paths: &[PathBuf]) -> Result<InputStats> {
-    let mut seen_ids = HashSet::new();
-    let mut total_character_count = 0u64;
-    let mut total_audio_duration_ms = 0u64;
-    let mut daily = BTreeMap::<String, DailyInputStats>::new();
+fn append_to_paths(
+    record: &HistoryRecord,
+    retention: &RetentionConfig,
+    history_path: &Path,
+    stats_path: &Path,
+    recordings_dir: &Path,
+) -> Result<()> {
+    append_history_record(history_path, record)?;
+    append_stats_for_record(stats_path, record)?;
+    prune_path(history_path, retention, recordings_dir)
+}
 
+fn append_history_record(path: &Path, record: &HistoryRecord) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("Failed to open {}", path.display()))?;
+    writeln!(file, "{}", serde_json::to_string(record)?)
+        .with_context(|| format!("Failed to append {}", path.display()))?;
+    Ok(())
+}
+
+fn prune_path(path: &Path, retention: &RetentionConfig, recordings_dir: &Path) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let mut records = read_records_in_file_order(path)?;
+    records.sort_by_key(|record| record.created_at);
+
+    let mut keep_start = records.len().saturating_sub(retention.max_history_records);
+    while keep_start < records.len()
+        && storage_bytes(&records[keep_start..], recordings_dir)? > retention.max_storage_bytes
+    {
+        keep_start += 1;
+    }
+
+    if keep_start == 0 {
+        return Ok(());
+    }
+
+    let removed = records[..keep_start].to_vec();
+    let kept = records[keep_start..].to_vec();
+    write_records_atomically(path, &kept)?;
+    delete_recording_files(&removed, recordings_dir)?;
+    Ok(())
+}
+
+#[cfg(test)]
+fn load_stats_from_paths(paths: &[PathBuf]) -> Result<InputStats> {
+    let mut accumulator = InputStatsAccumulator::default();
+    let mut seen_ids = HashSet::new();
+    add_history_paths_to_stats(paths, &mut seen_ids, &mut accumulator)?;
+    Ok(accumulator.finish())
+}
+
+fn load_stats_from_sources(stats_path: &Path, history_paths: &[PathBuf]) -> Result<InputStats> {
+    let mut accumulator = InputStatsAccumulator::default();
+    let mut seen_ids = HashSet::new();
+
+    for event in read_stats_events_in_file_order(stats_path)? {
+        if event.schema_version == STATS_SCHEMA_VERSION && seen_ids.insert(event.record_id.clone())
+        {
+            accumulator.add_event(&event);
+        }
+    }
+
+    add_history_paths_to_stats(history_paths, &mut seen_ids, &mut accumulator)?;
+    Ok(accumulator.finish())
+}
+
+fn add_history_paths_to_stats(
+    paths: &[PathBuf],
+    seen_ids: &mut HashSet<String>,
+    accumulator: &mut InputStatsAccumulator,
+) -> Result<()> {
     for path in paths {
+        add_history_path_to_stats(path, seen_ids, accumulator)?;
+    }
+    Ok(())
+}
+
+fn add_history_path_to_stats(
+    path: &Path,
+    seen_ids: &mut HashSet<String>,
+    accumulator: &mut InputStatsAccumulator,
+) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    for record in read_records_in_file_order(path)? {
+        if should_hide_history_record(&record) || !seen_ids.insert(record.id.clone()) {
+            continue;
+        }
+        if let Some(event) = stats_event_from_record(&record) {
+            accumulator.add_event(&event);
+        }
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct InputStatsAccumulator {
+    total_character_count: u64,
+    total_audio_duration_ms: u64,
+    daily: BTreeMap<String, DailyInputStats>,
+}
+
+impl InputStatsAccumulator {
+    fn add_event(&mut self, event: &InputStatsEvent) {
+        self.total_character_count += event.character_count;
+        self.total_audio_duration_ms += event.audio_duration_ms;
+        let entry = self
+            .daily
+            .entry(event.date.clone())
+            .or_insert(DailyInputStats {
+                date: event.date.clone(),
+                record_count: 0,
+                character_count: 0,
+                audio_duration_ms: 0,
+            });
+        entry.record_count += 1;
+        entry.character_count += event.character_count;
+        entry.audio_duration_ms += event.audio_duration_ms;
+    }
+
+    fn finish(self) -> InputStats {
+        let average_chars_per_minute = if self.total_audio_duration_ms == 0 {
+            0.0
+        } else {
+            self.total_character_count as f64 / (self.total_audio_duration_ms as f64 / 60_000.0)
+        };
+
+        InputStats {
+            total_character_count: self.total_character_count,
+            total_audio_duration_ms: self.total_audio_duration_ms,
+            average_chars_per_minute,
+            daily: self.daily.into_values().collect(),
+        }
+    }
+}
+
+fn append_stats_for_record(path: &Path, record: &HistoryRecord) -> Result<()> {
+    let Some(event) = stats_event_from_record(record) else {
+        return Ok(());
+    };
+    append_stats_events(path, std::slice::from_ref(&event))
+}
+
+fn backfill_stats_from_history(stats_path: &Path, history_paths: &[PathBuf]) -> Result<()> {
+    let mut seen_ids = stats_record_ids(stats_path)?;
+    let mut missing_events = Vec::new();
+
+    for path in history_paths {
         if !path.exists() {
             continue;
         }
@@ -130,40 +264,80 @@ fn load_stats_from_paths(paths: &[PathBuf]) -> Result<InputStats> {
             if should_hide_history_record(&record) || !seen_ids.insert(record.id.clone()) {
                 continue;
             }
-
-            let character_count = count_input_characters(&record) as u64;
-            let audio_duration_ms = audio_duration_ms(&record);
-            total_character_count += character_count;
-            total_audio_duration_ms += audio_duration_ms;
-
-            let date = record
-                .created_at
-                .with_timezone(&Local)
-                .date_naive()
-                .to_string();
-            let entry = daily.entry(date.clone()).or_insert(DailyInputStats {
-                date,
-                record_count: 0,
-                character_count: 0,
-                audio_duration_ms: 0,
-            });
-            entry.record_count += 1;
-            entry.character_count += character_count;
-            entry.audio_duration_ms += audio_duration_ms;
+            if let Some(event) = stats_event_from_record(&record) {
+                missing_events.push(event);
+            }
         }
     }
 
-    let average_chars_per_minute = if total_audio_duration_ms == 0 {
-        0.0
-    } else {
-        total_character_count as f64 / (total_audio_duration_ms as f64 / 60_000.0)
-    };
+    append_stats_events(stats_path, &missing_events)
+}
 
-    Ok(InputStats {
-        total_character_count,
-        total_audio_duration_ms,
-        average_chars_per_minute,
-        daily: daily.into_values().collect(),
+fn stats_record_ids(path: &Path) -> Result<HashSet<String>> {
+    Ok(read_stats_events_in_file_order(path)?
+        .into_iter()
+        .filter(|event| event.schema_version == STATS_SCHEMA_VERSION)
+        .map(|event| event.record_id)
+        .collect())
+}
+
+fn append_stats_events(path: &Path, events: &[InputStatsEvent]) -> Result<()> {
+    if events.is_empty() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("Failed to open {}", path.display()))?;
+    for event in events {
+        writeln!(file, "{}", serde_json::to_string(event)?)
+            .with_context(|| format!("Failed to append {}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn read_stats_events_in_file_order(path: &Path) -> Result<Vec<InputStatsEvent>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let file =
+        fs::File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
+    let reader = BufReader::new(file);
+    let mut events = Vec::new();
+    for line in reader.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Ok(event) = serde_json::from_str::<InputStatsEvent>(&line) {
+            events.push(event);
+        }
+    }
+    Ok(events)
+}
+
+fn stats_event_from_record(record: &HistoryRecord) -> Option<InputStatsEvent> {
+    if should_hide_history_record(record) {
+        return None;
+    }
+
+    Some(InputStatsEvent {
+        schema_version: STATS_SCHEMA_VERSION,
+        record_id: record.id.clone(),
+        date: record
+            .created_at
+            .with_timezone(&Local)
+            .date_naive()
+            .to_string(),
+        character_count: count_input_characters(record) as u64,
+        audio_duration_ms: audio_duration_ms(record),
     })
 }
 
@@ -489,6 +663,41 @@ mod tests {
         }
     }
 
+    fn sample_record_with(
+        id: &str,
+        created_at: &str,
+        pasted_text: &str,
+        sample_count: usize,
+        workflow_error: Option<&str>,
+    ) -> HistoryRecord {
+        let mut record = sample_record(id, workflow_error);
+        record.created_at = DateTime::parse_from_rfc3339(created_at)
+            .unwrap()
+            .with_timezone(&Utc);
+        record.pasted_text = pasted_text.to_string();
+        record.corrected_text = pasted_text.to_string();
+        record.raw_text = pasted_text.to_string();
+        record.audio_sample_count = sample_count;
+        record
+    }
+
+    fn temp_path(name: &str, extension: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "boltscribe-{name}-{}-{}.{}",
+            std::process::id(),
+            Utc::now().timestamp_millis(),
+            extension
+        ))
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "boltscribe-{name}-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_millis()
+        ))
+    }
+
     #[test]
     fn history_record_serializes() {
         let record = sample_record("1", None);
@@ -671,6 +880,219 @@ mod tests {
         assert_eq!(stats.daily.len(), 1);
         assert_eq!(stats.daily[0].record_count, 2);
         assert_eq!(stats.daily[0].character_count, 5);
+    }
+
+    #[test]
+    fn stats_event_from_history_record_uses_minimal_stats_fields() {
+        let record = sample_record_with(
+            "ledger-1",
+            "2026-05-16T12:00:00Z",
+            "你好，world!",
+            24_000,
+            None,
+        );
+        let event = stats_event_from_record(&record).unwrap();
+
+        assert_eq!(event.schema_version, STATS_SCHEMA_VERSION);
+        assert_eq!(event.record_id, "ledger-1");
+        assert_eq!(
+            event.date,
+            record
+                .created_at
+                .with_timezone(&Local)
+                .date_naive()
+                .to_string()
+        );
+        assert_eq!(event.character_count, 3);
+        assert_eq!(event.audio_duration_ms, 1_500);
+        assert!(
+            stats_event_from_record(&sample_record("hidden", Some("ASR returned empty text")))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn stats_ledger_summarizes_input_events() {
+        let path = temp_path("stats-ledger-summary", "jsonl");
+        let events = [
+            InputStatsEvent {
+                schema_version: STATS_SCHEMA_VERSION,
+                record_id: "1".to_string(),
+                date: "2026-05-16".to_string(),
+                character_count: 5,
+                audio_duration_ms: 3_000,
+            },
+            InputStatsEvent {
+                schema_version: STATS_SCHEMA_VERSION,
+                record_id: "2".to_string(),
+                date: "2026-05-16".to_string(),
+                character_count: 10,
+                audio_duration_ms: 2_000,
+            },
+        ];
+        append_stats_events(&path, &events).unwrap();
+
+        let stats = load_stats_from_sources(&path, &[]).unwrap();
+        let _ = fs::remove_file(path);
+
+        assert_eq!(stats.total_character_count, 15);
+        assert_eq!(stats.total_audio_duration_ms, 5_000);
+        assert!((stats.average_chars_per_minute - 180.0).abs() < 0.01);
+        assert_eq!(stats.daily.len(), 1);
+        assert_eq!(stats.daily[0].record_count, 2);
+        assert_eq!(stats.daily[0].character_count, 15);
+    }
+
+    #[test]
+    fn stats_sources_deduplicate_ledger_and_history_records() {
+        let stats_path = temp_path("stats-dedupe-ledger", "jsonl");
+        let history_path = temp_path("stats-dedupe-history", "jsonl");
+        append_stats_events(
+            &stats_path,
+            &[InputStatsEvent {
+                schema_version: STATS_SCHEMA_VERSION,
+                record_id: "same".to_string(),
+                date: "2026-05-16".to_string(),
+                character_count: 5,
+                audio_duration_ms: 1_000,
+            }],
+        )
+        .unwrap();
+
+        let mut file = fs::File::create(&history_path).unwrap();
+        for record in [
+            sample_record_with("same", "2026-05-16T12:00:00Z", "重复不计", 16_000, None),
+            sample_record_with("new", "2026-05-17T12:00:00Z", "新增", 32_000, None),
+        ] {
+            writeln!(file, "{}", serde_json::to_string(&record).unwrap()).unwrap();
+        }
+
+        let stats =
+            load_stats_from_sources(&stats_path, std::slice::from_ref(&history_path)).unwrap();
+        let _ = fs::remove_file(stats_path);
+        let _ = fs::remove_file(history_path);
+
+        assert_eq!(stats.total_audio_duration_ms, 3_000);
+        assert_eq!(stats.total_character_count, 7);
+        assert_eq!(stats.daily.len(), 2);
+    }
+
+    #[test]
+    fn backfill_stats_from_history_writes_missing_visible_records() {
+        let stats_path = temp_path("stats-backfill", "jsonl");
+        let history_path = temp_path("history-backfill", "jsonl");
+        append_stats_events(
+            &stats_path,
+            &[InputStatsEvent {
+                schema_version: STATS_SCHEMA_VERSION,
+                record_id: "existing".to_string(),
+                date: "2026-05-16".to_string(),
+                character_count: 1,
+                audio_duration_ms: 1_000,
+            }],
+        )
+        .unwrap();
+
+        let mut file = fs::File::create(&history_path).unwrap();
+        for record in [
+            sample_record_with("existing", "2026-05-16T12:00:00Z", "已有", 16_000, None),
+            sample_record_with("missing", "2026-05-17T12:00:00Z", "补回", 32_000, None),
+            sample_record_with(
+                "hidden",
+                "2026-05-18T12:00:00Z",
+                "忽略",
+                48_000,
+                Some("ASR returned empty text"),
+            ),
+        ] {
+            writeln!(file, "{}", serde_json::to_string(&record).unwrap()).unwrap();
+        }
+
+        backfill_stats_from_history(&stats_path, std::slice::from_ref(&history_path)).unwrap();
+        let events = read_stats_events_in_file_order(&stats_path).unwrap();
+        let _ = fs::remove_file(stats_path);
+        let _ = fs::remove_file(history_path);
+
+        assert_eq!(
+            events
+                .iter()
+                .map(|event| event.record_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["existing", "missing"]
+        );
+    }
+
+    #[test]
+    fn stats_ledger_retains_counts_after_history_prune() {
+        let base = temp_dir("stats-prune-retains");
+        let history_path = base.join("history.jsonl");
+        let stats_path = base.join("input_stats.jsonl");
+        let recordings_dir = base.join("recordings");
+        fs::create_dir_all(&recordings_dir).unwrap();
+
+        let old_record = sample_record_with("old", "2026-05-16T12:00:00Z", "旧记录", 16_000, None);
+        let new_record = sample_record_with("new", "2026-06-03T12:00:00Z", "新记录", 32_000, None);
+        append_history_record(&history_path, &old_record).unwrap();
+        backfill_stats_from_history(&stats_path, std::slice::from_ref(&history_path)).unwrap();
+
+        append_to_paths(
+            &new_record,
+            &RetentionConfig {
+                max_history_records: 1,
+                max_storage_bytes: u64::MAX,
+            },
+            &history_path,
+            &stats_path,
+            &recordings_dir,
+        )
+        .unwrap();
+
+        let records = read_records_in_file_order(&history_path).unwrap();
+        let stats =
+            load_stats_from_sources(&stats_path, std::slice::from_ref(&history_path)).unwrap();
+        let _ = fs::remove_dir_all(base);
+
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["new"]
+        );
+        assert_eq!(stats.total_audio_duration_ms, 3_000);
+        assert_eq!(stats.daily.len(), 2);
+    }
+
+    #[test]
+    fn append_stats_failure_skips_history_prune() {
+        let base = temp_dir("stats-failure-skips-prune");
+        let history_path = base.join("history.jsonl");
+        let stats_path = base.join("input_stats.jsonl");
+        let recordings_dir = base.join("recordings");
+        fs::create_dir_all(&stats_path).unwrap();
+        fs::create_dir_all(&recordings_dir).unwrap();
+
+        append_history_record(
+            &history_path,
+            &sample_record_with("old", "2026-05-16T12:00:00Z", "旧记录", 16_000, None),
+        )
+        .unwrap();
+        let result = append_to_paths(
+            &sample_record_with("new", "2026-06-03T12:00:00Z", "新记录", 32_000, None),
+            &RetentionConfig {
+                max_history_records: 1,
+                max_storage_bytes: u64::MAX,
+            },
+            &history_path,
+            &stats_path,
+            &recordings_dir,
+        );
+
+        let records = read_records_in_file_order(&history_path).unwrap();
+        let _ = fs::remove_dir_all(base);
+
+        assert!(result.is_err());
+        assert_eq!(records.len(), 2);
     }
 
     #[test]

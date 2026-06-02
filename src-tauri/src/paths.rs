@@ -36,6 +36,12 @@ pub fn history_path() -> Result<PathBuf> {
     Ok(app_dir().map_err(|err| anyhow!(err))?.join("history.jsonl"))
 }
 
+pub fn input_stats_path() -> Result<PathBuf> {
+    Ok(app_dir()
+        .map_err(|err| anyhow!(err))?
+        .join("input_stats.jsonl"))
+}
+
 pub fn legacy_history_path() -> Result<PathBuf> {
     Ok(legacy_app_dir()
         .map_err(|err| anyhow!(err))?
@@ -79,6 +85,9 @@ mod tests {
         assert!(history_path()
             .unwrap()
             .ends_with("BoltScribe/history.jsonl"));
+        assert!(input_stats_path()
+            .unwrap()
+            .ends_with("BoltScribe/input_stats.jsonl"));
         assert!(recordings_dir().unwrap().ends_with("BoltScribe/recordings"));
     }
 

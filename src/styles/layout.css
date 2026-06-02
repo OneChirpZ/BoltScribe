@@ -117,6 +117,7 @@ nav {
 .input-stats-card {
   display: grid;
   gap: 10px;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 12px;
@@ -162,16 +163,22 @@ nav {
 .input-heatmap-block {
   display: grid;
   gap: 7px;
+  min-width: 0;
 }
 
 .input-heatmap {
   display: grid;
   grid-auto-flow: column;
+  grid-auto-columns: 9px;
   grid-template-rows: repeat(7, 1fr);
   gap: 3px;
-  width: max-content;
+  width: 100%;
+  min-width: 0;
   max-width: 100%;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
 }
 
 .input-heatmap-cell {

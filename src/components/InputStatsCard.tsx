@@ -1,7 +1,7 @@
 import type { DailyInputStats, InputStats } from "../types";
 import type { TextBundle } from "../domain/i18n";
 
-const heatmapDays = 91;
+const dayMs = 24 * 60 * 60 * 1000;
 
 export default function InputStatsCard({
   stats,
@@ -51,13 +51,26 @@ function StatValue({ label, value }: { label: string; value: string }) {
 }
 
 function heatmapCells(daily: DailyInputStats[]) {
+  if (daily.length === 0) {
+    return [];
+  }
+
   const byDate = new Map(daily.map((day) => [day.date, day]));
+  const dates = daily.map((day) => parseDateKey(day.date)).filter((date): date is Date => Boolean(date));
+  if (dates.length === 0) {
+    return [];
+  }
+
   const today = startOfLocalDay(new Date());
-  const start = new Date(today);
-  start.setDate(start.getDate() - (heatmapDays - 1));
+  const start = new Date(Math.min(...dates.map((date) => date.getTime())));
   const leadingEmptyDays = start.getDay();
   start.setDate(start.getDate() - leadingEmptyDays);
-  const totalDays = heatmapDays + leadingEmptyDays;
+
+  const lastStatsDay = new Date(Math.max(...dates.map((date) => date.getTime())));
+  const end = new Date(Math.max(today.getTime(), lastStatsDay.getTime()));
+  const trailingEmptyDays = 6 - end.getDay();
+  end.setDate(end.getDate() + trailingEmptyDays);
+  const totalDays = calendarDayIndex(end) - calendarDayIndex(start) + 1;
 
   return Array.from({ length: totalDays }, (_, index) => {
     const date = new Date(start);
@@ -72,6 +85,22 @@ function heatmapCells(daily: DailyInputStats[]) {
   });
 }
 
+function parseDateKey(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null;
+  }
+  return date;
+}
+
 function heatmapLevel(count: number, maxCount: number) {
   if (count <= 0 || maxCount <= 0) {
     return 0;
@@ -81,6 +110,10 @@ function heatmapLevel(count: number, maxCount: number) {
 
 function startOfLocalDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function calendarDayIndex(date: Date) {
+  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMs);
 }
 
 function formatDateKey(date: Date) {
