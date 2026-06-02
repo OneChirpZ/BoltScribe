@@ -214,14 +214,10 @@ mod platform {
         Ok(coreaudio_output_devices()?
             .into_iter()
             .map(|device| {
-                let supports_volume_control = match volume_control_for_device(device.id) {
-                    Ok(Some(_)) => true,
-                    _ => false,
-                };
-                let supports_mute_control = match mute_control_for_device(device.id) {
-                    Ok(Some(_)) => true,
-                    _ => false,
-                };
+                let supports_volume_control =
+                    matches!(volume_control_for_device(device.id), Ok(Some(_)));
+                let supports_mute_control =
+                    matches!(mute_control_for_device(device.id), Ok(Some(_)));
                 AudioOutputDevice {
                     id: output_device_id(&device),
                     name: device.name,

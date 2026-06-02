@@ -822,6 +822,9 @@ fn set_status_for_task(
 
 fn emit_status(app: &AppHandle, status: &WorkflowStatus) {
     crate::windows::sync_overlay_window(app, status);
+    if let Err(err) = crate::tray::sync_voice_input_label(app, status) {
+        eprintln!("failed to sync tray voice input item: {err}");
+    }
     let _ = app.emit("workflow://status", status);
 }
 
