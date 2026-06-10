@@ -1,7 +1,7 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportResult, HistoryRecord, InputStats, WorkflowStatus } from "../types";
+import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportResult, DataDirInfo, HistoryRecord, InputStats, WorkflowStatus } from "../types";
 
 export function loadConfig() {
   if (browserPreviewEnabled()) {
@@ -109,6 +109,49 @@ export function openAppDir() {
     return Promise.resolve();
   }
   return invoke("open_app_dir");
+}
+
+export function openGitHubRepository() {
+  if (browserPreviewEnabled()) {
+    window.open("https://github.com/OneChirpZ/BoltScribe", "_blank", "noopener,noreferrer");
+    return Promise.resolve();
+  }
+  return invoke("open_github_repository");
+}
+
+export function getDataDir() {
+  if (browserPreviewEnabled()) {
+    return Promise.resolve(clonePreview(previewDataDirInfo));
+  }
+  return invoke<DataDirInfo>("get_data_dir");
+}
+
+export function chooseDataDir() {
+  if (browserPreviewEnabled()) {
+    return Promise.resolve("D:\\BoltScribeData");
+  }
+  return invoke<string | null>("choose_data_dir");
+}
+
+export function setDataDir(path: string) {
+  if (browserPreviewEnabled()) {
+    previewDataDirInfo = {
+      path,
+      default_path: previewDataDirInfo.default_path,
+      is_default: path === previewDataDirInfo.default_path,
+      cleanup_warning: null,
+    };
+    return Promise.resolve(clonePreview(previewDataDirInfo));
+  }
+  return invoke<DataDirInfo>("set_data_dir", { path });
+}
+
+export function resetDataDir() {
+  if (browserPreviewEnabled()) {
+    previewDataDirInfo = clonePreview(previewDefaultDataDirInfo);
+    return Promise.resolve(clonePreview(previewDataDirInfo));
+  }
+  return invoke<DataDirInfo>("reset_data_dir");
 }
 
 export function hideMainWindow() {
@@ -301,6 +344,15 @@ let previewConfig: AppConfig = {
     fn_long_press_duration_ms: 200,
   },
 };
+
+const previewDefaultDataDirInfo: DataDirInfo = {
+  path: "C:\\Users\\Preview\\AppData\\Roaming\\BoltScribe",
+  default_path: "C:\\Users\\Preview\\AppData\\Roaming\\BoltScribe",
+  is_default: true,
+  cleanup_warning: null,
+};
+
+let previewDataDirInfo: DataDirInfo = clonePreview(previewDefaultDataDirInfo);
 
 const previewAudioInputDevices: AudioInputDevice[] = [
   { id: "system-default", name: "MacBook Pro 麦克风", is_default: true, platform: "macos" },

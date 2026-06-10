@@ -9,6 +9,7 @@ mod autostart;
 mod commands;
 mod config;
 mod corrector;
+mod data_dir;
 mod fn_trigger;
 mod history;
 mod injector;
@@ -23,19 +24,20 @@ mod windows;
 mod workflow;
 
 use commands::{
-    accessibility_permission_granted, apply_fn_trigger, cancel_current_workflow,
-    copy_text_to_clipboard, export_config, get_status, hide_main_window, import_config,
-    input_monitoring_permission_granted, load_audio_input_devices, load_audio_output_devices,
-    load_config, load_history, load_stats, open_accessibility_settings, open_app_dir,
-    open_input_monitoring_settings, request_accessibility_permission,
-    request_input_monitoring_permission, request_microphone_permission, save_config,
-    toggle_recording,
+    accessibility_permission_granted, apply_fn_trigger, cancel_current_workflow, choose_data_dir,
+    copy_text_to_clipboard, export_config, get_data_dir, get_status, hide_main_window,
+    import_config, input_monitoring_permission_granted, load_audio_input_devices,
+    load_audio_output_devices, load_config, load_history, load_stats, open_accessibility_settings,
+    open_app_dir, open_github_repository, open_input_monitoring_settings,
+    request_accessibility_permission, request_input_monitoring_permission,
+    request_microphone_permission, reset_data_dir, save_config, set_data_dir, toggle_recording,
 };
 use tauri::{Emitter, RunEvent};
 
 fn main() {
     let app = tauri::Builder::default()
         .plugin(shortcuts::global_shortcut_plugin())
+        .plugin(tauri_plugin_dialog::init())
         .manage(workflow::AppState::default())
         .setup(|app| {
             windows::ensure_main_window(app.handle())
@@ -81,6 +83,11 @@ fn main() {
             toggle_recording,
             cancel_current_workflow,
             open_app_dir,
+            open_github_repository,
+            get_data_dir,
+            choose_data_dir,
+            set_data_dir,
+            reset_data_dir,
             hide_main_window,
             accessibility_permission_granted,
             request_accessibility_permission,

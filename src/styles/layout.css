@@ -30,6 +30,10 @@
   min-height: 46px;
 }
 
+.brand-copy {
+  min-width: 0;
+}
+
 .brand-mark {
   width: 42px;
   height: 42px;
@@ -57,6 +61,33 @@
   margin-top: 3px;
   color: var(--muted-2);
   font-size: 11px;
+}
+
+.brand-github-button {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.brand-github-button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.brand-github-button:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.055);
+  transform: translateY(-1px);
 }
 
 nav {

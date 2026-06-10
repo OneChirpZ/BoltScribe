@@ -451,6 +451,55 @@ textarea.dictionary-lines {
   line-height: 1.35;
 }
 
+.data-dir-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.data-dir-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.data-dir-heading > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.data-dir-heading strong {
+  color: var(--text);
+}
+
+.data-dir-heading span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.data-dir-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  color: var(--text-soft);
+  background: rgba(0, 0, 0, 0.16);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.data-dir-actions {
+  justify-content: flex-start;
+}
+
 .status-chip.warning {
   color: #f2cd7c;
   border-color: rgba(245, 184, 75, 0.34);

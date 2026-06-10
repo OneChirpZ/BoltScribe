@@ -152,6 +152,13 @@ export interface ConfigImportResult {
   report: ConfigImportReport;
 }
 
+export interface DataDirInfo {
+  path: string;
+  default_path: string;
+  is_default: boolean;
+  cleanup_warning: string | null;
+}
+
 export interface WorkflowStatus {
   mode: "idle" | "recording" | "processing" | "error";
   message: string;

@@ -1,5 +1,5 @@
 import { useRef, type ChangeEvent } from "react";
-import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, OutputVolumeDuckingConfig } from "../types";
+import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, DataDirInfo, OutputVolumeDuckingConfig } from "../types";
 import Field from "../components/Field";
 import HelpTip from "../components/HelpTip";
 import PanelHeader from "../components/PanelHeader";
@@ -21,10 +21,14 @@ export default function SettingsPage({
   config,
   audioDevices,
   audioOutputDevices,
+  dataDir,
   onChange,
   onSave,
   onExportConfig,
   onImportConfig,
+  onOpenDataDir,
+  onChooseDataDir,
+  onResetDataDir,
   onRefreshAudioDevices,
   inputMonitoringGranted,
   inputMonitoringPermission,
@@ -38,10 +42,14 @@ export default function SettingsPage({
   config: AppConfig;
   audioDevices: AudioInputDevice[];
   audioOutputDevices: AudioOutputDevice[];
+  dataDir: DataDirInfo | null;
   onChange: (config: AppConfig) => void;
   onSave: () => void;
   onExportConfig: () => void;
   onImportConfig: (file: File) => void;
+  onOpenDataDir: () => void;
+  onChooseDataDir: () => void;
+  onResetDataDir: () => void;
   onRefreshAudioDevices: () => void;
   inputMonitoringGranted: boolean | null;
   inputMonitoringPermission: PermissionRequestState;
@@ -433,6 +441,31 @@ export default function SettingsPage({
           <Field label={text.settings.maxStorage}>
             <input type="number" min="0.01" max={maxStorageGb} step="0.01" value={storageGb} onChange={(event) => updateMaxStorageGb(event.target.value)} />
           </Field>
+          <div className="field-wide data-dir-panel">
+            <div className="data-dir-heading">
+              <div>
+                <strong>{text.settings.dataDirectory}</strong>
+                <span>{text.settings.dataDirHelp}</span>
+              </div>
+              <span className="status-chip">
+                {dataDir ? (dataDir.is_default ? text.settings.defaultDataDir : text.settings.customDataDir) : text.common.checking}
+              </span>
+            </div>
+            <div className="data-dir-path" title={dataDir?.path ?? ""}>
+              {dataDir?.path ?? text.common.checking}
+            </div>
+            <div className="section-actions data-dir-actions">
+              <button className="secondary small" type="button" disabled={!canSave} onClick={onOpenDataDir}>
+                {text.nav.openDataDir}
+              </button>
+              <button className="secondary small" type="button" disabled={!canSave} onClick={onChooseDataDir}>
+                {text.settings.changeDataDir}
+              </button>
+              <button className="secondary small" type="button" disabled={!canSave || !dataDir || dataDir.is_default} onClick={onResetDataDir}>
+                {text.settings.resetDataDir}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
