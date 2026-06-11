@@ -10,4 +10,5 @@
 - Use short-lived local branches for non-trivial work, named `codex/<task-name>` by default. Tiny, low-risk fixes may go directly on `main`.
 - Before branch switching, merging, rebasing, restoring, or creating worktrees, check `git status --short --branch`; also check `git worktree list --porcelain` when worktrees are involved.
 - Prefer squash-merging ordinary task branches into `main` after focused verification. Use normal merges for experiment lines whose history matters.
+- After a branch has been successfully merged into `master`, archive the local branch by renaming it under `archived/<branch-name>` instead of leaving it under its original `codex/...`, `feat/...`, or other active namespace.
 - Keep branches local unless the user asks to push, publish, create a PR, or make a remote backup. Release from `main` after version sync and packaging checks.
