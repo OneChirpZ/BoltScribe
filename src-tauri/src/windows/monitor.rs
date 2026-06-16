@@ -1,5 +1,11 @@
 use tauri::{Manager, Monitor, Wry};
 
+#[cfg(target_os = "macos")]
+use std::{
+    process::Stdio,
+    time::{Duration, Instant},
+};
+
 pub(crate) fn active_overlay_monitor(
     app: &tauri::AppHandle<Wry>,
 ) -> tauri::Result<Option<Monitor>> {
@@ -32,19 +38,6 @@ tell application "System Events"
   if name of frontApp is "BoltScribe" then
     return ""
   end if
-  set targetElement to missing value
-  try
-    set targetElement to value of attribute "AXFocusedUIElement" of frontApp
-  end try
-  if targetElement is not missing value then
-    try
-      set {x, y} to position of targetElement
-      set {w, h} to size of targetElement
-      if w > 0 and h > 0 then
-        return (((x + (w / 2)) as integer) as text) & "," & (((y + (h / 2)) as integer) as text)
-      end if
-    end try
-  end if
   set targetWindow to missing value
   repeat with candidateWindow in windows of frontApp
     try
@@ -65,17 +58,42 @@ tell application "System Events"
   return (((x + (w / 2)) as integer) as text) & "," & (((y + (h / 2)) as integer) as text)
 end tell
 "#;
-    let output = std::process::Command::new("osascript")
-        .arg("-e")
-        .arg(script)
-        .output()
-        .ok()?;
+    let output = run_osascript_with_timeout(script, Duration::from_millis(750))?;
     if !output.status.success() {
         return None;
     }
     let text = String::from_utf8(output.stdout).ok()?;
     let (x, y) = text.trim().split_once(',')?;
     Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+}
+
+#[cfg(target_os = "macos")]
+fn run_osascript_with_timeout(script: &str, timeout: Duration) -> Option<std::process::Output> {
+    let mut child = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(script)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let started_at = Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return child.wait_with_output().ok(),
+            Ok(None) if started_at.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
