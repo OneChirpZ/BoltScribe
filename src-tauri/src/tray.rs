@@ -3,6 +3,15 @@ use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, Wry};
+#[cfg(target_os = "windows")]
+use {
+    std::sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
+    std::time::Duration,
+    tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent},
+};
 
 const MENU_SHOW_MAIN: &str = "show_main_window";
 const MENU_TOGGLE_VOICE_INPUT: &str = "toggle_voice_input";
@@ -20,7 +29,7 @@ pub(crate) fn setup(app: &tauri::AppHandle<Wry>) -> tauri::Result<()> {
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .tooltip("BoltScribe")
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(show_menu_on_left_click())
         .on_menu_event(|app, event| match event.id().as_ref() {
             MENU_SHOW_MAIN => {
                 if let Err(err) = windows::show_main_window(app) {
@@ -41,10 +50,32 @@ pub(crate) fn setup(app: &tauri::AppHandle<Wry>) -> tauri::Result<()> {
             _ => {}
         });
 
+    #[cfg(target_os = "windows")]
+    {
+        let click_controller = Arc::new(WindowsTrayClickController::default());
+        builder = builder.on_tray_icon_event(move |tray, event| {
+            handle_windows_tray_icon_event(
+                click_controller.clone(),
+                tray.app_handle().clone(),
+                event,
+            );
+        });
+    }
+
     builder = builder.icon(tray_template_icon()).icon_as_template(true);
 
     builder.build(app)?;
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn show_menu_on_left_click() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_menu_on_left_click() -> bool {
+    true
 }
 
 pub(crate) fn sync_llm_correction_label(
@@ -161,6 +192,88 @@ fn voice_input_menu_state(mode: &workflow::WorkflowMode) -> VoiceInputMenuState 
     }
 }
 
+#[cfg(target_os = "windows")]
+#[derive(Default)]
+struct WindowsTrayClickController {
+    pending_left_click_id: AtomicU64,
+    ignore_next_left_button_up: AtomicBool,
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsTrayClickController {
+    fn queue_left_click(&self) -> Option<u64> {
+        if self
+            .ignore_next_left_button_up
+            .swap(false, Ordering::AcqRel)
+        {
+            return None;
+        }
+
+        Some(self.pending_left_click_id.fetch_add(1, Ordering::AcqRel) + 1)
+    }
+
+    fn cancel_for_double_click(&self) {
+        self.pending_left_click_id.fetch_add(1, Ordering::AcqRel);
+        self.ignore_next_left_button_up
+            .store(true, Ordering::Release);
+    }
+
+    fn is_left_click_current(&self, click_id: u64) -> bool {
+        self.pending_left_click_id.load(Ordering::Acquire) == click_id
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn handle_windows_tray_icon_event(
+    click_controller: Arc<WindowsTrayClickController>,
+    app: tauri::AppHandle<Wry>,
+    event: TrayIconEvent,
+) {
+    match event {
+        TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+        } => queue_windows_left_click_toggle(click_controller, app),
+        TrayIconEvent::DoubleClick {
+            button: MouseButton::Left,
+            ..
+        } => {
+            click_controller.cancel_for_double_click();
+            if let Err(err) = windows::show_main_window(&app) {
+                eprintln!("failed to show main window from tray double click: {err:?}");
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn queue_windows_left_click_toggle(
+    click_controller: Arc<WindowsTrayClickController>,
+    app: tauri::AppHandle<Wry>,
+) {
+    let Some(click_id) = click_controller.queue_left_click() else {
+        return;
+    };
+    std::thread::spawn(move || {
+        std::thread::sleep(windows_single_click_delay());
+        if !click_controller.is_left_click_current(click_id) {
+            return;
+        }
+        if let Err(err) = workflow::toggle_recording_from_app(app) {
+            eprintln!("failed to toggle voice input from tray left click: {err:?}");
+        }
+    });
+}
+
+#[cfg(target_os = "windows")]
+fn windows_single_click_delay() -> Duration {
+    let double_click_ms =
+        unsafe { ::windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() };
+    Duration::from_millis(u64::from(double_click_ms) + 50)
+}
+
 fn tray_template_icon() -> Image<'static> {
     const SIZE: usize = 64;
     const SUPERSAMPLE: usize = 4;
@@ -254,5 +367,38 @@ mod tests {
                 enabled: false,
             }
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_left_click_queues_toggle() {
+        let controller = WindowsTrayClickController::default();
+
+        let click_id = controller.queue_left_click();
+
+        assert_eq!(click_id, Some(1));
+        assert!(controller.is_left_click_current(1));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_double_click_cancels_pending_toggle() {
+        let controller = WindowsTrayClickController::default();
+        let click_id = controller.queue_left_click().unwrap();
+
+        controller.cancel_for_double_click();
+
+        assert!(!controller.is_left_click_current(click_id));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_double_click_ignores_following_left_button_up() {
+        let controller = WindowsTrayClickController::default();
+
+        controller.cancel_for_double_click();
+
+        assert_eq!(controller.queue_left_click(), None);
+        assert_eq!(controller.queue_left_click(), Some(2));
     }
 }
