@@ -340,6 +340,7 @@ let previewConfig: AppConfig = {
   system: {
     launch_at_login: false,
     hide_dock_icon: false,
+    tray_left_click_recording_enabled: true,
     fn_long_press_enabled: false,
     fn_long_press_duration_ms: 200,
   },

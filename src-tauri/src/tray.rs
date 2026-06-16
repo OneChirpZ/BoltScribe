@@ -253,18 +253,52 @@ fn queue_windows_left_click_toggle(
     click_controller: Arc<WindowsTrayClickController>,
     app: tauri::AppHandle<Wry>,
 ) {
-    let Some(click_id) = click_controller.queue_left_click() else {
+    let Some(click_id) = queue_windows_left_click_if_enabled(
+        &click_controller,
+        current_tray_left_click_recording_enabled(),
+    ) else {
         return;
     };
     std::thread::spawn(move || {
         std::thread::sleep(windows_single_click_delay());
-        if !click_controller.is_left_click_current(click_id) {
+        if !should_run_windows_left_click_toggle(
+            &click_controller,
+            click_id,
+            current_tray_left_click_recording_enabled(),
+        ) {
             return;
         }
         if let Err(err) = workflow::toggle_recording_from_app(app) {
             eprintln!("failed to toggle voice input from tray left click: {err:?}");
         }
     });
+}
+
+#[cfg(target_os = "windows")]
+fn queue_windows_left_click_if_enabled(
+    click_controller: &WindowsTrayClickController,
+    enabled: bool,
+) -> Option<u64> {
+    if !enabled {
+        return None;
+    }
+    click_controller.queue_left_click()
+}
+
+#[cfg(target_os = "windows")]
+fn should_run_windows_left_click_toggle(
+    click_controller: &WindowsTrayClickController,
+    click_id: u64,
+    enabled: bool,
+) -> bool {
+    enabled && click_controller.is_left_click_current(click_id)
+}
+
+#[cfg(target_os = "windows")]
+fn current_tray_left_click_recording_enabled() -> bool {
+    config::ConfigStore::load()
+        .map(|config| config.system.tray_left_click_recording_enabled)
+        .unwrap_or(true)
 }
 
 #[cfg(target_os = "windows")]
@@ -374,10 +408,39 @@ mod tests {
     fn windows_left_click_queues_toggle() {
         let controller = WindowsTrayClickController::default();
 
-        let click_id = controller.queue_left_click();
+        let click_id = queue_windows_left_click_if_enabled(&controller, true);
 
         assert_eq!(click_id, Some(1));
         assert!(controller.is_left_click_current(1));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_left_click_disabled_does_not_queue_toggle() {
+        let controller = WindowsTrayClickController::default();
+
+        let click_id = queue_windows_left_click_if_enabled(&controller, false);
+
+        assert_eq!(click_id, None);
+        assert!(!controller.is_left_click_current(1));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_left_click_disabled_before_delay_skips_toggle() {
+        let controller = WindowsTrayClickController::default();
+        let click_id = queue_windows_left_click_if_enabled(&controller, true).unwrap();
+
+        assert!(!should_run_windows_left_click_toggle(
+            &controller,
+            click_id,
+            false
+        ));
+        assert!(should_run_windows_left_click_toggle(
+            &controller,
+            click_id,
+            true
+        ));
     }
 
     #[cfg(target_os = "windows")]

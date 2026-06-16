@@ -145,6 +145,8 @@ pub struct SystemConfig {
     pub launch_at_login: bool,
     #[serde(default)]
     pub hide_dock_icon: bool,
+    #[serde(default = "default_tray_left_click_recording_enabled")]
+    pub tray_left_click_recording_enabled: bool,
     #[serde(default = "default_fn_long_press_enabled")]
     pub fn_long_press_enabled: bool,
     #[serde(default = "default_fn_long_press_duration_ms")]
@@ -446,6 +448,7 @@ impl Default for SystemConfig {
         Self {
             launch_at_login: false,
             hide_dock_icon: false,
+            tray_left_click_recording_enabled: default_tray_left_click_recording_enabled(),
             fn_long_press_enabled: default_fn_long_press_enabled(),
             fn_long_press_duration_ms: default_fn_long_press_duration_ms(),
         }
@@ -480,6 +483,10 @@ fn default_hotkey_slots() -> Vec<String> {
 
 fn default_hotkey_enabled_slots() -> Vec<bool> {
     vec![true, false]
+}
+
+fn default_tray_left_click_recording_enabled() -> bool {
+    true
 }
 
 fn default_fn_long_press_enabled() -> bool {
@@ -1330,6 +1337,7 @@ mod tests {
         assert_eq!(config.hotkey_enabled, vec![true, false]);
         assert_eq!(config.asr.provider, "volcengine");
         assert_eq!(config.asr.auth_mode, "api_key");
+        assert!(config.system.tray_left_click_recording_enabled);
         assert!(!config.system.fn_long_press_enabled);
         assert_eq!(config.system.fn_long_press_duration_ms, 200);
         assert_eq!(config.llm.endpoint, "https://api.openai.com/v1");
@@ -1372,6 +1380,19 @@ mod tests {
         let config: AppConfig = serde_json::from_value(value).unwrap();
 
         assert!(!config.system.fn_long_press_enabled);
+    }
+
+    #[test]
+    fn missing_tray_left_click_recording_defaults_to_enabled() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value["system"]
+            .as_object_mut()
+            .unwrap()
+            .remove("tray_left_click_recording_enabled");
+
+        let config: AppConfig = serde_json::from_value(value).unwrap();
+
+        assert!(config.system.tray_left_click_recording_enabled);
     }
 
     #[test]
@@ -1507,6 +1528,7 @@ mod tests {
         );
         assert!(!config.system.launch_at_login);
         assert!(!config.system.hide_dock_icon);
+        assert!(config.system.tray_left_click_recording_enabled);
         assert!(config.audio.uses_system_default_input_device());
     }
 

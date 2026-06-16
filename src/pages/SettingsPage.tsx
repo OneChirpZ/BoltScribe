@@ -8,7 +8,7 @@ import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrect
 import { hotkeyEnabledSlots, hotkeySlots, soundSourceShortcutKeyOptions, updateHotkey, updateHotkeyEnabled } from "../domain/hotkeys";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
 import type { PermissionRequestState } from "../domain/permissions";
-import { supportsDockVisibilityControl, supportsFnLongPressTrigger, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback } from "../domain/platform";
+import { supportsDockVisibilityControl, supportsFnLongPressTrigger, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback, supportsTraySingleClickRecording } from "../domain/platform";
 
 const maxHistoryRecords = 500;
 const bytesPerGb = 1024 * 1024 * 1024;
@@ -64,6 +64,7 @@ export default function SettingsPage({
   const storageGb = Number((config.retention.max_storage_bytes / bytesPerGb).toFixed(2));
   const canControlDockVisibility = supportsDockVisibilityControl();
   const canUseFnLongPressTrigger = supportsFnLongPressTrigger();
+  const canUseTraySingleClickRecording = supportsTraySingleClickRecording();
   const canDuckOutputVolume = supportsOutputVolumeDucking();
   const canUseSoundSourceFallback = supportsSoundSourceHotkeyFallback();
   const shortcutSlots = hotkeySlots(config);
@@ -226,6 +227,27 @@ export default function SettingsPage({
             text={text}
           />
         </div>
+        {canUseTraySingleClickRecording ? (
+          <div className="trigger-options">
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={config.system.tray_left_click_recording_enabled ?? true}
+                onChange={(event) =>
+                  onChange({
+                    ...config,
+                    system: {
+                      ...config.system,
+                      tray_left_click_recording_enabled: event.target.checked,
+                    },
+                  })
+                }
+              />
+              <span>{text.settings.traySingleClickRecording}</span>
+              <HelpTip content={text.settings.traySingleClickRecordingHelp} />
+            </label>
+          </div>
+        ) : null}
         {canUseFnLongPressTrigger ? (
           <div className="trigger-options">
             <label className="toggle-row">
