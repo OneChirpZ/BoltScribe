@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, HistoryRecord, InputStats, WorkflowStatus } from "../types";
+import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, DataDirInfo, HistoryRecord, InputStats, WorkflowStatus } from "../types";
 import type { Page } from "../domain/navigation";
 import type { PermissionRequestState } from "../domain/permissions";
 import { appLanguage, translations } from "../domain/i18n";
@@ -13,7 +13,7 @@ import HistoryRecordsPage from "../pages/HistoryRecordsPage";
 import ModelsPage from "../pages/ModelsPage";
 import CorrectionPage from "../pages/CorrectionPage";
 import SettingsPage from "../pages/SettingsPage";
-import { accessibilityPermissionGranted, applyFnTrigger, copyTextToClipboard, exportConfig as exportConfigCommand, getAppVersion, getStatus, hideMainWindow, importConfig as importConfigCommand, inputMonitoringPermissionGranted, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadAudioInputDevices, loadAudioOutputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, openInputMonitoringSettings, requestAccessibilityPermission, requestInputMonitoringPermission as requestInputMonitoringPermissionCommand, requestMicrophonePermission as requestMicrophonePermissionCommand, saveConfig, toggleRecording as toggleRecordingCommand } from "./tauriApi";
+import { accessibilityPermissionGranted, applyFnTrigger, chooseDataDir, copyTextToClipboard, exportConfig as exportConfigCommand, getAppVersion, getDataDir, getStatus, hideMainWindow, importConfig as importConfigCommand, inputMonitoringPermissionGranted, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadAudioInputDevices, loadAudioOutputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, openGitHubRepository, openInputMonitoringSettings, requestAccessibilityPermission, requestInputMonitoringPermission as requestInputMonitoringPermissionCommand, requestMicrophonePermission as requestMicrophonePermissionCommand, resetDataDir as resetDataDirCommand, saveConfig, setDataDir as setDataDirCommand, toggleRecording as toggleRecordingCommand } from "./tauriApi";
 
 const appIconUrl = new URL("../assets/app-icon.png", import.meta.url).href;
 const recentHistoryLimit = 6;
@@ -31,6 +31,7 @@ export default function MainApp() {
   const [status, setStatus] = useState<WorkflowStatus>(emptyStatus);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
   const [stats, setStats] = useState<InputStats | null>(null);
+  const [dataDir, setDataDirInfo] = useState<DataDirInfo | null>(null);
   const [audioDevices, setAudioDevices] = useState<AudioInputDevice[]>([]);
   const [audioOutputDevices, setAudioOutputDevices] = useState<AudioOutputDevice[]>([]);
   const [audioInputDevicesChecked, setAudioInputDevicesChecked] = useState(false);
@@ -96,17 +97,19 @@ export default function MainApp() {
   }
 
   async function refreshAll() {
-    const [loadedConfig, loadedStatus, records, loadedStats, hasAccessibility] = await Promise.all([
+    const [loadedConfig, loadedStatus, records, loadedStats, loadedDataDir, hasAccessibility] = await Promise.all([
       loadConfig(),
       getStatus(),
       loadHistory(recentHistoryLimit),
       loadStats(),
+      getDataDir(),
       accessibilityPermissionGranted(),
     ]);
     applyLoadedConfig(loadedConfig);
     setStatus(loadedStatus);
     setHistory(records);
     setStats(loadedStats);
+    setDataDirInfo(loadedDataDir);
     setAccessibilityGranted(hasAccessibility);
     if (needsAccessibilityPermission && !hasAccessibility) {
       setShowPermissionGuide(true);
@@ -430,6 +433,53 @@ export default function MainApp() {
     }
   }
 
+  async function refreshDataAfterDirectoryChange(info: DataDirInfo) {
+    setDataDirInfo(info);
+    await Promise.all([
+      refreshHistory(),
+      refreshStats(),
+      pageRef.current === "history" ? loadHistoryPage(historyPageIndexRef.current) : Promise.resolve(),
+    ]);
+  }
+
+  async function changeDataDir() {
+    setBusy(true);
+    try {
+      const selectedPath = await chooseDataDir();
+      if (!selectedPath) {
+        return;
+      }
+      const info = await setDataDirCommand(selectedPath);
+      await refreshDataAfterDirectoryChange(info);
+      setNotice(info.cleanup_warning ?? text.notices.dataDirChanged(info.path));
+    } catch (error) {
+      setNotice(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetDataDir() {
+    setBusy(true);
+    try {
+      const info = await resetDataDirCommand();
+      await refreshDataAfterDirectoryChange(info);
+      setNotice(info.cleanup_warning ?? text.notices.dataDirChanged(info.path));
+    } catch (error) {
+      setNotice(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openGitHubRepositoryPage() {
+    try {
+      await openGitHubRepository();
+    } catch (error) {
+      setNotice(String(error));
+    }
+  }
+
   async function importConfigFile(file: File) {
     setBusy(true);
     try {
@@ -461,11 +511,20 @@ export default function MainApp() {
       <aside className="sidebar">
         <div className="brand">
           <img className="brand-mark" src={appIconUrl} alt="" aria-hidden="true" />
-          <div>
+          <div className="brand-copy">
             <div className="brand-title">BoltScribe</div>
             <div className="brand-subtitle">{text.appSubtitle}</div>
             {appVersion ? <div className="brand-version">{text.common.version(appVersion)}</div> : null}
           </div>
+          <button
+            className="brand-github-button"
+            type="button"
+            onClick={() => { void openGitHubRepositoryPage(); }}
+            aria-label={text.nav.openGitHubRepository}
+            title={text.nav.openGitHubRepository}
+          >
+            <GitHubIcon />
+          </button>
         </div>
         <nav>
           <NavButton current={page} page="home" onClick={requestPageChange} label={text.nav.home} />
@@ -544,10 +603,14 @@ export default function MainApp() {
             config={config}
             audioDevices={audioDevices}
             audioOutputDevices={audioOutputDevices}
+            dataDir={dataDir}
             onChange={changeConfig}
             onSave={() => save(config)}
             onExportConfig={() => { void exportCurrentConfig(); }}
             onImportConfig={(file) => { void importConfigFile(file); }}
+            onOpenDataDir={() => { void openAppDir(); }}
+            onChooseDataDir={() => { void changeDataDir(); }}
+            onResetDataDir={() => { void resetDataDir(); }}
             onRefreshAudioDevices={() => { void refreshAudioDevices().catch((error) => setNotice(String(error))); }}
             inputMonitoringGranted={inputMonitoringGranted}
             inputMonitoringPermission={inputMonitoringPermission}
@@ -594,6 +657,17 @@ export default function MainApp() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function GitHubIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-1.05-.02-1.91-2.78.62-3.37-1.21-3.37-1.21-.45-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.96c.85 0 1.7.12 2.5.34 1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.07.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.81 0 .27.18.59.69.49A10.17 10.17 0 0 0 22 12.25C22 6.58 17.52 2 12 2Z"
+      />
+    </svg>
   );
 }
 

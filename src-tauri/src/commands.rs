@@ -1,16 +1,18 @@
 use crate::{
-    audio_devices, autostart, config, fn_trigger, history, injector, output_volume, paths,
-    recorder, shortcuts, tray, windows, workflow,
+    audio_devices, autostart, config, data_dir, fn_trigger, history, injector, output_volume,
+    paths, recorder, shortcuts, tray, windows, workflow,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
 use std::time::Duration;
 use tauri::{Emitter, State, Wry};
+use tauri_plugin_dialog::DialogExt;
 
 const AUDIO_DEVICE_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
+const GITHUB_REPOSITORY_URL: &str = "https://github.com/OneChirpZ/BoltScribe";
 static AUDIO_INPUT_DEVICE_REFRESH_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static AUDIO_OUTPUT_DEVICE_REFRESH_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
@@ -221,6 +223,41 @@ pub(crate) fn open_app_dir() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub(crate) fn open_github_repository() -> Result<(), String> {
+    open_url(GITHUB_REPOSITORY_URL).map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn get_data_dir() -> Result<data_dir::DataDirInfo, String> {
+    data_dir::info().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) async fn choose_data_dir(app: tauri::AppHandle<Wry>) -> Result<Option<String>, String> {
+    app.dialog()
+        .file()
+        .set_title("Select BoltScribe Data Folder")
+        .blocking_pick_folder()
+        .map(|path| {
+            path.into_path()
+                .map(|path| path.display().to_string())
+                .map_err(|err| err.to_string())
+        })
+        .transpose()
+}
+
+#[tauri::command]
+pub(crate) fn set_data_dir(path: String) -> Result<data_dir::DataDirInfo, String> {
+    data_dir::set_data_dir(PathBuf::from(path.trim())).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn reset_data_dir() -> Result<data_dir::DataDirInfo, String> {
+    data_dir::reset_data_dir().map_err(|err| err.to_string())
+}
+
 #[cfg(target_os = "macos")]
 fn open_path(path: &Path) -> std::io::Result<std::process::ExitStatus> {
     std::process::Command::new("open").arg(path).status()
@@ -234,6 +271,24 @@ fn open_path(path: &Path) -> std::io::Result<std::process::ExitStatus> {
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn open_path(path: &Path) -> std::io::Result<std::process::ExitStatus> {
     std::process::Command::new("xdg-open").arg(path).status()
+}
+
+#[cfg(target_os = "macos")]
+fn open_url(url: &str) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("open").arg(url).status()
+}
+
+#[cfg(target_os = "windows")]
+fn open_url(url: &str) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("rundll32")
+        .arg("url.dll,FileProtocolHandler")
+        .arg(url)
+        .status()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn open_url(url: &str) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("xdg-open").arg(url).status()
 }
 
 #[tauri::command]

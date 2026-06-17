@@ -36,3 +36,7 @@ export function supportsSoundSourceHotkeyFallback() {
 export function supportsFnLongPressTrigger() {
   return runtimePlatform() === "macos";
 }
+
+export function supportsTraySingleClickRecording() {
+  return runtimePlatform() === "windows";
+}
