@@ -11,6 +11,8 @@
 <p align="center">
   <a href="README.zh-CN.md">中文 README</a>
   ·
+  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.1">Latest Release</a>
+  ·
   <a href="#features">Features</a>
   ·
   <a href="#quick-start">Quick Start</a>
@@ -36,7 +38,9 @@ It runs as a lightweight tray/menu bar app, keeps data on your machine, and prov
 - **ASR plus correction:** transcribe speech with Volcengine ASR and optionally refine the text with an LLM.
 - **Flexible model setup:** use OpenAI-compatible providers, save model presets, and run multi-model race mode.
 - **Local history:** review previous recordings, transcripts, corrected text, logs, and input statistics.
-- **Tray workflow:** keep BoltScribe in the background with quick access to settings and correction controls.
+- **Tray workflow:** keep BoltScribe in the background, start/stop voice input from the tray menu, and optionally use single-click recording on Windows.
+- **Configurable local data:** keep the default local data folder or migrate history, stats, and recordings to a custom empty directory from Settings.
+- **Responsive capsule overlay:** the recording capsule is positioned without slow focused-element queries on macOS.
 - **Bilingual interface:** switch between Chinese and English.
 
 ## Architecture
@@ -46,6 +50,14 @@ It runs as a lightweight tray/menu bar app, keeps data on your machine, and prov
 BoltScribe is built with Tauri, React, TypeScript, and Rust. The React frontend lives in `src`; the Tauri backend lives in `src-tauri/src`.
 
 ## Quick Start
+
+### Download
+
+The latest public release is [BoltScribe v1.2.1](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.1).
+
+Available artifact:
+
+- macOS Apple Silicon: `BoltScribe_1.2.1_aarch64.dmg`
 
 ### Requirements
 
@@ -81,6 +93,12 @@ Release bundles are generated under:
 src-tauri/target/release/bundle/
 ```
 
+Before packaging a public build, run:
+
+```bash
+npm run version:check
+```
+
 ## Configuration
 
 BoltScribe stores user configuration in:
@@ -110,9 +128,17 @@ Runtime data stays on the local machine:
 
 ```text
 ~/Library/Application Support/BoltScribe/history.jsonl
+~/Library/Application Support/BoltScribe/input_stats.jsonl
 ~/Library/Application Support/BoltScribe/recordings/
 %APPDATA%\BoltScribe\history.jsonl
+%APPDATA%\BoltScribe\input_stats.jsonl
 %APPDATA%\BoltScribe\recordings\
+```
+
+You can move the data directory from Settings. BoltScribe migrates existing history, input stats, and recordings into the selected empty directory and stores the custom directory pointer in:
+
+```text
+~/.boltscribe/data_dir.txt
 ```
 
 History retention defaults to:

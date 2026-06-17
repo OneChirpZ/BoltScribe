@@ -11,6 +11,8 @@
 <p align="center">
   <a href="README.md">English README</a>
   ·
+  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.1">最新发布</a>
+  ·
   <a href="#功能亮点">功能亮点</a>
   ·
   <a href="#快速开始">快速开始</a>
@@ -36,7 +38,9 @@ BoltScribe 是一个 macOS 和 Windows 语音输入应用。按下全局快捷�
 - **ASR 与纠错：** 使用火山引擎 ASR 转写，并可通过 LLM 整理文本。
 - **灵活模型配置：** 支持 OpenAI 兼容服务商、模型预设和多模型竞速。
 - **本地历史记录：** 可查看录音、原始转写、纠错结果、日志和输入统计。
-- **托盘/菜单栏工作流：** 常驻后台，快速进入设置或开关 LLM 纠错。
+- **托盘/菜单栏工作流：** 常驻后台，可从托盘菜单开始/停止语音输入，并可在 Windows 上开启单击托盘录音。
+- **可迁移本地数据目录：** 可保留默认本地数据目录，也可在设置中把历史、统计和录音迁移到自定义空目录。
+- **更快的胶囊浮窗：** macOS 上不再通过慢速 focused element 查询定位录音胶囊。
 - **中英文界面：** 支持中文和英文界面切换。
 
 ## 架构
@@ -46,6 +50,14 @@ BoltScribe 是一个 macOS 和 Windows 语音输入应用。按下全局快捷�
 BoltScribe 使用 Tauri、React、TypeScript 和 Rust 构建。React 前端位于 `src`，Tauri 后端位于 `src-tauri/src`。
 
 ## 快速开始
+
+### 下载
+
+最新公开版本是 [BoltScribe v1.2.1](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.1)。
+
+当前发布产物：
+
+- macOS Apple Silicon：`BoltScribe_1.2.1_aarch64.dmg`
 
 ### 环境要求
 
@@ -81,6 +93,12 @@ npm run tauri build
 src-tauri/target/release/bundle/
 ```
 
+打公开发布包前请先运行：
+
+```bash
+npm run version:check
+```
+
 ## 配置
 
 BoltScribe 的用户配置保存在：
@@ -110,9 +128,17 @@ BoltScribe 需要麦克风权限来录音。在 macOS 上，它还需要辅助�
 
 ```text
 ~/Library/Application Support/BoltScribe/history.jsonl
+~/Library/Application Support/BoltScribe/input_stats.jsonl
 ~/Library/Application Support/BoltScribe/recordings/
 %APPDATA%\BoltScribe\history.jsonl
+%APPDATA%\BoltScribe\input_stats.jsonl
 %APPDATA%\BoltScribe\recordings\
+```
+
+可以在设置中移动数据目录。BoltScribe 会把现有历史、输入统计和录音迁移到选中的空目录，并把自定义目录指针保存在：
+
+```text
+~/.boltscribe/data_dir.txt
 ```
 
 默认保留策略：

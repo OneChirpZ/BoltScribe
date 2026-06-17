@@ -72,6 +72,6 @@
 
   <g transform="translate(168 458)" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="14">
     <rect width="844" height="36" rx="18" fill="#ffffff" fill-opacity="0.05" stroke="#ffffff" stroke-opacity="0.1"/>
-    <text x="24" y="24" fill="#d9d3c6">Local data: ~/.boltscribe/config.json · Application Support/BoltScribe/history.jsonl · recordings/*.wav</text>
+    <text x="24" y="24" fill="#d9d3c6">Local data: ~/.boltscribe/config.json · configurable data dir · history/input_stats/recordings</text>
   </g>
 </svg>

@@ -25,3 +25,13 @@ Release DMG files should include the same version in the filename, for example:
 ```text
 BoltScribe_1.1.0_aarch64.dmg
 ```
+
+Before publishing a GitHub release, verify the generated macOS app and DMG:
+
+```bash
+codesign --verify --deep --strict src-tauri/target/release/bundle/macos/BoltScribe.app
+hdiutil verify src-tauri/target/release/bundle/dmg/BoltScribe_<version>_aarch64.dmg
+shasum -a 256 src-tauri/target/release/bundle/dmg/BoltScribe_<version>_aarch64.dmg
+```
+
+If notarization environment variables are not configured, call that out in the release notes.

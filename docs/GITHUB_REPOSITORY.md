@@ -8,16 +8,17 @@ Use this when creating the public GitHub repository. Do not include personal API
 
 ## Short Description
 
-Local-first macOS voice input with ASR transcription, LLM correction, global hotkeys, and a Tauri menu bar workflow.
+Local-first macOS and Windows voice input with ASR transcription, LLM correction, global hotkeys, and a Tauri tray workflow.
 
 ## Longer Description
 
-BoltScribe is a macOS dictation app that records speech from a global hotkey, transcribes it with ASR, optionally corrects it through OpenAI-compatible LLM providers, and pastes the final text back into the active app. It includes model presets, cross-provider race mode, local history, retention controls, usage stats, and a floating recording capsule.
+BoltScribe is a macOS and Windows dictation app that records speech from a global hotkey or tray action, transcribes it with ASR, optionally corrects it through OpenAI-compatible LLM providers, and pastes the final text back into the active app. It includes model presets, cross-provider race mode, local history, configurable local data storage, retention controls, persistent usage stats, and a floating recording capsule.
 
 ## Suggested Topics
 
 ```text
 macos
+windows
 tauri
 react
 rust
@@ -29,6 +30,7 @@ asr
 llm
 openai-compatible
 menu-bar
+tray
 productivity
 accessibility
 volcengine
