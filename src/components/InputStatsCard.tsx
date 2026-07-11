@@ -1,7 +1,11 @@
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { DailyInputStats, InputStats } from "../types";
 import type { TextBundle } from "../domain/i18n";
 
-const dayMs = 24 * 60 * 60 * 1000;
+const heatmapCellSize = 9;
+const heatmapGap = 3;
+const defaultHeatmapWeeks = 16;
+const minHeatmapWeeks = 7;
 
 export default function InputStatsCard({
   stats,
@@ -10,8 +14,35 @@ export default function InputStatsCard({
   stats: InputStats | null;
   text: TextBundle;
 }) {
-  const cells = heatmapCells(stats?.daily ?? []);
+  const heatmapRef = useRef<HTMLDivElement>(null);
+  const [heatmapWeeks, setHeatmapWeeks] = useState(defaultHeatmapWeeks);
+  const cells = heatmapCells(stats?.daily ?? [], heatmapWeeks);
   const maxCount = Math.max(0, ...cells.map((cell) => cell.record_count));
+  const heatmapStyle = { "--input-heatmap-weeks": heatmapWeeks } as CSSProperties;
+
+  useEffect(() => {
+    const element = heatmapRef.current;
+    if (!element) {
+      return;
+    }
+
+    const updateWeeks = (width: number) => {
+      setHeatmapWeeks(heatmapWeekCount(width));
+    };
+
+    updateWeeks(element.clientWidth);
+    if (typeof ResizeObserver === "undefined") {
+      const handleResize = () => updateWeeks(element.clientWidth);
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      updateWeeks(entries[0]?.contentRect.width ?? element.clientWidth);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <section className="input-stats-card" aria-label={text.stats.title}>
@@ -25,7 +56,7 @@ export default function InputStatsCard({
       </div>
       <div className="input-heatmap-block">
         <div className="input-heatmap-title">{text.stats.heatmapLabel}</div>
-        <div className="input-heatmap" aria-label={text.stats.heatmapLabel}>
+        <div ref={heatmapRef} className="input-heatmap" style={heatmapStyle} aria-label={text.stats.heatmapLabel}>
           {cells.map((cell) => (
             <span
               key={cell.date}
@@ -44,33 +75,23 @@ export default function InputStatsCard({
 function StatValue({ label, value }: { label: string; value: string }) {
   return (
     <div className="input-stat-value">
-      <strong>{value}</strong>
       <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
 
-function heatmapCells(daily: DailyInputStats[]) {
-  if (daily.length === 0) {
-    return [];
-  }
-
+function heatmapCells(daily: DailyInputStats[], weekCount: number) {
   const byDate = new Map(daily.map((day) => [day.date, day]));
   const dates = daily.map((day) => parseDateKey(day.date)).filter((date): date is Date => Boolean(date));
-  if (dates.length === 0) {
-    return [];
-  }
-
   const today = startOfLocalDay(new Date());
-  const start = new Date(Math.min(...dates.map((date) => date.getTime())));
-  const leadingEmptyDays = start.getDay();
-  start.setDate(start.getDate() - leadingEmptyDays);
-
-  const lastStatsDay = new Date(Math.max(...dates.map((date) => date.getTime())));
+  const lastStatsDay = dates.length > 0 ? new Date(Math.max(...dates.map((date) => date.getTime()))) : today;
   const end = new Date(Math.max(today.getTime(), lastStatsDay.getTime()));
   const trailingEmptyDays = 6 - end.getDay();
   end.setDate(end.getDate() + trailingEmptyDays);
-  const totalDays = calendarDayIndex(end) - calendarDayIndex(start) + 1;
+  const totalDays = Math.max(minHeatmapWeeks, weekCount) * 7;
+  const start = new Date(end);
+  start.setDate(end.getDate() - totalDays + 1);
 
   return Array.from({ length: totalDays }, (_, index) => {
     const date = new Date(start);
@@ -83,6 +104,11 @@ function heatmapCells(daily: DailyInputStats[]) {
       audio_duration_ms: 0,
     };
   });
+}
+
+function heatmapWeekCount(width: number) {
+  const columns = Math.floor((width + heatmapGap) / (heatmapCellSize + heatmapGap));
+  return Math.max(minHeatmapWeeks, columns);
 }
 
 function parseDateKey(value: string) {
@@ -110,10 +136,6 @@ function heatmapLevel(count: number, maxCount: number) {
 
 function startOfLocalDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function calendarDayIndex(date: Date) {
-  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / dayMs);
 }
 
 function formatDateKey(date: Date) {

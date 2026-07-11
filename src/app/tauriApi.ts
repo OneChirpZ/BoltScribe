@@ -60,7 +60,7 @@ export function loadAudioOutputDevices() {
 
 export function getAppVersion() {
   if (browserPreviewEnabled()) {
-    return Promise.resolve("1.1.0");
+    return Promise.resolve(__APP_VERSION__);
   }
   return getVersion();
 }
@@ -374,19 +374,28 @@ const previewHistory: HistoryRecord[] = [
 
 const previewStats: InputStats = {
   total_character_count: 17909,
-  total_audio_duration_ms: 6360000,
+  total_audio_duration_ms: 69180000,
   average_chars_per_minute: 168,
   daily: Array.from({ length: 70 }, (_, index) => {
-    const date = new Date(Date.UTC(2026, 2, 12 + index));
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    date.setDate(date.getDate() - 69 + index);
     const active = index > 60 ? index - 60 : 0;
     return {
-      date: date.toISOString().slice(0, 10),
+      date: previewDateKey(date),
       record_count: active,
       character_count: active * 420,
       audio_duration_ms: active * 42000,
     };
   }),
 };
+
+function previewDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 function previewHistoryRecord(id: string, created_at: string, text: string): HistoryRecord {
   return {

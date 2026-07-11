@@ -90,6 +90,21 @@ impl AppState {
                 last_record_id: None,
             })
     }
+
+    pub(crate) fn run_while_inactive<T>(&self, action: impl FnOnce() -> Result<T>) -> Result<T> {
+        let runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| anyhow!("Failed to lock workflow state"))?;
+        if runtime.recording || runtime.processing {
+            return Err(anyhow!(
+                "Cannot change the data folder while recording or processing"
+            ));
+        }
+        let result = action();
+        drop(runtime);
+        result
+    }
 }
 
 pub fn toggle_recording_from_app(app: AppHandle) -> Result<WorkflowStatus> {
@@ -833,6 +848,34 @@ fn emit_status(app: &AppHandle, status: &WorkflowStatus) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inactive_workflow_allows_guarded_action() {
+        let state = AppState::default();
+
+        assert_eq!(state.run_while_inactive(|| Ok(42)).unwrap(), 42);
+    }
+
+    #[test]
+    fn active_workflow_rejects_guarded_action() {
+        for (recording, processing) in [(true, false), (false, true)] {
+            let state = AppState::default();
+            {
+                let mut runtime = state.runtime.lock().unwrap();
+                runtime.recording = recording;
+                runtime.processing = processing;
+            }
+            let called = std::cell::Cell::new(false);
+
+            let result = state.run_while_inactive(|| {
+                called.set(true);
+                Ok(())
+            });
+
+            assert!(result.is_err());
+            assert!(!called.get());
+        }
+    }
 
     #[test]
     fn active_race_targets_require_enabled_and_are_deduplicated() {

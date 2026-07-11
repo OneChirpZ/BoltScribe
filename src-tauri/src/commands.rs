@@ -249,13 +249,22 @@ pub(crate) async fn choose_data_dir(app: tauri::AppHandle<Wry>) -> Result<Option
 }
 
 #[tauri::command]
-pub(crate) fn set_data_dir(path: String) -> Result<data_dir::DataDirInfo, String> {
-    data_dir::set_data_dir(PathBuf::from(path.trim())).map_err(|err| err.to_string())
+pub(crate) fn set_data_dir(
+    path: String,
+    state: State<'_, workflow::AppState>,
+) -> Result<data_dir::DataDirInfo, String> {
+    state
+        .run_while_inactive(|| data_dir::set_data_dir(PathBuf::from(path.trim())))
+        .map_err(|err| err.to_string())
 }
 
 #[tauri::command]
-pub(crate) fn reset_data_dir() -> Result<data_dir::DataDirInfo, String> {
-    data_dir::reset_data_dir().map_err(|err| err.to_string())
+pub(crate) fn reset_data_dir(
+    state: State<'_, workflow::AppState>,
+) -> Result<data_dir::DataDirInfo, String> {
+    state
+        .run_while_inactive(data_dir::reset_data_dir)
+        .map_err(|err| err.to_string())
 }
 
 #[cfg(target_os = "macos")]

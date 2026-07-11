@@ -1,7 +1,7 @@
 export default function HelpTip({ content }: { content: string }) {
   return (
-    <span className="help-tip" tabIndex={0} aria-label={content} data-tooltip={content}>
+    <button className="help-tip" type="button" aria-label={content} data-tooltip={content}>
       ?
-    </span>
+    </button>
   );
 }

@@ -11,7 +11,7 @@
 <p align="center">
   <a href="README.md">English README</a>
   ·
-  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.1">最新发布</a>
+  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.2">最新发布</a>
   ·
   <a href="#功能亮点">功能亮点</a>
   ·
@@ -53,11 +53,12 @@ BoltScribe 使用 Tauri、React、TypeScript 和 Rust 构建。React 前端位�
 
 ### 下载
 
-最新公开版本是 [BoltScribe v1.2.1](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.1)。
+最新公开版本是 [BoltScribe v1.2.2](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.2)。
 
 当前发布产物：
 
-- macOS Apple Silicon：`BoltScribe_1.2.1_aarch64.dmg`
+- macOS Apple Silicon：`BoltScribe_1.2.2_aarch64.dmg`
+- Windows x64：`BoltScribe_1.2.2_x64-setup.exe`
 
 ### 环境要求
 

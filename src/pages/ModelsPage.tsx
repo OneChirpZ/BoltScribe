@@ -4,14 +4,12 @@ import Field from "../components/Field";
 import HelpTip from "../components/HelpTip";
 import PanelHeader from "../components/PanelHeader";
 import type { TextBundle } from "../domain/i18n";
-import { defaultRecordingOverlayScale, maxRecordingOverlayScale, minRecordingOverlayScale } from "../domain/overlay";
 import { optionalNumber } from "../domain/numbers";
 import { builtInModelsForProvider, deleteModelPreset, modelsForProvider, providerLabel, providerPresets, saveModelPreset, thinkingEfforts } from "../domain/providers";
 
 export default function ModelsPage({
   config,
   onChange,
-  onSave,
   onSaveConfig,
   onNotice,
   canSave,
@@ -19,7 +17,6 @@ export default function ModelsPage({
 }: {
   config: AppConfig;
   onChange: (config: AppConfig) => void;
-  onSave: () => void;
   onSaveConfig: (config: AppConfig, successMessage?: string) => void;
   onNotice: (message: string) => void;
   canSave: boolean;
@@ -45,7 +42,26 @@ export default function ModelsPage({
     setSelectedPresetModel(presetModels.some((model) => model === config.llm.model) ? config.llm.model : "__custom__");
   }, [providerKey]);
 
+  useEffect(() => {
+    const hideSecrets = () => {
+      setShowAsrAccessKey(false);
+      setShowLlmApiKey(false);
+    };
+    const hideSecretsWhenDocumentIsHidden = () => {
+      if (document.hidden) {
+        hideSecrets();
+      }
+    };
+    window.addEventListener("blur", hideSecrets);
+    document.addEventListener("visibilitychange", hideSecretsWhenDocumentIsHidden);
+    return () => {
+      window.removeEventListener("blur", hideSecrets);
+      document.removeEventListener("visibilitychange", hideSecretsWhenDocumentIsHidden);
+    };
+  }, []);
+
   function updateProvider(provider: string) {
+    setShowLlmApiKey(false);
     const preset = providerPresets[provider as keyof typeof providerPresets];
     const provider_settings = upsertProviderSettings(config.llm.provider_settings ?? [], {
       provider: providerKey,
@@ -92,6 +108,7 @@ export default function ModelsPage({
   }
 
   function updateAsrAuthMode(auth_mode: string) {
+    setShowAsrAccessKey(false);
     onChange({ ...config, asr: { ...config.asr, auth_mode } });
   }
 
@@ -145,32 +162,36 @@ export default function ModelsPage({
   }
 
   return (
-    <section className="panel page-stack">
-      <PanelHeader title={text.models.title} action={<button className="primary small" disabled={!canSave} onClick={onSave}>{text.common.save}</button>} />
+    <section className="panel page-stack config-page models-page">
+      <PanelHeader title={text.models.title} />
 
       <div className="settings-section">
         <div className="section-title">
           <h2>{text.models.asr}</h2>
         </div>
         <div className="form-grid">
-          <Field label={text.models.asrAuthMode}>
-            <select value={asrAuthMode} onChange={(event) => updateAsrAuthMode(event.target.value)}>
-              <option value="api_key">{text.models.asrAuthModeNew}</option>
-              <option value="legacy">{text.models.asrAuthModeLegacy}</option>
-            </select>
-          </Field>
-          <Field label={text.models.asrLanguage}>
+          <SegmentedField
+            label={text.models.asrAuthMode}
+            value={asrAuthMode}
+            options={[
+              { value: "api_key", label: text.models.asrAuthModeNew },
+              { value: "legacy", label: text.models.asrAuthModeLegacy },
+            ]}
+            onChange={updateAsrAuthMode}
+          />
+          <Field label={text.models.asrLanguage} className="field-compact">
             <input value={config.asr.language} onChange={(event) => onChange({ ...config, asr: { ...config.asr, language: event.target.value } })} />
           </Field>
           {asrAuthMode === "legacy" ? (
-            <Field label={text.models.appKey}>
+            <Field label={text.models.appKey} className="field-medium">
               <input value={config.asr.app_key} onChange={(event) => onChange({ ...config, asr: { ...config.asr, app_key: event.target.value } })} />
             </Field>
           ) : null}
-          <Field label={asrAccessKeyLabel}>
+          <Field label={asrAccessKeyLabel} className="field-medium" group>
             <div className="secret-field">
               <input
                 type={showAsrAccessKey ? "text" : "password"}
+                aria-label={asrAccessKeyLabel}
                 value={config.asr.access_key}
                 onChange={(event) => onChange({ ...config, asr: { ...config.asr, access_key: event.target.value } })}
               />
@@ -184,38 +205,11 @@ export default function ModelsPage({
               </button>
             </div>
           </Field>
-          <Field label="Resource ID">
+          <Field label="Resource ID" className="field-medium">
             <input value={config.asr.resource_id} onChange={(event) => onChange({ ...config, asr: { ...config.asr, resource_id: event.target.value } })} />
           </Field>
-          <Field label="WebSocket URL">
+          <Field label="WebSocket URL" className="field-wide field-long">
             <input value={config.asr.stream_url} onChange={(event) => onChange({ ...config, asr: { ...config.asr, stream_url: event.target.value } })} />
-          </Field>
-        </div>
-      </div>
-
-      <div className="settings-section">
-        <div className="section-title">
-          <h2>{text.models.interface}</h2>
-        </div>
-        <div className="form-grid">
-          <Field label={text.models.overlayScale(Math.round((config.ui.recording_overlay_scale ?? defaultRecordingOverlayScale) * 200))} className="field-wide compact-range-field">
-            <div className="range-compact">
-              <input
-                className="range-input"
-                type="range"
-                min={String(minRecordingOverlayScale)}
-                max={String(maxRecordingOverlayScale)}
-                step="0.05"
-                value={config.ui.recording_overlay_scale ?? defaultRecordingOverlayScale}
-                onChange={(event) => onChange({
-                  ...config,
-                  ui: {
-                    ...config.ui,
-                    recording_overlay_scale: Number(event.target.value),
-                  },
-                })}
-              />
-            </div>
           </Field>
         </div>
       </div>
@@ -225,26 +219,29 @@ export default function ModelsPage({
           <h2>{text.models.providerSettings}</h2>
         </div>
         <div className="form-grid">
-          <Field label={text.models.provider}>
-            <select value={providerKey} onChange={(event) => updateProvider(event.target.value)}>
-              {Object.entries(providerPresets).map(([key, preset]) => (
-                <option key={key} value={key}>{preset.label}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label={text.models.apiFormat}>
-            <select value={config.llm.api_format} onChange={(event) => updateProviderField("api_format", event.target.value)}>
-              <option value="responses">Responses</option>
-              <option value="chat_completions">Chat Completions</option>
-            </select>
-          </Field>
-          <Field label="Endpoint">
+          <SegmentedField
+            label={text.models.provider}
+            value={providerKey}
+            options={Object.entries(providerPresets).map(([value, preset]) => ({ value, label: preset.label }))}
+            onChange={updateProvider}
+          />
+          <SegmentedField
+            label={text.models.apiFormat}
+            value={config.llm.api_format}
+            options={[
+              { value: "responses", label: "Responses" },
+              { value: "chat_completions", label: "Chat Completions" },
+            ]}
+            onChange={(value) => updateProviderField("api_format", value)}
+          />
+          <Field label="Endpoint" className="field-wide field-long">
             <input value={config.llm.endpoint} onChange={(event) => updateProviderField("endpoint", event.target.value)} />
           </Field>
-          <Field label={text.models.apiKey}>
+          <Field label={text.models.apiKey} className="field-wide field-long" group>
             <div className="secret-field">
               <input
                 type={showLlmApiKey ? "text" : "password"}
+                aria-label={text.models.apiKey}
                 value={config.llm.api_key}
                 onChange={(event) => updateProviderField("api_key", event.target.value)}
               />
@@ -269,7 +266,7 @@ export default function ModelsPage({
             <button className="secondary small" type="button" disabled={!canSave} onClick={saveCurrentModelPreset}>{text.models.savePreset}</button>
           </div>
         </div>
-        <div className="form-grid">
+        <div className="form-grid model-primary-grid">
           <Field label={text.models.modelPreset}>
             <select
               value={selectedPresetModel}
@@ -290,39 +287,43 @@ export default function ModelsPage({
           <Field label={text.models.model}>
             <input value={config.llm.model} onChange={(event) => updateModel(event.target.value)} />
           </Field>
-          <Field label="Temperature">
-            <input type="number" min="0" max="2" step="0.1" value={config.llm.temperature} onChange={(event) => onChange({ ...config, llm: { ...config.llm, temperature: Number(event.target.value) } })} />
-          </Field>
-          <Field label={text.models.timeoutSecs}>
-            <input type="number" min="1" value={config.llm.timeout_secs} onChange={(event) => onChange({ ...config, llm: { ...config.llm, timeout_secs: Number(event.target.value) } })} />
-          </Field>
-          <Field label="Max Output Tokens">
-            <input
-              type="number"
-              min="1"
-              value={config.llm.max_output_tokens ?? ""}
-              onChange={(event) => onChange({ ...config, llm: { ...config.llm, max_output_tokens: optionalNumber(event.target.value) } })}
-            />
-          </Field>
-          <label className="toggle-row inline-toggle">
-            <input
-              type="checkbox"
-              checked={config.llm.thinking_enabled}
-              onChange={(event) => onChange({ ...config, llm: { ...config.llm, thinking_enabled: event.target.checked } })}
-            />
-            Thinking
-          </label>
-          <Field label={text.models.thinkingEffort}>
-            <select
-              value={config.llm.thinking_effort}
-              disabled={!config.llm.thinking_enabled}
-              onChange={(event) => onChange({ ...config, llm: { ...config.llm, thinking_effort: event.target.value } })}
-            >
-              {thinkingEfforts.map((effort) => (
-                <option key={effort} value={effort}>{effort}</option>
-              ))}
-            </select>
-          </Field>
+          <div className="field-wide compact-number-grid">
+            <Field label="Temperature">
+              <input type="number" min="0" max="2" step="0.1" value={config.llm.temperature} onChange={(event) => onChange({ ...config, llm: { ...config.llm, temperature: Number(event.target.value) } })} />
+            </Field>
+            <Field label={text.models.timeoutSecs}>
+              <input type="number" min="1" value={config.llm.timeout_secs} onChange={(event) => onChange({ ...config, llm: { ...config.llm, timeout_secs: Number(event.target.value) } })} />
+            </Field>
+            <Field label="Max Output Tokens">
+              <input
+                type="number"
+                min="1"
+                value={config.llm.max_output_tokens ?? ""}
+                onChange={(event) => onChange({ ...config, llm: { ...config.llm, max_output_tokens: optionalNumber(event.target.value) } })}
+              />
+            </Field>
+          </div>
+          <div className="field-wide compact-control-row">
+            <label className="toggle-row inline-toggle">
+              <input
+                type="checkbox"
+                checked={config.llm.thinking_enabled}
+                onChange={(event) => onChange({ ...config, llm: { ...config.llm, thinking_enabled: event.target.checked } })}
+              />
+              <span>Thinking</span>
+            </label>
+            <Field label={text.models.thinkingEffort} className="field-compact">
+              <select
+                value={config.llm.thinking_effort}
+                disabled={!config.llm.thinking_enabled}
+                onChange={(event) => onChange({ ...config, llm: { ...config.llm, thinking_effort: event.target.value } })}
+              >
+                {thinkingEfforts.map((effort) => (
+                  <option key={effort} value={effort}>{effort}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
         </div>
       </div>
 
@@ -333,30 +334,31 @@ export default function ModelsPage({
             <HelpTip content={text.models.raceHelp} />
           </h2>
         </div>
-        <div className="form-grid">
+        <div className="race-settings-stack">
           <label className="toggle-row inline-toggle">
             <input
               type="checkbox"
               checked={config.llm.race_enabled ?? false}
               onChange={(event) => updateRaceEnabled(event.target.checked)}
             />
-            {text.models.enableRace}
+            <span>{text.models.enableRace}</span>
           </label>
-          <Field label={text.models.raceModels} className="field-wide">
-            <div className="race-model-list">
-              {raceTargetOptions.map((target) => (
-                <label key={raceTargetKey(target)} className="race-model-option">
-                  <input
-                    type="checkbox"
-                    checked={raceTargetKeys.has(raceTargetKey(target))}
-                    disabled={!config.llm.race_enabled}
-                    onChange={(event) => toggleRaceTarget(target, event.target.checked)}
-                  />
-                  <span>{providerLabel(target.provider)} / {target.model}</span>
-                </label>
-              ))}
-            </div>
-          </Field>
+          {config.llm.race_enabled ? (
+            <Field label={text.models.raceModels} group>
+              <div className="race-model-list">
+                {raceTargetOptions.map((target) => (
+                  <label key={raceTargetKey(target)} className="race-model-option">
+                    <input
+                      type="checkbox"
+                      checked={raceTargetKeys.has(raceTargetKey(target))}
+                      onChange={(event) => toggleRaceTarget(target, event.target.checked)}
+                    />
+                    <span>{providerLabel(target.provider)} / {target.model}</span>
+                  </label>
+                ))}
+              </div>
+            </Field>
+          ) : <p className="settings-help-text">{text.models.raceHelp}</p>}
         </div>
       </div>
     </section>
@@ -389,9 +391,48 @@ function selectedRaceTargets(config: AppConfig): RaceModelTarget[] {
 }
 
 function allRaceTargetOptions(config: AppConfig): RaceModelTarget[] {
-  return uniqueRaceTargets(Object.keys(providerPresets).flatMap((provider) => (
+  const configuredTargets = Object.keys(providerPresets).flatMap((provider) => (
     modelsForProvider(provider, config.llm.model_presets).map((model) => ({ provider, model }))
-  )));
+  ));
+  const currentTarget = config.llm.model.trim()
+    ? [{ provider: config.llm.provider, model: config.llm.model }]
+    : [];
+  return uniqueRaceTargets([...configuredTargets, ...selectedRaceTargets(config), ...currentTarget]);
+}
+
+function SegmentedField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="field">
+      <span className="field-label">{label}</span>
+      <div className="segmented-control" role="group" aria-label={label}>
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={option.value === value ? "active" : ""}
+            aria-pressed={option.value === value}
+            onClick={() => {
+              if (option.value !== value) {
+                onChange(option.value);
+              }
+            }}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function uniqueRaceTargets(targets: RaceModelTarget[]) {

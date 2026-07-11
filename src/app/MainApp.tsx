@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, DataDirInfo, HistoryRecord, InputStats, WorkflowStatus } from "../types";
 import type { Page } from "../domain/navigation";
 import type { PermissionRequestState } from "../domain/permissions";
 import { appLanguage, translations } from "../domain/i18n";
-import { requiresAccessibilityPermission } from "../domain/platform";
+import { requiresAccessibilityPermission, supportsFnLongPressTrigger } from "../domain/platform";
 import { emptyStatus } from "../domain/workflow";
 import NavButton from "../components/NavButton";
 import InputStatsCard from "../components/InputStatsCard";
@@ -41,6 +41,7 @@ export default function MainApp() {
   const [historyHasOlder, setHistoryHasOlder] = useState(false);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
   const [accessibilityGranted, setAccessibilityGranted] = useState<boolean | null>(null);
   const [inputMonitoringGranted, setInputMonitoringGranted] = useState<boolean | null>(null);
   const [inputMonitoringPermission, setInputMonitoringPermission] = useState<PermissionRequestState>("unknown");
@@ -52,6 +53,10 @@ export default function MainApp() {
   const configRef = useRef<AppConfig | null>(null);
   const savedConfigRef = useRef<AppConfig | null>(null);
   const pageRef = useRef(page);
+  const contentScrollRef = useRef<HTMLDivElement | null>(null);
+  const unsavedDialogRef = useRef<HTMLElement | null>(null);
+  const unsavedCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const focusBeforeUnsavedDialogRef = useRef<HTMLElement | null>(null);
   const historyPageIndexRef = useRef(historyPageIndex);
 
   async function refreshHistory() {
@@ -97,22 +102,40 @@ export default function MainApp() {
   }
 
   async function refreshAll() {
-    const [loadedConfig, loadedStatus, records, loadedStats, loadedDataDir, hasAccessibility] = await Promise.all([
-      loadConfig(),
+    const loadedConfig = await loadConfig();
+    applyLoadedConfig(loadedConfig);
+    const [statusResult, historyResult, statsResult, dataDirResult, accessibilityResult] = await Promise.allSettled([
       getStatus(),
       loadHistory(recentHistoryLimit),
       loadStats(),
       getDataDir(),
       accessibilityPermissionGranted(),
     ]);
-    applyLoadedConfig(loadedConfig);
-    setStatus(loadedStatus);
-    setHistory(records);
-    setStats(loadedStats);
-    setDataDirInfo(loadedDataDir);
-    setAccessibilityGranted(hasAccessibility);
-    if (needsAccessibilityPermission && !hasAccessibility) {
-      setShowPermissionGuide(true);
+
+    if (statusResult.status === "fulfilled") {
+      setStatus(statusResult.value);
+    }
+    if (historyResult.status === "fulfilled") {
+      setHistory(historyResult.value);
+    }
+    if (statsResult.status === "fulfilled") {
+      setStats(statsResult.value);
+    }
+    if (dataDirResult.status === "fulfilled") {
+      setDataDirInfo(dataDirResult.value);
+    }
+    if (accessibilityResult.status === "fulfilled") {
+      setAccessibilityGranted(accessibilityResult.value);
+      if (needsAccessibilityPermission && !accessibilityResult.value) {
+        setShowPermissionGuide(true);
+      }
+    }
+
+    const errors = [statusResult, historyResult, statsResult, dataDirResult, accessibilityResult]
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => String(result.reason));
+    if (errors.length > 0) {
+      throw new Error(errors.join("; "));
     }
   }
 
@@ -149,6 +172,9 @@ export default function MainApp() {
 
   useEffect(() => {
     pageRef.current = page;
+    if (contentScrollRef.current) {
+      contentScrollRef.current.scrollTop = 0;
+    }
     if (page !== "history") {
       return;
     }
@@ -180,6 +206,23 @@ export default function MainApp() {
   }, [notice]);
 
   useEffect(() => {
+    if (!pendingConfigAction) {
+      const previousFocus = focusBeforeUnsavedDialogRef.current;
+      focusBeforeUnsavedDialogRef.current = null;
+      previousFocus?.focus();
+      return;
+    }
+    if (!focusBeforeUnsavedDialogRef.current && document.activeElement instanceof HTMLElement) {
+      focusBeforeUnsavedDialogRef.current = document.activeElement;
+    }
+    if (busy) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => unsavedCancelButtonRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [pendingConfigAction, busy]);
+
+  useEffect(() => {
     if (!config?.system.fn_long_press_enabled) {
       setInputMonitoringGranted(null);
       setInputMonitoringPermission("unknown");
@@ -209,15 +252,22 @@ export default function MainApp() {
 
   async function persistConfig(nextConfig: AppConfig, successMessage?: string) {
     setBusy(true);
+    setSavingConfig(true);
     try {
-      const savedConfig = await saveConfig(nextConfig);
-      applyLoadedConfig(savedConfig);
+      const persistedConfig = await saveConfig(nextConfig);
+      savedConfigRef.current = persistedConfig;
+      setSavedConfig(persistedConfig);
+      if (!isConfigDirty(configRef.current, nextConfig)) {
+        configRef.current = persistedConfig;
+        setConfig(persistedConfig);
+      }
       setNotice(successMessage ?? text.notices.configSaved);
-      return savedConfig;
+      return persistedConfig;
     } catch (error) {
       setNotice(String(error));
       return null;
     } finally {
+      setSavingConfig(false);
       setBusy(false);
     }
   }
@@ -259,7 +309,7 @@ export default function MainApp() {
     completePendingConfigAction(action);
   }
 
-  function discardPendingConfig() {
+  async function discardPendingConfig() {
     const action = pendingConfigAction;
     if (!action) {
       return;
@@ -267,6 +317,19 @@ export default function MainApp() {
     const persisted = savedConfigRef.current;
     if (persisted) {
       applyLoadedConfig(persisted);
+      if (supportsFnLongPressTrigger()) {
+        setBusy(true);
+        try {
+          await applyFnTrigger(
+            persisted.system.fn_long_press_enabled ?? false,
+            persisted.system.fn_long_press_duration_ms ?? 200,
+          );
+        } catch (error) {
+          setNotice(String(error));
+        } finally {
+          setBusy(false);
+        }
+      }
     }
     setPendingConfigAction(null);
     completePendingConfigAction(action);
@@ -504,7 +567,35 @@ export default function MainApp() {
     loadHistoryPage(nextPage).catch((error) => setNotice(String(error)));
   }
 
+  function handleUnsavedDialogKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape" && !busy) {
+      event.preventDefault();
+      setPendingConfigAction(null);
+      return;
+    }
+    if (event.key !== "Tab") {
+      return;
+    }
+
+    const buttons = Array.from(unsavedDialogRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? []);
+    if (buttons.length === 0) {
+      return;
+    }
+    const firstButton = buttons[0];
+    const lastButton = buttons[buttons.length - 1];
+    if (event.shiftKey && document.activeElement === firstButton) {
+      event.preventDefault();
+      lastButton.focus();
+    } else if (!event.shiftKey && document.activeElement === lastButton) {
+      event.preventDefault();
+      firstButton.focus();
+    }
+  }
+
   const canSave = Boolean(config) && !busy;
+  const canSaveChanges = canSave && hasUnsavedChanges;
+  const canChangeDataDir = canSave && status.mode !== "recording" && status.mode !== "processing";
+  const showSaveBar = Boolean(config) && (page === "models" || page === "correction" || page === "settings");
 
   return (
     <div className="app-shell">
@@ -542,97 +633,129 @@ export default function MainApp() {
       </aside>
 
       <main className="content">
-        {needsAccessibilityPermission && accessibilityGranted === false ? (
-          <div className="permission-banner">
-            <div>
-              <strong>{text.permission.bannerTitle}</strong>
-              <span>{text.permission.bannerText}</span>
+        <div className="content-scroll" ref={contentScrollRef}>
+          {needsAccessibilityPermission && accessibilityGranted === false ? (
+            <div className="permission-banner">
+              <div>
+                <strong>{text.permission.bannerTitle}</strong>
+                <span>{text.permission.bannerText}</span>
+              </div>
+              <div className="permission-actions">
+                <button className="secondary small" onClick={() => refreshAccessibility().catch((error) => setNotice(String(error)))}>{text.permission.recheck}</button>
+                <button className="secondary small" onClick={() => setShowPermissionGuide(true)}>{text.home.permissionGuide}</button>
+                <button className="secondary small" onClick={openAccessibilityPermission}>{text.permission.openSettings}</button>
+              </div>
             </div>
-            <div className="permission-actions">
-              <button className="secondary small" onClick={() => refreshAccessibility().catch((error) => setNotice(String(error)))}>{text.permission.recheck}</button>
-              <button className="secondary small" onClick={() => setShowPermissionGuide(true)}>{text.home.permissionGuide}</button>
-              <button className="secondary small" onClick={openAccessibilityPermission}>{text.permission.openSettings}</button>
+          ) : null}
+          {!config ? (
+            <section className="panel">
+              <h1>{language === "zh-CN" ? "正在加载配置" : "Loading configuration"}</h1>
+            </section>
+          ) : null}
+          {config && page === "home" ? (
+            <HomePage
+              config={config}
+              status={status}
+              busy={busy}
+              history={history}
+              inputDevicesChecked={audioInputDevicesChecked}
+              hasInputDevice={audioDevices.length > 0}
+              audioDevicesRefreshing={audioDevicesRefreshing}
+              onToggle={toggleRecording}
+              onOpenPermissionGuide={() => setShowPermissionGuide(true)}
+              onRefreshAudioDevices={() => { void refreshAudioDevices().catch((error) => setNotice(String(error))); }}
+              onRefreshHistory={refreshHistory}
+              onOpenHistoryPage={openHistoryPage}
+              onCopyHistory={copyHistoryText}
+              language={language}
+              text={text}
+            />
+          ) : null}
+          {config && page === "history" ? (
+            <HistoryRecordsPage
+              history={historyPageRecords}
+              pageIndex={historyPageIndex}
+              pageSize={historyPageSize}
+              hasOlder={historyHasOlder}
+              onRefresh={() => changeHistoryPage(historyPageIndex)}
+              onPreviousPage={() => changeHistoryPage(Math.max(0, historyPageIndex - 1))}
+              onNextPage={() => changeHistoryPage(historyPageIndex + 1)}
+              onCopyHistory={copyHistoryText}
+              text={text}
+            />
+          ) : null}
+          {config && page === "models" ? (
+            <ModelsPage config={config} onChange={changeConfig} onSaveConfig={save} onNotice={setNotice} canSave={canSave} text={text} />
+          ) : null}
+          {config && page === "correction" ? (
+            <CorrectionPage config={config} onChange={changeConfig} text={text} />
+          ) : null}
+          {config && page === "settings" ? (
+            <SettingsPage
+              config={config}
+              audioDevices={audioDevices}
+              audioOutputDevices={audioOutputDevices}
+              dataDir={dataDir}
+              audioDevicesRefreshing={audioDevicesRefreshing}
+              onChange={changeConfig}
+              onExportConfig={() => { void exportCurrentConfig(); }}
+              onImportConfig={(file) => { void importConfigFile(file); }}
+              onOpenDataDir={() => { void openAppDir(); }}
+              onChooseDataDir={() => { void changeDataDir(); }}
+              onResetDataDir={() => { void resetDataDir(); }}
+              onRefreshAudioDevices={() => { void refreshAudioDevices().catch((error) => setNotice(String(error))); }}
+              inputMonitoringGranted={inputMonitoringGranted}
+              inputMonitoringPermission={inputMonitoringPermission}
+              onRefreshInputMonitoring={() => { void refreshInputMonitoring().catch((error) => setNotice(String(error))); }}
+              onRequestInputMonitoring={() => { void requestInputMonitoringPermission(); }}
+              onApplyFnTrigger={(enabled) => { void applyCurrentFnTrigger(enabled).catch((error) => setNotice(String(error))); }}
+              importReport={configImportReport}
+              canSave={canSave}
+              canChangeDataDir={canChangeDataDir}
+              text={text}
+            />
+          ) : null}
+        </div>
+        {showSaveBar ? (
+          <div className={hasUnsavedChanges ? "config-save-bar dirty" : "config-save-bar"}>
+            <div className="config-save-status" role="status" aria-live="polite">
+              <span className="config-save-dot" aria-hidden="true" />
+              <span>{hasUnsavedChanges ? text.unsaved.statusPending : text.unsaved.statusSaved}</span>
             </div>
+            <button
+              className="primary small"
+              type="button"
+              disabled={!canSaveChanges}
+              onClick={() => {
+                const currentConfig = configRef.current;
+                if (currentConfig) {
+                  void save(currentConfig);
+                }
+              }}
+            >
+              {savingConfig ? text.common.saving : text.common.save}
+            </button>
           </div>
-        ) : null}
-        {!config ? (
-          <section className="panel">
-            <h1>{language === "zh-CN" ? "正在加载配置" : "Loading configuration"}</h1>
-          </section>
-        ) : null}
-        {config && page === "home" ? (
-          <HomePage
-            config={config}
-            status={status}
-            busy={busy}
-            history={history}
-            inputDevicesChecked={audioInputDevicesChecked}
-            hasInputDevice={audioDevices.length > 0}
-            audioDevicesRefreshing={audioDevicesRefreshing}
-            onToggle={toggleRecording}
-            onOpenPermissionGuide={() => setShowPermissionGuide(true)}
-            onRefreshAudioDevices={() => { void refreshAudioDevices().catch((error) => setNotice(String(error))); }}
-            onRefreshHistory={refreshHistory}
-            onOpenHistoryPage={openHistoryPage}
-            onCopyHistory={copyHistoryText}
-            language={language}
-            text={text}
-          />
-        ) : null}
-        {config && page === "history" ? (
-          <HistoryRecordsPage
-            history={historyPageRecords}
-            pageIndex={historyPageIndex}
-            pageSize={historyPageSize}
-            hasOlder={historyHasOlder}
-            onRefresh={() => changeHistoryPage(historyPageIndex)}
-            onPreviousPage={() => changeHistoryPage(Math.max(0, historyPageIndex - 1))}
-            onNextPage={() => changeHistoryPage(historyPageIndex + 1)}
-            onCopyHistory={copyHistoryText}
-            text={text}
-          />
-        ) : null}
-        {config && page === "models" ? (
-          <ModelsPage config={config} onChange={changeConfig} onSave={() => save(config)} onSaveConfig={save} onNotice={setNotice} canSave={canSave} text={text} />
-        ) : null}
-        {config && page === "correction" ? (
-          <CorrectionPage config={config} onChange={changeConfig} onSave={() => save(config)} canSave={canSave} text={text} />
-        ) : null}
-        {config && page === "settings" ? (
-          <SettingsPage
-            config={config}
-            audioDevices={audioDevices}
-            audioOutputDevices={audioOutputDevices}
-            dataDir={dataDir}
-            onChange={changeConfig}
-            onSave={() => save(config)}
-            onExportConfig={() => { void exportCurrentConfig(); }}
-            onImportConfig={(file) => { void importConfigFile(file); }}
-            onOpenDataDir={() => { void openAppDir(); }}
-            onChooseDataDir={() => { void changeDataDir(); }}
-            onResetDataDir={() => { void resetDataDir(); }}
-            onRefreshAudioDevices={() => { void refreshAudioDevices().catch((error) => setNotice(String(error))); }}
-            inputMonitoringGranted={inputMonitoringGranted}
-            inputMonitoringPermission={inputMonitoringPermission}
-            onRefreshInputMonitoring={() => { void refreshInputMonitoring().catch((error) => setNotice(String(error))); }}
-            onRequestInputMonitoring={() => { void requestInputMonitoringPermission(); }}
-            onApplyFnTrigger={(enabled) => { void applyCurrentFnTrigger(enabled).catch((error) => setNotice(String(error))); }}
-            importReport={configImportReport}
-            canSave={canSave}
-            text={text}
-          />
         ) : null}
       </main>
       {pendingConfigAction ? (
         <div className="modal-backdrop" role="presentation">
-          <section className="unsaved-dialog" role="dialog" aria-modal="true" aria-labelledby="unsaved-title">
+          <section
+            ref={unsavedDialogRef}
+            className="unsaved-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="unsaved-title"
+            aria-describedby="unsaved-message"
+            onKeyDown={handleUnsavedDialogKeyDown}
+          >
             <div>
               <h1 id="unsaved-title">{text.unsaved.title}</h1>
-              <p>{text.unsaved.message}</p>
+              <p id="unsaved-message">{text.unsaved.message}</p>
             </div>
             <div className="modal-footer">
-              <button className="secondary small" type="button" onClick={() => setPendingConfigAction(null)} disabled={busy}>{text.unsaved.cancel}</button>
-              <button className="secondary small" type="button" onClick={discardPendingConfig} disabled={busy}>{text.unsaved.discard}</button>
+              <button ref={unsavedCancelButtonRef} className="secondary small" type="button" onClick={() => setPendingConfigAction(null)} disabled={busy}>{text.unsaved.cancel}</button>
+              <button className="secondary small" type="button" onClick={() => { void discardPendingConfig(); }} disabled={busy}>{text.unsaved.discard}</button>
               <button className="primary small" type="button" onClick={() => { void savePendingConfig(); }} disabled={busy || !hasUnsavedChanges}>{text.unsaved.save}</button>
             </div>
           </section>

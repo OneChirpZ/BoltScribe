@@ -7,6 +7,7 @@ import ShortcutPicker from "../components/ShortcutPicker";
 import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrectionTemplates";
 import { hotkeyEnabledSlots, hotkeySlots, soundSourceShortcutKeyOptions, updateHotkey, updateHotkeyEnabled } from "../domain/hotkeys";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
+import { defaultRecordingOverlayScale, maxRecordingOverlayScale, minRecordingOverlayScale } from "../domain/overlay";
 import type { PermissionRequestState } from "../domain/permissions";
 import { supportsDockVisibilityControl, supportsFnLongPressTrigger, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback, supportsTraySingleClickRecording } from "../domain/platform";
 
@@ -22,8 +23,8 @@ export default function SettingsPage({
   audioDevices,
   audioOutputDevices,
   dataDir,
+  audioDevicesRefreshing,
   onChange,
-  onSave,
   onExportConfig,
   onImportConfig,
   onOpenDataDir,
@@ -37,14 +38,15 @@ export default function SettingsPage({
   onApplyFnTrigger,
   importReport,
   canSave,
+  canChangeDataDir,
   text,
 }: {
   config: AppConfig;
   audioDevices: AudioInputDevice[];
   audioOutputDevices: AudioOutputDevice[];
   dataDir: DataDirInfo | null;
+  audioDevicesRefreshing: boolean;
   onChange: (config: AppConfig) => void;
-  onSave: () => void;
   onExportConfig: () => void;
   onImportConfig: (file: File) => void;
   onOpenDataDir: () => void;
@@ -58,6 +60,7 @@ export default function SettingsPage({
   onApplyFnTrigger: (enabled: boolean) => void;
   importReport: ConfigImportReport | null;
   canSave: boolean;
+  canChangeDataDir: boolean;
   text: TextBundle;
 }) {
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -103,6 +106,18 @@ export default function SettingsPage({
       ui: {
         ...config.ui,
         [axis === "x" ? "recording_overlay_offset_x" : "recording_overlay_offset_y"]: nextValue,
+      },
+    });
+  }
+
+  function resetOverlayAppearance() {
+    onChange({
+      ...config,
+      ui: {
+        ...config.ui,
+        recording_overlay_scale: defaultRecordingOverlayScale,
+        recording_overlay_offset_x: 0,
+        recording_overlay_offset_y: 0,
       },
     });
   }
@@ -185,15 +200,15 @@ export default function SettingsPage({
   }
 
   return (
-    <section className="panel page-stack">
-      <PanelHeader title={text.settings.title} action={<button className="primary small" disabled={!canSave} onClick={onSave}>{text.common.save}</button>} />
+    <section className="panel page-stack settings-page">
+      <PanelHeader title={text.settings.title} />
 
-      <div className="settings-section">
-        <div className="section-title">
-          <h2>{text.settings.languageSection}</h2>
-        </div>
-        <div className="form-grid">
-          <Field label={text.settings.language}>
+      <div className="settings-overview-grid">
+        <div className="settings-section">
+          <div className="section-title">
+            <h2>{text.settings.languageSection}</h2>
+          </div>
+          <Field label={text.settings.language} className="field-medium">
             <select
               value={config.ui.app_language ?? "zh-CN"}
               onChange={(event) => updateLanguage(event.target.value)}
@@ -202,6 +217,32 @@ export default function SettingsPage({
               <option value="en-US">{text.settings.english}</option>
             </select>
           </Field>
+        </div>
+
+        <div className="settings-section">
+          <div className="section-title">
+            <h2>{text.settings.system}</h2>
+          </div>
+          <div className="settings-toggle-stack">
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={config.system.launch_at_login}
+                onChange={(event) => onChange({ ...config, system: { ...config.system, launch_at_login: event.target.checked } })}
+              />
+              <span>{text.settings.launchAtLogin}</span>
+            </label>
+            {canControlDockVisibility ? (
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={config.system.hide_dock_icon ?? false}
+                  onChange={(event) => onChange({ ...config, system: { ...config.system, hide_dock_icon: event.target.checked } })}
+                />
+                <span>{text.settings.hideDockIcon}</span>
+              </label>
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -229,23 +270,25 @@ export default function SettingsPage({
         </div>
         {canUseTraySingleClickRecording ? (
           <div className="trigger-options">
-            <label className="toggle-row">
-              <input
-                type="checkbox"
-                checked={config.system.tray_left_click_recording_enabled ?? true}
-                onChange={(event) =>
-                  onChange({
-                    ...config,
-                    system: {
-                      ...config.system,
-                      tray_left_click_recording_enabled: event.target.checked,
-                    },
-                  })
-                }
-              />
-              <span>{text.settings.traySingleClickRecording}</span>
+            <div className="toggle-with-help">
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={config.system.tray_left_click_recording_enabled ?? true}
+                  onChange={(event) =>
+                    onChange({
+                      ...config,
+                      system: {
+                        ...config.system,
+                        tray_left_click_recording_enabled: event.target.checked,
+                      },
+                    })
+                  }
+                />
+                <span>{text.settings.traySingleClickRecording}</span>
+              </label>
               <HelpTip content={text.settings.traySingleClickRecordingHelp} />
-            </label>
+            </div>
           </div>
         ) : null}
         {canUseFnLongPressTrigger ? (
@@ -258,7 +301,7 @@ export default function SettingsPage({
               />
               {text.settings.fnLongPressTrigger}
             </label>
-            <Field label={text.settings.fnLongPressDuration}>
+            <Field label={text.settings.fnLongPressDuration} className="field-compact">
               <div className="number-with-unit">
                 <input
                   type="number"
@@ -294,39 +337,45 @@ export default function SettingsPage({
 
       <div className="settings-section">
         <div className="section-title">
-          <h2>{text.settings.audioInput}</h2>
+          <h2>{text.settings.audio}</h2>
           <div className="section-actions">
-            <button className="secondary small" type="button" onClick={onRefreshAudioDevices}>
-              {text.settings.audioRefreshDevices}
+            <button className="secondary small" type="button" disabled={audioDevicesRefreshing} onClick={onRefreshAudioDevices}>
+              {audioDevicesRefreshing ? text.settings.audioRefreshingDevices : text.settings.audioRefreshDevices}
             </button>
           </div>
         </div>
-        <div className="form-grid">
-          <Field label={text.settings.audioInputDevice} className="field-wide">
-            <select
-              value={audioInputDeviceValue(config, audioDevices)}
-              onChange={(event) => updateAudioInputDevice(event.target.value)}
-            >
-              <option value="system_default">{text.settings.audioSystemDefault}</option>
-              {selectedAudioDeviceMissing(config, audioDevices) ? (
-                <option value={selectedAudioDeviceValue(config)}>
-                  {text.settings.audioDeviceMissing(config.audio.input_device_name ?? config.audio.input_device_id ?? "")}
-                </option>
-              ) : null}
-              {audioDevices.map((device) => (
-                <option key={device.id} value={device.id}>
-                  {device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}
-                </option>
-              ))}
-            </select>
-            {audioDevices.length === 0 ? <span>{text.settings.audioNoInputDevices}</span> : null}
-          </Field>
-          <div className="field-wide output-ducking-block">
+        <div className="audio-settings-stack">
+          <div className="settings-subsection">
+            <div className="settings-subsection-heading">
+              <h3>{text.settings.audioInput}</h3>
+            </div>
+            <Field label={text.settings.audioInputDevice} className="field-medium">
+              <select
+                value={audioInputDeviceValue(config, audioDevices)}
+                onChange={(event) => updateAudioInputDevice(event.target.value)}
+              >
+                <option value="system_default">{text.settings.audioSystemDefault}</option>
+                {selectedAudioDeviceMissing(config, audioDevices) ? (
+                  <option value={selectedAudioDeviceValue(config)}>
+                    {text.settings.audioDeviceMissing(config.audio.input_device_name ?? config.audio.input_device_id ?? "")}
+                  </option>
+                ) : null}
+                {audioDevices.map((device) => (
+                  <option key={device.id} value={device.id}>
+                    {device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}
+                  </option>
+                ))}
+              </select>
+              {audioDevices.length === 0 ? <span>{text.settings.audioNoInputDevices}</span> : null}
+            </Field>
+          </div>
+
+          <div className="settings-subsection output-ducking-block">
             <div className="output-ducking-heading">
-              <h3>{text.settings.audioOutputVolumeDucking}</h3>
+              <h3 id="output-ducking-heading">{text.settings.audioOutputVolumeDucking}</h3>
               <HelpTip content={canDuckOutputVolume ? text.settings.outputVolumeDuckingHelp : text.settings.outputVolumeDuckingUnsupported} />
             </div>
-            <fieldset className="output-ducking-controls" disabled={!canDuckOutputVolume}>
+            <fieldset className="output-ducking-controls" aria-labelledby="output-ducking-heading" disabled={!canDuckOutputVolume}>
               <label className="toggle-row">
                 <input
                   type="checkbox"
@@ -335,118 +384,130 @@ export default function SettingsPage({
                 />
                 <span>{text.settings.outputVolumeDuckingEnabled}</span>
               </label>
-              <div className="output-ducking-status">
-                <span className="status-chip">
-                  {canDuckOutputVolume
-                    ? text.settings.outputVolumeDuckingCurrent(defaultOutputDevice?.name ?? text.settings.outputVolumeDuckingNoOutputDevice)
-                    : text.settings.outputVolumeDuckingUnsupported}
-                </span>
-                {defaultOutputDeviceUnsupported && !defaultOutputDeviceUsesSoundSourceFallback ? (
-                  <span className="status-chip warning">
-                    {text.settings.outputVolumeDuckingUnsupportedShort}
-                    <HelpTip content={text.settings.outputVolumeDuckingDeviceUnsupported} />
-                  </span>
-                ) : null}
-                {defaultOutputDeviceUsesSoundSourceFallback ? (
-                  <span className="status-chip warning">
-                    {text.settings.outputVolumeDuckingSoundSourceFallbackShort}
-                    <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
-                  </span>
-                ) : null}
-                {defaultOutputDeviceUsesMuteFallback ? (
-                  <span className="status-chip warning">
-                    {text.settings.outputVolumeDuckingMuteFallbackShort}
-                    <HelpTip content={text.settings.outputVolumeDuckingDeviceMuteFallback} />
-                  </span>
-                ) : null}
-              </div>
-              <label className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={outputDucking.mute_instead_of_reduce}
-                  onChange={(event) =>
-                    updateOutputVolumeDucking({ mute_instead_of_reduce: event.target.checked })
-                  }
-                />
-                <span>{text.settings.outputVolumeDuckingMuteInstead}</span>
-                <HelpTip content={text.settings.outputVolumeDuckingMuteInsteadHelp} />
-              </label>
-              {!outputDucking.mute_instead_of_reduce ? (
-                <Field label={text.settings.outputVolumeDuckingReduction} className="field-wide">
-                  <div className="range-with-value">
-                    <input
-                      className="range-input"
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="1"
-                      value={outputDucking.reduction_percent}
-                      onChange={(event) => updateOutputVolumeReduction(event.target.value)}
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="1"
-                      value={outputDucking.reduction_percent}
-                      onChange={(event) => updateOutputVolumeReduction(event.target.value)}
-                    />
-                    <span>%</span>
-                  </div>
-                </Field>
-              ) : null}
-              {canUseSoundSourceFallback ? (
-                <div className="sound-source-fallback">
-                  <label className="toggle-row">
-                    <input
-                      type="checkbox"
-                      checked={outputDucking.sound_source_hotkey_fallback_enabled}
-                      onChange={(event) => updateOutputVolumeDucking({ sound_source_hotkey_fallback_enabled: event.target.checked })}
-                    />
-                    <span>{text.settings.outputVolumeDuckingSoundSourceFallback}</span>
-                    <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
-                  </label>
-                  <ShortcutPicker
-                    label={text.settings.outputVolumeDuckingSoundSourceHotkey}
-                    enabled={outputDucking.sound_source_hotkey_fallback_enabled}
-                    value={outputDucking.sound_source_toggle_mute_hotkey}
-                    onChange={(value) => updateOutputVolumeDucking({ sound_source_toggle_mute_hotkey: value })}
-                    text={text}
-                    platform="macos"
-                    keyOptions={soundSourceShortcutKeyOptions}
-                    showEnabledToggle={false}
-                  />
-                </div>
-              ) : null}
-              <Field label={text.settings.outputVolumeDuckingWhitelist} className="field-wide">
-                <div className="device-checklist">
-                  {audioOutputDevices.map((device) => (
-                    <label key={device.id} className="device-checklist-row">
-                      <input
-                        type="checkbox"
-                        checked={outputDucking.device_name_whitelist.includes(device.name)}
-                        onChange={(event) => toggleOutputDuckingDeviceName(device.name, event.target.checked)}
-                      />
-                      <span>
-                        {device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}
-                        {outputDuckingDeviceBadge(device, text, canUseSoundSourceFallback && outputDucking.sound_source_hotkey_fallback_enabled)}
+              {outputDucking.enabled && canDuckOutputVolume ? (
+                <div className="output-ducking-options">
+                  <div className="output-ducking-status">
+                    <span className="status-chip">
+                      {text.settings.outputVolumeDuckingCurrent(defaultOutputDevice?.name ?? text.settings.outputVolumeDuckingNoOutputDevice)}
+                    </span>
+                    {defaultOutputDeviceUnsupported && !defaultOutputDeviceUsesSoundSourceFallback ? (
+                      <span className="status-chip warning">
+                        {text.settings.outputVolumeDuckingUnsupportedShort}
+                        <HelpTip content={text.settings.outputVolumeDuckingDeviceUnsupported} />
                       </span>
-                    </label>
-                  ))}
-                  {missingOutputDuckingNames.map((name) => (
-                    <label key={name} className="device-checklist-row">
+                    ) : null}
+                    {defaultOutputDeviceUsesSoundSourceFallback ? (
+                      <span className="status-chip warning">
+                        {text.settings.outputVolumeDuckingSoundSourceFallbackShort}
+                        <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
+                      </span>
+                    ) : null}
+                    {defaultOutputDeviceUsesMuteFallback ? (
+                      <span className="status-chip warning">
+                        {text.settings.outputVolumeDuckingMuteFallbackShort}
+                        <HelpTip content={text.settings.outputVolumeDuckingDeviceMuteFallback} />
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="toggle-with-help">
+                    <label className="toggle-row">
                       <input
                         type="checkbox"
-                        checked
-                        onChange={(event) => toggleOutputDuckingDeviceName(name, event.target.checked)}
+                        checked={outputDucking.mute_instead_of_reduce}
+                        onChange={(event) =>
+                          updateOutputVolumeDucking({ mute_instead_of_reduce: event.target.checked })
+                        }
                       />
-                      <span>{text.settings.outputVolumeDuckingMissingDevice(name)}</span>
+                      <span>{text.settings.outputVolumeDuckingMuteInstead}</span>
                     </label>
-                  ))}
-                  {canDuckOutputVolume && audioOutputDevices.length === 0 ? <span>{text.settings.audioNoOutputDevices}</span> : null}
-                  {canDuckOutputVolume && outputDucking.device_name_whitelist.length === 0 ? <span>{text.settings.outputVolumeDuckingWhitelistAll}</span> : null}
+                    <HelpTip content={text.settings.outputVolumeDuckingMuteInsteadHelp} />
+                  </div>
+                  {!outputDucking.mute_instead_of_reduce ? (
+                    <Field label={text.settings.outputVolumeDuckingReduction} group>
+                      <div className="range-with-value">
+                        <input
+                          className="range-input"
+                          type="range"
+                          aria-label={text.settings.outputVolumeDuckingReduction}
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={outputDucking.reduction_percent}
+                          onChange={(event) => updateOutputVolumeReduction(event.target.value)}
+                        />
+                        <input
+                          type="number"
+                          aria-label={text.settings.outputVolumeDuckingReduction}
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={outputDucking.reduction_percent}
+                          onChange={(event) => updateOutputVolumeReduction(event.target.value)}
+                        />
+                        <span>%</span>
+                      </div>
+                    </Field>
+                  ) : null}
+                  {canUseSoundSourceFallback ? (
+                    <div className="sound-source-fallback">
+                      <div className="toggle-with-help">
+                        <label className="toggle-row">
+                          <input
+                            type="checkbox"
+                            checked={outputDucking.sound_source_hotkey_fallback_enabled}
+                            onChange={(event) => updateOutputVolumeDucking({ sound_source_hotkey_fallback_enabled: event.target.checked })}
+                          />
+                          <span>{text.settings.outputVolumeDuckingSoundSourceFallback}</span>
+                        </label>
+                        <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
+                      </div>
+                      <ShortcutPicker
+                        label={text.settings.outputVolumeDuckingSoundSourceHotkey}
+                        enabled={outputDucking.sound_source_hotkey_fallback_enabled}
+                        value={outputDucking.sound_source_toggle_mute_hotkey}
+                        onChange={(value) => updateOutputVolumeDucking({ sound_source_toggle_mute_hotkey: value })}
+                        text={text}
+                        platform="macos"
+                        keyOptions={soundSourceShortcutKeyOptions}
+                        showEnabledToggle={false}
+                      />
+                    </div>
+                  ) : null}
+                  <Field label={text.settings.outputVolumeDuckingWhitelist} group>
+                    <div className="device-checklist">
+                      {audioOutputDevices.map((device) => (
+                        <label key={device.id} className="device-checklist-row">
+                          <input
+                            type="checkbox"
+                            checked={outputDucking.device_name_whitelist.includes(device.name)}
+                            onChange={(event) => toggleOutputDuckingDeviceName(device.name, event.target.checked)}
+                          />
+                          <span>
+                            {device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}
+                            {outputDuckingDeviceBadge(device, text, canUseSoundSourceFallback && outputDucking.sound_source_hotkey_fallback_enabled)}
+                          </span>
+                        </label>
+                      ))}
+                      {missingOutputDuckingNames.map((name) => (
+                        <label key={name} className="device-checklist-row">
+                          <input
+                            type="checkbox"
+                            checked
+                            onChange={(event) => toggleOutputDuckingDeviceName(name, event.target.checked)}
+                          />
+                          <span>{text.settings.outputVolumeDuckingMissingDevice(name)}</span>
+                        </label>
+                      ))}
+                      {audioOutputDevices.length === 0 ? <span>{text.settings.audioNoOutputDevices}</span> : null}
+                      {outputDucking.device_name_whitelist.length === 0 ? <span>{text.settings.outputVolumeDuckingWhitelistAll}</span> : null}
+                    </div>
+                  </Field>
                 </div>
-              </Field>
+              ) : (
+                <p className="settings-help-text">
+                  {canDuckOutputVolume ? text.settings.outputVolumeDuckingHelp : text.settings.outputVolumeDuckingUnsupported}
+                </p>
+              )}
             </fieldset>
           </div>
         </div>
@@ -457,10 +518,10 @@ export default function SettingsPage({
           <h2>{text.settings.retention}</h2>
         </div>
         <div className="form-grid">
-          <Field label={text.settings.maxRecords}>
+          <Field label={text.settings.maxRecords} className="field-compact">
             <input type="number" min="1" max={maxHistoryRecords} value={config.retention.max_history_records} onChange={(event) => updateMaxRecords(event.target.value)} />
           </Field>
-          <Field label={text.settings.maxStorage}>
+          <Field label={text.settings.maxStorage} className="field-compact">
             <input type="number" min="0.01" max={maxStorageGb} step="0.01" value={storageGb} onChange={(event) => updateMaxStorageGb(event.target.value)} />
           </Field>
           <div className="field-wide data-dir-panel">
@@ -480,49 +541,76 @@ export default function SettingsPage({
               <button className="secondary small" type="button" disabled={!canSave} onClick={onOpenDataDir}>
                 {text.nav.openDataDir}
               </button>
-              <button className="secondary small" type="button" disabled={!canSave} onClick={onChooseDataDir}>
+              <button className="secondary small" type="button" disabled={!canChangeDataDir} onClick={onChooseDataDir}>
                 {text.settings.changeDataDir}
               </button>
-              <button className="secondary small" type="button" disabled={!canSave || !dataDir || dataDir.is_default} onClick={onResetDataDir}>
+              <button className="secondary small" type="button" disabled={!canChangeDataDir || !dataDir || dataDir.is_default} onClick={onResetDataDir}>
                 {text.settings.resetDataDir}
               </button>
             </div>
+            {canSave && !canChangeDataDir ? <p className="settings-help-text warning">{text.settings.dataDirBusy}</p> : null}
           </div>
         </div>
       </div>
 
-      <div className="settings-section">
-        <div className="section-title">
-          <h2>{text.settings.overlayPosition}</h2>
+      <div className="settings-overview-grid settings-overview-grid-final">
+        <div className="settings-section">
+          <div className="section-title">
+            <h2>{text.settings.overlayAppearance}</h2>
+            <button className="secondary small" type="button" onClick={resetOverlayAppearance}>{text.settings.resetOverlay}</button>
+          </div>
+          <div className="form-grid">
+            <Field
+              label={text.settings.overlayScale(Math.round((config.ui.recording_overlay_scale ?? defaultRecordingOverlayScale) * 200))}
+              className="field-wide compact-range-field"
+            >
+              <div className="range-compact">
+                <input
+                  className="range-input"
+                  type="range"
+                  min={String(minRecordingOverlayScale)}
+                  max={String(maxRecordingOverlayScale)}
+                  step="0.05"
+                  value={config.ui.recording_overlay_scale ?? defaultRecordingOverlayScale}
+                  onChange={(event) => onChange({
+                    ...config,
+                    ui: {
+                      ...config.ui,
+                      recording_overlay_scale: Number(event.target.value),
+                    },
+                  })}
+                />
+              </div>
+            </Field>
+            <Field label={text.settings.offsetX} className="field-compact">
+              <input
+                type="number"
+                min={-maxOverlayOffset}
+                max={maxOverlayOffset}
+                step="1"
+                value={config.ui.recording_overlay_offset_x ?? 0}
+                onChange={(event) => updateOverlayOffset("x", event.target.value)}
+              />
+            </Field>
+            <Field label={text.settings.offsetY} className="field-compact">
+              <input
+                type="number"
+                min={-maxOverlayOffset}
+                max={maxOverlayOffset}
+                step="1"
+                value={config.ui.recording_overlay_offset_y ?? 0}
+                onChange={(event) => updateOverlayOffset("y", event.target.value)}
+              />
+            </Field>
+          </div>
         </div>
-        <div className="form-grid">
-          <Field label={text.settings.offsetX}>
-            <input
-              type="number"
-              min={-maxOverlayOffset}
-              max={maxOverlayOffset}
-              step="1"
-              value={config.ui.recording_overlay_offset_x ?? 0}
-              onChange={(event) => updateOverlayOffset("x", event.target.value)}
-            />
-          </Field>
-          <Field label={text.settings.offsetY}>
-            <input
-              type="number"
-              min={-maxOverlayOffset}
-              max={maxOverlayOffset}
-              step="1"
-              value={config.ui.recording_overlay_offset_y ?? 0}
-              onChange={(event) => updateOverlayOffset("y", event.target.value)}
-            />
-          </Field>
-        </div>
-      </div>
 
-      <div className="settings-section">
-        <div className="section-title">
-          <h2>{text.settings.configPortability}</h2>
-          <div className="section-actions">
+        <div className="settings-section">
+          <div className="section-title">
+            <h2>{text.settings.configPortability}</h2>
+          </div>
+          <p className="settings-help-text">{text.settings.configPortabilityHelp}</p>
+          <div className="section-actions settings-card-actions">
             <button className="secondary small" type="button" disabled={!canSave} onClick={onExportConfig}>
               {text.settings.exportConfig}
             </button>
@@ -537,33 +625,10 @@ export default function SettingsPage({
               onChange={importSelectedFile}
             />
           </div>
+          {importReport ? <ConfigImportReportView report={importReport} text={text} /> : null}
         </div>
-        {importReport ? <ConfigImportReportView report={importReport} text={text} /> : null}
       </div>
 
-      <div className="settings-section">
-        <div className="section-title">
-          <h2>{text.settings.system}</h2>
-        </div>
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={config.system.launch_at_login}
-            onChange={(event) => onChange({ ...config, system: { ...config.system, launch_at_login: event.target.checked } })}
-          />
-          {text.settings.launchAtLogin}
-        </label>
-        {canControlDockVisibility ? (
-          <label className="toggle-row">
-            <input
-              type="checkbox"
-              checked={config.system.hide_dock_icon ?? false}
-              onChange={(event) => onChange({ ...config, system: { ...config.system, hide_dock_icon: event.target.checked } })}
-            />
-            {text.settings.hideDockIcon}
-          </label>
-        ) : null}
-      </div>
     </section>
   );
 }

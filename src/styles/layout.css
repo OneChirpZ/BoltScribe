@@ -165,21 +165,21 @@ nav {
 .input-stats-metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 7px;
 }
 
 .input-stat-value {
   display: grid;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
 }
 
 .input-stat-value strong {
   overflow: hidden;
   color: var(--text);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.2;
-  text-overflow: ellipsis;
+  text-overflow: clip;
   white-space: nowrap;
 }
 
@@ -198,23 +198,25 @@ nav {
 }
 
 .input-heatmap {
+  --input-heatmap-cell: 9px;
+  --input-heatmap-gap: 3px;
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: 9px;
-  grid-template-rows: repeat(7, 1fr);
-  gap: 3px;
+  grid-template-columns: repeat(var(--input-heatmap-weeks), var(--input-heatmap-cell));
+  grid-template-rows: repeat(7, var(--input-heatmap-cell));
+  justify-content: end;
+  gap: var(--input-heatmap-gap);
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
   padding-bottom: 2px;
-  scrollbar-width: thin;
 }
 
 .input-heatmap-cell {
-  width: 9px;
-  height: 9px;
+  width: var(--input-heatmap-cell);
+  height: var(--input-heatmap-cell);
   border-radius: 2px;
   background: rgba(255, 255, 255, 0.06);
 }
@@ -236,11 +238,73 @@ nav {
 }
 
 .content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.content-scroll {
+  flex: 1;
   min-width: 0;
   min-height: 0;
   padding: 30px;
   overflow-x: hidden;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.config-save-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  min-height: 64px;
+  flex: 0 0 auto;
+  padding: 10px 30px;
+  border-top: 1px solid var(--line);
+  background:
+    linear-gradient(90deg, rgba(67, 194, 122, 0.045), transparent 44%),
+    rgba(21, 23, 18, 0.97);
+  box-shadow: 0 -14px 36px rgba(0, 0, 0, 0.18);
+}
+
+.config-save-bar.dirty {
+  background:
+    linear-gradient(90deg, rgba(245, 184, 75, 0.1), transparent 48%),
+    rgba(25, 26, 20, 0.98);
+}
+
+.config-save-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.config-save-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--green);
+  box-shadow: 0 0 0 4px rgba(67, 194, 122, 0.1);
+}
+
+.config-save-bar.dirty .config-save-status {
+  color: #f4d89c;
+}
+
+.config-save-bar.dirty .config-save-dot {
+  background: var(--amber);
+  box-shadow: 0 0 0 4px rgba(245, 184, 75, 0.12);
+}
+
+.config-save-bar .primary {
+  min-width: 82px;
 }
 
 .toast {

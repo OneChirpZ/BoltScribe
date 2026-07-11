@@ -9,14 +9,10 @@ import { buildPromptPreview, normalizeVariableName, variableToken } from "../dom
 export default function CorrectionPage({
   config,
   onChange,
-  onSave,
-  canSave,
   text,
 }: {
   config: AppConfig;
   onChange: (config: AppConfig) => void;
-  onSave: () => void;
-  canSave: boolean;
   text: TextBundle;
 }) {
   const dictionaryText = config.correction.dictionary_text ?? "";
@@ -110,9 +106,9 @@ export default function CorrectionPage({
   }
 
   return (
-    <section className="panel page-stack">
-      <PanelHeader title={text.correction.title} action={<button className="primary small" disabled={!canSave} onClick={onSave}>{text.common.save}</button>} />
-      <label className="toggle-row">
+    <section className="panel page-stack config-page correction-page">
+      <PanelHeader title={text.correction.title} />
+      <label className="toggle-row page-master-toggle">
         <input
           type="checkbox"
           checked={config.correction.enabled}

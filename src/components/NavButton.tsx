@@ -12,7 +12,12 @@ export default function NavButton({
   onClick: (page: Page) => void;
 }) {
   return (
-    <button className={current === page ? "nav-button active" : "nav-button"} onClick={() => onClick(page)}>
+    <button
+      className={current === page ? "nav-button active" : "nav-button"}
+      type="button"
+      aria-current={current === page ? "page" : undefined}
+      onClick={() => onClick(page)}
+    >
       {label}
     </button>
   );
