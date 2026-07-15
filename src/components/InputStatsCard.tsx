@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import type { DailyInputStats, InputStats } from "../types";
+import type { InputStats } from "../types";
 import type { TextBundle } from "../domain/i18n";
+import { buildInputHeatmapCells } from "../domain/inputStatsHeatmap";
 
 const heatmapCellSize = 9;
 const heatmapGap = 3;
@@ -16,7 +17,7 @@ export default function InputStatsCard({
 }) {
   const heatmapRef = useRef<HTMLDivElement>(null);
   const [heatmapWeeks, setHeatmapWeeks] = useState(defaultHeatmapWeeks);
-  const cells = heatmapCells(stats?.daily ?? [], heatmapWeeks);
+  const cells = buildInputHeatmapCells(stats?.daily ?? [], heatmapWeeks);
   const maxCount = Math.max(0, ...cells.map((cell) => cell.record_count));
   const heatmapStyle = { "--input-heatmap-weeks": heatmapWeeks } as CSSProperties;
 
@@ -81,50 +82,9 @@ function StatValue({ label, value }: { label: string; value: string }) {
   );
 }
 
-function heatmapCells(daily: DailyInputStats[], weekCount: number) {
-  const byDate = new Map(daily.map((day) => [day.date, day]));
-  const dates = daily.map((day) => parseDateKey(day.date)).filter((date): date is Date => Boolean(date));
-  const today = startOfLocalDay(new Date());
-  const lastStatsDay = dates.length > 0 ? new Date(Math.max(...dates.map((date) => date.getTime()))) : today;
-  const end = new Date(Math.max(today.getTime(), lastStatsDay.getTime()));
-  const trailingEmptyDays = 6 - end.getDay();
-  end.setDate(end.getDate() + trailingEmptyDays);
-  const totalDays = Math.max(minHeatmapWeeks, weekCount) * 7;
-  const start = new Date(end);
-  start.setDate(end.getDate() - totalDays + 1);
-
-  return Array.from({ length: totalDays }, (_, index) => {
-    const date = new Date(start);
-    date.setDate(start.getDate() + index);
-    const key = formatDateKey(date);
-    return byDate.get(key) ?? {
-      date: key,
-      record_count: 0,
-      character_count: 0,
-      audio_duration_ms: 0,
-    };
-  });
-}
-
 function heatmapWeekCount(width: number) {
   const columns = Math.floor((width + heatmapGap) / (heatmapCellSize + heatmapGap));
   return Math.max(minHeatmapWeeks, columns);
-}
-
-function parseDateKey(value: string) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) {
-    return null;
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(year, month - 1, day);
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
-    return null;
-  }
-  return date;
 }
 
 function heatmapLevel(count: number, maxCount: number) {
@@ -132,17 +92,6 @@ function heatmapLevel(count: number, maxCount: number) {
     return 0;
   }
   return Math.max(1, Math.min(4, Math.ceil((count / maxCount) * 4)));
-}
-
-function startOfLocalDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function formatDateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 function formatInteger(value: number) {

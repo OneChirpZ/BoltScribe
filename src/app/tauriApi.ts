@@ -273,9 +273,11 @@ let previewConfig: AppConfig = {
   hotkeys: ["PageUp", "CmdOrCtrl+Shift+Space"],
   hotkey_enabled: [true, true],
   audio: {
-    input_device_mode: "system_default",
-    input_device_id: null,
-    input_device_name: null,
+    input_device_mode: "manual",
+    input_device_id: "external-mic",
+    input_device_name: "External USB Mic",
+    input_device_priority: [{ id: "external-mic", name: "External USB Mic" }],
+    input_device_blacklist: [{ id: "capture-card", name: "USB2 Digital Audio" }],
     output_volume_ducking: {
       enabled: true,
       mute_instead_of_reduce: false,
@@ -319,11 +321,11 @@ let previewConfig: AppConfig = {
   },
   correction: {
     enabled: true,
-    user_requirements: "",
-    prompt_template: "纠错任务：\\n{{raw_text}}",
-    variables: [],
-    dictionary_text: "",
-    correction_rules_text: "",
+    user_requirements: "保留原意，修正错别字和标点；技术名词保持用户词典中的固定写法。",
+    prompt_template: "纠错任务：\n用户要求：\n{{user_requirements}}\n\n用户词典：\n{{dictionary}}\n\n易错词纠正：\n{{correction_rules}}\n\n原始转写：\n{{raw_text}}",
+    variables: [{ name: "scene", value: "日常技术沟通" }],
+    dictionary_text: "BoltScribe\nCodex\nLDFC",
+    correction_rules_text: "\"包次\" -> \"BoltScribe\" # 产品名\n\"扣得死\" -> \"Codex\" # 工具名",
     correction_rules: [],
     dictionary: [],
   },
@@ -358,6 +360,7 @@ let previewDataDirInfo: DataDirInfo = clonePreview(previewDefaultDataDirInfo);
 const previewAudioInputDevices: AudioInputDevice[] = [
   { id: "system-default", name: "MacBook Pro 麦克风", is_default: true, platform: "macos" },
   { id: "external-mic", name: "External USB Mic", is_default: false, platform: "macos" },
+  { id: "capture-card", name: "USB2 Digital Audio", is_default: false, platform: "macos" },
 ];
 
 const previewAudioOutputDevices: AudioOutputDevice[] = [

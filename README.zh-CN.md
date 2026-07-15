@@ -11,7 +11,7 @@
 <p align="center">
   <a href="README.md">English README</a>
   ·
-  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.2">最新发布</a>
+  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.5">最新发布</a>
   ·
   <a href="#功能亮点">功能亮点</a>
   ·
@@ -39,6 +39,7 @@ BoltScribe 是一个 macOS 和 Windows 语音输入应用。按下全局快捷�
 - **灵活模型配置：** 支持 OpenAI 兼容服务商、模型预设和多模型竞速。
 - **本地历史记录：** 可查看录音、原始转写、纠错结果、日志和输入统计。
 - **托盘/菜单栏工作流：** 常驻后台，可从托盘菜单开始/停止语音输入，并可在 Windows 上开启单击托盘录音。
+- **可靠的麦克风选择：** 支持屏蔽不可用设备、设置麦克风优先级，并在候选设备无法采集有效音频时自动回退。
 - **可迁移本地数据目录：** 可保留默认本地数据目录，也可在设置中把历史、统计和录音迁移到自定义空目录。
 - **更快的胶囊浮窗：** macOS 上不再通过慢速 focused element 查询定位录音胶囊。
 - **中英文界面：** 支持中文和英文界面切换。
@@ -53,12 +54,12 @@ BoltScribe 使用 Tauri、React、TypeScript 和 Rust 构建。React 前端位�
 
 ### 下载
 
-最新公开版本是 [BoltScribe v1.2.2](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.2)。
+最新公开版本是 [BoltScribe v1.2.5](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.5)。
 
 当前发布产物：
 
-- macOS Apple Silicon：`BoltScribe_1.2.2_aarch64.dmg`
-- Windows x64：`BoltScribe_1.2.2_x64-setup.exe`
+- macOS Apple Silicon：`BoltScribe_1.2.5_aarch64.dmg`
+- Windows x64：`BoltScribe_1.2.5_x64-setup.exe`
 
 ### 环境要求
 

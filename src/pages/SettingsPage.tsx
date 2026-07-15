@@ -1,5 +1,5 @@
 import { useRef, type ChangeEvent } from "react";
-import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, DataDirInfo, OutputVolumeDuckingConfig } from "../types";
+import type { AppConfig, AudioInputDevice, AudioInputDeviceRef, AudioOutputDevice, ConfigImportReport, DataDirInfo, OutputVolumeDuckingConfig } from "../types";
 import Field from "../components/Field";
 import HelpTip from "../components/HelpTip";
 import PanelHeader from "../components/PanelHeader";
@@ -82,6 +82,12 @@ export default function SettingsPage({
     outputDucking.enabled && canUseSoundSourceFallback && defaultOutputDeviceUnsupported && outputDucking.sound_source_hotkey_fallback_enabled;
   const outputDeviceNames = uniqueStrings(audioOutputDevices.map((device) => device.name));
   const missingOutputDuckingNames = outputDucking.device_name_whitelist.filter((name) => !outputDeviceNames.includes(name));
+  const inputDevicePriority = config.audio.input_device_priority ?? [];
+  const inputDeviceBlacklist = config.audio.input_device_blacklist ?? [];
+  const addablePriorityDevices = audioDevices.filter(
+    (device) => !containsInputDeviceRef(inputDevicePriority, device) && !containsInputDeviceRef(inputDeviceBlacklist, device),
+  );
+  const missingBlacklistedDevices = inputDeviceBlacklist.filter((blocked) => !findInputDevice(blocked, audioDevices));
 
   function updateMaxRecords(value: string) {
     const max_history_records = clampInt(Number(value), 1, maxHistoryRecords);
@@ -141,30 +147,51 @@ export default function SettingsPage({
     }
   }
 
-  function updateAudioInputDevice(value: string) {
-    if (value === "system_default") {
-      onChange({
-        ...config,
-        audio: {
-          ...config.audio,
-          input_device_mode: "system_default",
-          input_device_id: null,
-          input_device_name: null,
-        },
-      });
-      return;
-    }
-
-    const device = audioDevices.find((item) => item.id === value);
+  function updateInputDevicePolicy(priority: AudioInputDeviceRef[], blacklist: AudioInputDeviceRef[]) {
+    const first = priority[0] ?? null;
     onChange({
       ...config,
       audio: {
         ...config.audio,
-        input_device_mode: "manual",
-        input_device_id: value,
-        input_device_name: device?.name ?? value,
+        input_device_mode: first ? "manual" : "system_default",
+        input_device_id: first?.id || null,
+        input_device_name: first?.name || null,
+        input_device_priority: priority,
+        input_device_blacklist: blacklist,
       },
     });
+  }
+
+  function addInputDevicePriority(id: string) {
+    const device = audioDevices.find((item) => item.id === id);
+    if (!device || containsInputDeviceRef(inputDevicePriority, device) || containsInputDeviceRef(inputDeviceBlacklist, device)) {
+      return;
+    }
+    updateInputDevicePolicy([...inputDevicePriority, inputDeviceRef(device)], inputDeviceBlacklist);
+  }
+
+  function moveInputDevicePriority(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= inputDevicePriority.length) {
+      return;
+    }
+    const next = [...inputDevicePriority];
+    [next[index], next[target]] = [next[target], next[index]];
+    updateInputDevicePolicy(next, inputDeviceBlacklist);
+  }
+
+  function removeInputDevicePriority(index: number) {
+    updateInputDevicePolicy(inputDevicePriority.filter((_, itemIndex) => itemIndex !== index), inputDeviceBlacklist);
+  }
+
+  function toggleInputDeviceBlacklist(device: AudioInputDeviceRef, checked: boolean) {
+    const nextBlacklist = checked
+      ? uniqueInputDeviceRefs([...inputDeviceBlacklist, device])
+      : inputDeviceBlacklist.filter((blocked) => !inputDeviceRefsMatch(blocked, device));
+    const nextPriority = checked
+      ? inputDevicePriority.filter((preferred) => !inputDeviceRefsMatch(preferred, device))
+      : inputDevicePriority;
+    updateInputDevicePolicy(nextPriority, nextBlacklist);
   }
 
   function updateOutputVolumeDucking(patch: Partial<OutputVolumeDuckingConfig>) {
@@ -301,36 +328,38 @@ export default function SettingsPage({
               />
               {text.settings.fnLongPressTrigger}
             </label>
-            <Field label={text.settings.fnLongPressDuration} className="field-compact">
-              <div className="number-with-unit">
-                <input
-                  type="number"
-                  min={minFnLongPressDurationMs}
-                  max={maxFnLongPressDurationMs}
-                  step="50"
-                  value={config.system.fn_long_press_duration_ms ?? 200}
-                  disabled={!config.system.fn_long_press_enabled}
-                  onChange={(event) => updateFnLongPressDuration(event.target.value)}
-                />
-                <span>{text.common.milliseconds}</span>
-              </div>
-            </Field>
-            {config.system.fn_long_press_enabled ? (
-              <div className="trigger-permission-row">
-                <span>
-                  {text.permission.inputMonitoring}：
-                  <strong className={inputMonitoringGranted ? "permission-ok" : "permission-missing"}>
-                    {inputMonitoringPermissionLabel(inputMonitoringPermission, inputMonitoringGranted, text)}
-                  </strong>
-                </span>
-                <div>
-                  <button className="secondary small" type="button" onClick={onRefreshInputMonitoring}>{text.permission.recheck}</button>
-                  <button className="secondary small" type="button" onClick={onRequestInputMonitoring} disabled={inputMonitoringPermission === "checking"}>
-                    {inputMonitoringPermission === "checking" ? text.common.checking : text.permission.requestInputMonitoring}
-                  </button>
+            <div className="fn-trigger-details">
+              <Field label={text.settings.fnLongPressDuration} className="field-compact">
+                <div className="number-with-unit">
+                  <input
+                    type="number"
+                    min={minFnLongPressDurationMs}
+                    max={maxFnLongPressDurationMs}
+                    step="50"
+                    value={config.system.fn_long_press_duration_ms ?? 200}
+                    disabled={!config.system.fn_long_press_enabled}
+                    onChange={(event) => updateFnLongPressDuration(event.target.value)}
+                  />
+                  <span>{text.common.milliseconds}</span>
                 </div>
-              </div>
-            ) : null}
+              </Field>
+              {config.system.fn_long_press_enabled ? (
+                <div className="trigger-permission-row">
+                  <span>
+                    {text.permission.inputMonitoring}：
+                    <strong className={inputMonitoringGranted ? "permission-ok" : "permission-missing"}>
+                      {inputMonitoringPermissionLabel(inputMonitoringPermission, inputMonitoringGranted, text)}
+                    </strong>
+                  </span>
+                  <div>
+                    <button className="secondary small" type="button" onClick={onRefreshInputMonitoring}>{text.permission.recheck}</button>
+                    <button className="secondary small" type="button" onClick={onRequestInputMonitoring} disabled={inputMonitoringPermission === "checking"}>
+                      {inputMonitoringPermission === "checking" ? text.common.checking : text.permission.requestInputMonitoring}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
         ) : null}
       </div>
@@ -345,29 +374,93 @@ export default function SettingsPage({
           </div>
         </div>
         <div className="audio-settings-stack">
-          <div className="settings-subsection">
+          <div className="settings-subsection audio-input-subsection">
             <div className="settings-subsection-heading">
               <h3>{text.settings.audioInput}</h3>
             </div>
-            <Field label={text.settings.audioInputDevice} className="field-medium">
-              <select
-                value={audioInputDeviceValue(config, audioDevices)}
-                onChange={(event) => updateAudioInputDevice(event.target.value)}
-              >
-                <option value="system_default">{text.settings.audioSystemDefault}</option>
-                {selectedAudioDeviceMissing(config, audioDevices) ? (
-                  <option value={selectedAudioDeviceValue(config)}>
-                    {text.settings.audioDeviceMissing(config.audio.input_device_name ?? config.audio.input_device_id ?? "")}
-                  </option>
-                ) : null}
-                {audioDevices.map((device) => (
-                  <option key={device.id} value={device.id}>
-                    {device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}
-                  </option>
-                ))}
-              </select>
-              {audioDevices.length === 0 ? <span>{text.settings.audioNoInputDevices}</span> : null}
-            </Field>
+            <div className="audio-input-policy">
+              <Field label={text.settings.audioInputPriority} group>
+                <div className="input-device-priority-list">
+                  {inputDevicePriority.map((preferred, index) => {
+                    const available = findInputDevice(preferred, audioDevices);
+                    return (
+                      <div className="input-device-priority-row" key={`${preferred.id}:${preferred.name}`}>
+                        <span className="input-device-rank">{index + 1}</span>
+                        <span className="input-device-name">
+                          {available?.name ?? (preferred.name || preferred.id)}
+                          {available?.is_default ? text.settings.audioDefaultBadge : ""}
+                          {!available ? text.settings.audioPolicyMissingBadge : ""}
+                        </span>
+                        <button
+                          className="secondary small input-device-order-button"
+                          type="button"
+                          disabled={index === 0}
+                          title={text.settings.audioPriorityMoveUp}
+                          aria-label={text.settings.audioPriorityMoveUp}
+                          onClick={() => moveInputDevicePriority(index, -1)}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          className="secondary small input-device-order-button"
+                          type="button"
+                          disabled={index === inputDevicePriority.length - 1}
+                          title={text.settings.audioPriorityMoveDown}
+                          aria-label={text.settings.audioPriorityMoveDown}
+                          onClick={() => moveInputDevicePriority(index, 1)}
+                        >
+                          ↓
+                        </button>
+                        <button className="secondary small" type="button" onClick={() => removeInputDevicePriority(index)}>
+                          {text.settings.audioPriorityRemove}
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {inputDevicePriority.length === 0 ? <span>{text.settings.audioPriorityEmpty}</span> : null}
+                  <select
+                    aria-label={text.settings.audioPriorityAdd}
+                    value=""
+                    disabled={addablePriorityDevices.length === 0}
+                    onChange={(event) => addInputDevicePriority(event.target.value)}
+                  >
+                    <option value="">{text.settings.audioPriorityAdd}</option>
+                    {addablePriorityDevices.map((device) => (
+                      <option key={device.id} value={device.id}>
+                        {device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </Field>
+
+              <Field label={text.settings.audioInputBlacklist} group>
+                <div className="device-checklist">
+                  {audioDevices.map((device) => (
+                    <label key={device.id} className="device-checklist-row">
+                      <input
+                        type="checkbox"
+                        checked={containsInputDeviceRef(inputDeviceBlacklist, device)}
+                        onChange={(event) => toggleInputDeviceBlacklist(inputDeviceRef(device), event.target.checked)}
+                      />
+                      <span>{device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}</span>
+                    </label>
+                  ))}
+                  {missingBlacklistedDevices.map((blocked) => (
+                    <label key={`${blocked.id}:${blocked.name}`} className="device-checklist-row">
+                      <input
+                        type="checkbox"
+                        checked
+                        onChange={(event) => toggleInputDeviceBlacklist(blocked, event.target.checked)}
+                      />
+                      <span>{blocked.name || blocked.id}{text.settings.audioPolicyMissingBadge}</span>
+                    </label>
+                  ))}
+                  {audioDevices.length === 0 && missingBlacklistedDevices.length === 0 ? <span>{text.settings.audioNoInputDevices}</span> : null}
+                </div>
+              </Field>
+              <p className="settings-help-text">{text.settings.audioInputPolicyHelp}</p>
+            </div>
           </div>
 
           <div className="settings-subsection output-ducking-block">
@@ -559,10 +652,10 @@ export default function SettingsPage({
             <h2>{text.settings.overlayAppearance}</h2>
             <button className="secondary small" type="button" onClick={resetOverlayAppearance}>{text.settings.resetOverlay}</button>
           </div>
-          <div className="form-grid">
+          <div className="overlay-control-row">
             <Field
               label={text.settings.overlayScale(Math.round((config.ui.recording_overlay_scale ?? defaultRecordingOverlayScale) * 200))}
-              className="field-wide compact-range-field"
+              className="compact-range-field overlay-scale-control"
             >
               <div className="range-compact">
                 <input
@@ -690,25 +783,39 @@ function ReportList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function audioInputDeviceValue(config: AppConfig, audioDevices: AudioInputDevice[]) {
-  if (config.audio.input_device_mode !== "manual") {
-    return "system_default";
+function inputDeviceRef(device: AudioInputDevice): AudioInputDeviceRef {
+  return { id: device.id, name: device.name };
+}
+
+function inputDeviceRefsMatch(left: AudioInputDeviceRef, right: AudioInputDeviceRef) {
+  return (Boolean(left.id) && left.id === right.id)
+    || (Boolean(left.name) && Boolean(right.name) && left.name.toLocaleLowerCase() === right.name.toLocaleLowerCase());
+}
+
+function containsInputDeviceRef(items: AudioInputDeviceRef[], device: AudioInputDevice | AudioInputDeviceRef) {
+  return items.some((item) => inputDeviceRefsMatch(item, device));
+}
+
+function findInputDevice(reference: AudioInputDeviceRef, devices: AudioInputDevice[]) {
+  if (reference.id) {
+    const exact = devices.find((device) => device.id === reference.id);
+    if (exact) {
+      return exact;
+    }
   }
-  return (selectedAudioDevice(config, audioDevices)?.id ?? selectedAudioDeviceValue(config)) || "system_default";
+  return reference.name
+    ? devices.find((device) => device.name.toLocaleLowerCase() === reference.name.toLocaleLowerCase()) ?? null
+    : null;
 }
 
-function selectedAudioDeviceValue(config: AppConfig) {
-  return config.audio.input_device_id ?? config.audio.input_device_name ?? "";
-}
-
-function selectedAudioDevice(config: AppConfig, audioDevices: AudioInputDevice[]) {
-  const id = config.audio.input_device_id;
-  const name = config.audio.input_device_name;
-  return audioDevices.find((device) => device.id === id) ?? audioDevices.find((device) => Boolean(name) && device.name === name) ?? null;
-}
-
-function selectedAudioDeviceMissing(config: AppConfig, audioDevices: AudioInputDevice[]) {
-  return config.audio.input_device_mode === "manual" && Boolean(selectedAudioDeviceValue(config)) && !selectedAudioDevice(config, audioDevices);
+function uniqueInputDeviceRefs(items: AudioInputDeviceRef[]) {
+  const unique: AudioInputDeviceRef[] = [];
+  for (const item of items) {
+    if (!containsInputDeviceRef(unique, item)) {
+      unique.push(item);
+    }
+  }
+  return unique;
 }
 
 function outputVolumeDuckingConfig(config: AppConfig): OutputVolumeDuckingConfig {

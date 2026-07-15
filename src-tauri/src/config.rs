@@ -38,7 +38,19 @@ pub struct AudioConfig {
     #[serde(default)]
     pub input_device_name: Option<String>,
     #[serde(default)]
+    pub input_device_priority: Vec<AudioInputDeviceRef>,
+    #[serde(default)]
+    pub input_device_blacklist: Vec<AudioInputDeviceRef>,
+    #[serde(default)]
     pub output_volume_ducking: OutputVolumeDuckingConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AudioInputDeviceRef {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -383,22 +395,37 @@ impl AsrConfig {
 
 impl AudioConfig {
     pub fn normalize(&mut self) {
-        if self.input_device_mode != "manual" {
+        if self.input_device_mode == "manual" {
+            self.input_device_id = normalized_optional_string(self.input_device_id.as_deref());
+            self.input_device_name = normalized_optional_string(self.input_device_name.as_deref());
+        } else {
+            self.input_device_id = None;
+            self.input_device_name = None;
+        }
+
+        self.input_device_priority = normalize_audio_input_device_refs(&self.input_device_priority);
+        if self.input_device_priority.is_empty() && self.input_device_mode == "manual" {
+            let legacy = AudioInputDeviceRef {
+                id: self.input_device_id.clone().unwrap_or_default(),
+                name: self.input_device_name.clone().unwrap_or_default(),
+            };
+            if !legacy.id.is_empty() || !legacy.name.is_empty() {
+                self.input_device_priority.push(legacy);
+            }
+        }
+        self.input_device_blacklist =
+            normalize_audio_input_device_refs(&self.input_device_blacklist);
+
+        if let Some(preferred) = self.input_device_priority.first() {
+            self.input_device_mode = "manual".to_string();
+            self.input_device_id = normalized_optional_string(Some(preferred.id.as_str()));
+            self.input_device_name = normalized_optional_string(Some(preferred.name.as_str()));
+        } else {
             self.input_device_mode = default_input_device_mode();
             self.input_device_id = None;
             self.input_device_name = None;
-        } else {
-            self.input_device_id = normalized_optional_string(self.input_device_id.as_deref());
-            self.input_device_name = normalized_optional_string(self.input_device_name.as_deref());
-            if self.input_device_id.is_none() && self.input_device_name.is_none() {
-                self.input_device_mode = default_input_device_mode();
-            }
         }
         self.output_volume_ducking.normalize();
-    }
-
-    pub fn uses_system_default_input_device(&self) -> bool {
-        self.input_device_mode != "manual"
     }
 }
 
@@ -408,8 +435,21 @@ impl Default for AudioConfig {
             input_device_mode: default_input_device_mode(),
             input_device_id: None,
             input_device_name: None,
+            input_device_priority: Vec::new(),
+            input_device_blacklist: Vec::new(),
             output_volume_ducking: OutputVolumeDuckingConfig::default(),
         }
+    }
+}
+
+impl AudioInputDeviceRef {
+    pub fn matches_device(&self, id: &str, name: &str) -> bool {
+        (!self.id.is_empty() && self.id == id)
+            || (!self.name.is_empty() && self.name.eq_ignore_ascii_case(name))
+    }
+
+    fn matches_ref(&self, other: &Self) -> bool {
+        self.matches_device(&other.id, &other.name)
     }
 }
 
@@ -793,6 +833,25 @@ fn normalize_string_list(items: &[String]) -> Vec<String> {
     normalized
 }
 
+fn normalize_audio_input_device_refs(items: &[AudioInputDeviceRef]) -> Vec<AudioInputDeviceRef> {
+    let mut normalized = Vec::new();
+    for item in items {
+        let value = AudioInputDeviceRef {
+            id: item.id.trim().to_string(),
+            name: item.name.trim().to_string(),
+        };
+        if (value.id.is_empty() && value.name.is_empty())
+            || normalized
+                .iter()
+                .any(|existing: &AudioInputDeviceRef| existing.matches_ref(&value))
+        {
+            continue;
+        }
+        normalized.push(value);
+    }
+    normalized
+}
+
 fn normalized_optional_string(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)
@@ -1055,6 +1114,22 @@ fn config_schema_value() -> Result<serde_json::Value> {
     let mut schema = serde_json::to_value(AppConfig::default())?;
     set_schema_array(&mut schema, &["hotkeys"], serde_json::json!(""));
     set_schema_array(&mut schema, &["hotkey_enabled"], serde_json::json!(false));
+    set_schema_array(
+        &mut schema,
+        &["audio", "input_device_priority"],
+        serde_json::json!({
+            "id": "",
+            "name": ""
+        }),
+    );
+    set_schema_array(
+        &mut schema,
+        &["audio", "input_device_blacklist"],
+        serde_json::json!({
+            "id": "",
+            "name": ""
+        }),
+    );
     set_schema_array(
         &mut schema,
         &["audio", "output_volume_ducking", "device_name_whitelist"],
@@ -1529,7 +1604,8 @@ mod tests {
         assert!(!config.system.launch_at_login);
         assert!(!config.system.hide_dock_icon);
         assert!(config.system.tray_left_click_recording_enabled);
-        assert!(config.audio.uses_system_default_input_device());
+        assert_eq!(config.audio.input_device_mode, "system_default");
+        assert!(config.audio.input_device_priority.is_empty());
     }
 
     #[test]
@@ -1549,6 +1625,105 @@ mod tests {
         assert_eq!(config.audio.input_device_mode, "system_default");
         assert!(config.audio.input_device_id.is_none());
         assert!(config.audio.input_device_name.is_none());
+    }
+
+    #[test]
+    fn legacy_manual_input_device_migrates_to_priority() {
+        let mut config = AppConfig {
+            audio: AudioConfig {
+                input_device_mode: "manual".to_string(),
+                input_device_id: Some(" legacy-id ".to_string()),
+                input_device_name: Some(" Preferred Mic ".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        config.normalize();
+
+        assert_eq!(
+            config.audio.input_device_priority,
+            vec![AudioInputDeviceRef {
+                id: "legacy-id".to_string(),
+                name: "Preferred Mic".to_string(),
+            }]
+        );
+        assert_eq!(config.audio.input_device_mode, "manual");
+        assert_eq!(config.audio.input_device_id.as_deref(), Some("legacy-id"));
+        assert_eq!(
+            config.audio.input_device_name.as_deref(),
+            Some("Preferred Mic")
+        );
+    }
+
+    #[test]
+    fn audio_device_policy_normalizes_without_losing_blacklisted_priority() {
+        let mut config = AppConfig::default();
+        config.audio.input_device_priority = vec![
+            AudioInputDeviceRef {
+                id: " mic-1 ".to_string(),
+                name: " Main Mic ".to_string(),
+            },
+            AudioInputDeviceRef {
+                id: "mic-1".to_string(),
+                name: "Duplicate Name".to_string(),
+            },
+            AudioInputDeviceRef {
+                id: String::new(),
+                name: String::new(),
+            },
+        ];
+        config.audio.input_device_blacklist = vec![AudioInputDeviceRef {
+            id: " mic-1 ".to_string(),
+            name: " Main Mic ".to_string(),
+        }];
+
+        config.normalize();
+
+        assert_eq!(config.audio.input_device_priority.len(), 1);
+        assert_eq!(config.audio.input_device_priority[0].id, "mic-1");
+        assert_eq!(config.audio.input_device_priority[0].name, "Main Mic");
+        assert_eq!(config.audio.input_device_blacklist.len(), 1);
+        assert_eq!(config.audio.input_device_blacklist[0].id, "mic-1");
+    }
+
+    #[test]
+    fn missing_audio_device_policy_fields_default_to_empty_lists() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        let audio = value["audio"].as_object_mut().unwrap();
+        audio.remove("input_device_priority");
+        audio.remove("input_device_blacklist");
+
+        let config: AppConfig = serde_json::from_value(value).unwrap();
+
+        assert!(config.audio.input_device_priority.is_empty());
+        assert!(config.audio.input_device_blacklist.is_empty());
+    }
+
+    #[test]
+    fn config_import_preserves_audio_device_policy_objects() {
+        let mut config_value = serde_json::to_value(AppConfig::default()).unwrap();
+        config_value["audio"]["input_device_priority"] = serde_json::json!([
+            { "id": "preferred", "name": "Preferred Mic" }
+        ]);
+        config_value["audio"]["input_device_blacklist"] = serde_json::json!([
+            { "id": "blocked", "name": "Capture Card" }
+        ]);
+        let raw = serde_json::json!({
+            "format": CONFIG_EXPORT_FORMAT,
+            "version": CONFIG_EXPORT_VERSION,
+            "config": config_value
+        })
+        .to_string();
+
+        let result = ConfigStore::import_json(&raw).unwrap();
+
+        assert_eq!(result.config.audio.input_device_priority[0].id, "preferred");
+        assert_eq!(
+            result.config.audio.input_device_blacklist[0].name,
+            "Capture Card"
+        );
+        assert!(result.report.invalid_fields.is_empty());
     }
 
     #[test]

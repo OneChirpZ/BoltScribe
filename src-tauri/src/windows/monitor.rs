@@ -35,7 +35,7 @@ fn focused_foreground_window_center() -> Option<(f64, f64)> {
     let script = r#"
 tell application "System Events"
   set frontApp to first application process whose frontmost is true
-  if name of frontApp is "BoltScribe" then
+  if unix id of frontApp is __BOLTSCRIBE_PID__ then
     return ""
   end if
   set targetWindow to missing value
@@ -57,8 +57,9 @@ tell application "System Events"
   set {w, h} to size of targetWindow
   return (((x + (w / 2)) as integer) as text) & "," & (((y + (h / 2)) as integer) as text)
 end tell
-"#;
-    let output = run_osascript_with_timeout(script, Duration::from_millis(750))?;
+"#
+    .replace("__BOLTSCRIBE_PID__", &std::process::id().to_string());
+    let output = run_osascript_with_timeout(&script, Duration::from_millis(750))?;
     if !output.status.success() {
         return None;
     }

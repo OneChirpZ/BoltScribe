@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, DataDirInfo, HistoryRecord, InputStats, WorkflowStatus } from "../types";
-import type { Page } from "../domain/navigation";
+import type { CorrectionSection, Page } from "../domain/navigation";
 import type { PermissionRequestState } from "../domain/permissions";
 import { appLanguage, translations } from "../domain/i18n";
 import { requiresAccessibilityPermission, supportsFnLongPressTrigger } from "../domain/platform";
@@ -20,12 +20,13 @@ const recentHistoryLimit = 6;
 const historyPageSize = 20;
 
 type PendingConfigAction =
-  | { kind: "page"; page: Page }
+  | { kind: "page"; page: Page; correctionSection?: CorrectionSection }
   | { kind: "close" };
 
 export default function MainApp() {
   const needsAccessibilityPermission = requiresAccessibilityPermission();
   const [page, setPage] = useState<Page>("home");
+  const [correctionSection, setCorrectionSection] = useState<CorrectionSection>("requirements");
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [savedConfig, setSavedConfig] = useState<AppConfig | null>(null);
   const [status, setStatus] = useState<WorkflowStatus>(emptyStatus);
@@ -287,6 +288,19 @@ export default function MainApp() {
     setPage(nextPage);
   }
 
+  function requestCorrectionSection(nextSection: CorrectionSection) {
+    if (page === "correction") {
+      setCorrectionSection(nextSection);
+      return;
+    }
+    if (isConfigDirty(configRef.current, savedConfigRef.current)) {
+      setPendingConfigAction({ kind: "page", page: "correction", correctionSection: nextSection });
+      return;
+    }
+    setCorrectionSection(nextSection);
+    setPage("correction");
+  }
+
   function requestWindowClose() {
     if (isConfigDirty(configRef.current, savedConfigRef.current)) {
       setPendingConfigAction({ kind: "close" });
@@ -337,6 +351,9 @@ export default function MainApp() {
 
   function completePendingConfigAction(action: PendingConfigAction) {
     if (action.kind === "page") {
+      if (action.correctionSection) {
+        setCorrectionSection(action.correctionSection);
+      }
       setPage(action.page);
       return;
     }
@@ -595,11 +612,17 @@ export default function MainApp() {
   const canSave = Boolean(config) && !busy;
   const canSaveChanges = canSave && hasUnsavedChanges;
   const canChangeDataDir = canSave && status.mode !== "recording" && status.mode !== "processing";
-  const showSaveBar = Boolean(config) && (page === "models" || page === "correction" || page === "settings");
+  const showSaveBar = Boolean(config) && (hasUnsavedChanges || page === "models" || page === "correction" || page === "settings");
+  const correctionNavItems: Array<{ section: CorrectionSection; label: string }> = [
+    { section: "requirements", label: text.correction.requirementsNav },
+    { section: "dictionary", label: text.correction.dictionaryNav },
+    { section: "rules", label: text.correction.rulesNav },
+    { section: "prompt", label: text.correction.promptNav },
+  ];
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={page === "correction" ? "sidebar correction-active" : "sidebar"}>
         <div className="brand">
           <img className="brand-mark" src={appIconUrl} alt="" aria-hidden="true" />
           <div className="brand-copy">
@@ -617,11 +640,49 @@ export default function MainApp() {
             <GitHubIcon />
           </button>
         </div>
-        <nav>
+        <nav className="sidebar-nav" aria-label={language === "zh-CN" ? "主导航" : "Main navigation"}>
           <NavButton current={page} page="home" onClick={requestPageChange} label={text.nav.home} />
           <NavButton current={page} page="history" onClick={requestPageChange} label={text.nav.history} />
           <NavButton current={page} page="models" onClick={requestPageChange} label={text.nav.models} />
-          <NavButton current={page} page="correction" onClick={requestPageChange} label={text.nav.correction} />
+          <div className="correction-nav-group">
+            <div className="correction-nav-primary">
+              <NavButton
+                current={page}
+                page="correction"
+                onClick={requestPageChange}
+                label={text.nav.correction}
+                ariaExpanded={page === "correction"}
+              />
+              <label className="nav-toggle" title={text.correction.enabled}>
+                <span className="visually-hidden">{text.correction.enabled}</span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={config?.correction.enabled ?? false}
+                  disabled={!config || busy}
+                  onChange={(event) => {
+                    if (!config) return;
+                    changeConfig({ ...config, correction: { ...config.correction, enabled: event.target.checked } });
+                  }}
+                />
+              </label>
+            </div>
+            {page === "correction" ? (
+              <nav className="correction-subnav" aria-label={text.correction.navigationLabel}>
+                {correctionNavItems.map((item) => (
+                  <button
+                    key={item.section}
+                    className={correctionSection === item.section ? "correction-subnav-button active" : "correction-subnav-button"}
+                    type="button"
+                    aria-current={correctionSection === item.section ? "page" : undefined}
+                    onClick={() => setCorrectionSection(item.section)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </nav>
+            ) : null}
+          </div>
           <NavButton current={page} page="settings" onClick={requestPageChange} label={text.nav.settings} />
         </nav>
         <div className="sidebar-footer">
@@ -633,7 +694,7 @@ export default function MainApp() {
       </aside>
 
       <main className="content">
-        <div className="content-scroll" ref={contentScrollRef}>
+        <div className={page === "correction" ? "content-scroll correction-content" : "content-scroll"} ref={contentScrollRef}>
           {needsAccessibilityPermission && accessibilityGranted === false ? (
             <div className="permission-banner">
               <div>
@@ -666,6 +727,8 @@ export default function MainApp() {
               onRefreshAudioDevices={() => { void refreshAudioDevices().catch((error) => setNotice(String(error))); }}
               onRefreshHistory={refreshHistory}
               onOpenHistoryPage={openHistoryPage}
+              onOpenModels={() => requestPageChange("models")}
+              onOpenCorrectionSection={requestCorrectionSection}
               onCopyHistory={copyHistoryText}
               language={language}
               text={text}
@@ -688,7 +751,7 @@ export default function MainApp() {
             <ModelsPage config={config} onChange={changeConfig} onSaveConfig={save} onNotice={setNotice} canSave={canSave} text={text} />
           ) : null}
           {config && page === "correction" ? (
-            <CorrectionPage config={config} onChange={changeConfig} text={text} />
+            <CorrectionPage config={config} onChange={changeConfig} section={correctionSection} text={text} />
           ) : null}
           {config && page === "settings" ? (
             <SettingsPage

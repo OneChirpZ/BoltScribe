@@ -4,6 +4,8 @@ import { activeHotkeys, displayShortcut } from "../domain/hotkeys";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
 import { translateWorkflowMessage, workflowModeLabel } from "../domain/i18n";
 import { providerLabel } from "../domain/providers";
+import type { CorrectionSection } from "../domain/navigation";
+import { parseCorrectionRulesText, parseDictionaryText } from "../domain/correctionText";
 
 export default function HomePage({
   config,
@@ -18,6 +20,8 @@ export default function HomePage({
   onRefreshAudioDevices,
   onRefreshHistory,
   onOpenHistoryPage,
+  onOpenModels,
+  onOpenCorrectionSection,
   onCopyHistory,
   language,
   text,
@@ -34,6 +38,8 @@ export default function HomePage({
   onRefreshAudioDevices: () => void;
   onRefreshHistory: () => void;
   onOpenHistoryPage: () => void;
+  onOpenModels: () => void;
+  onOpenCorrectionSection: (section: CorrectionSection) => void;
   onCopyHistory: (text: string, label: string) => void;
   language: AppLanguage;
   text: TextBundle;
@@ -82,10 +88,23 @@ export default function HomePage({
           </div>
         </div>
         <div className="summary-grid">
-          <Summary label={text.home.asr} value="火山引擎 WebSocket" />
-          <Summary label={text.home.llm} value={`${providerLabel(config.llm.provider)} / ${config.llm.model || text.home.unconfigured}`} />
-          <Summary label={text.home.dictionaryItems} value={text.home.itemCount(countNonEmptyLines(config.correction.dictionary_text ?? ""))} />
-          <Summary label="Thinking" value={config.llm.thinking_enabled ? config.llm.thinking_effort : text.common.closed} />
+          <Summary label={text.home.asr} value="火山引擎 WebSocket" onClick={onOpenModels} />
+          <Summary
+            label={text.home.llm}
+            value={`${providerLabel(config.llm.provider)} / ${config.llm.model || text.home.unconfigured}`}
+            detail={text.home.raceModeStatus(config.llm.race_enabled ?? false)}
+            onClick={onOpenModels}
+          />
+          <Summary
+            label={text.home.dictionaryItems}
+            value={text.home.itemCount(parseDictionaryText(config.correction.dictionary_text ?? "").filter((line) => line.kind === "entry").length)}
+            onClick={() => onOpenCorrectionSection("dictionary")}
+          />
+          <Summary
+            label={text.home.correctionItems}
+            value={text.home.itemCount(parseCorrectionRulesText(config.correction.correction_rules_text ?? "").filter((line) => line.kind === "rule").length)}
+            onClick={() => onOpenCorrectionSection("rules")}
+          />
         </div>
       </section>
       <HistoryPage title={text.home.latestHistory} history={history} onRefresh={onRefreshHistory} onOpenFullHistory={onOpenHistoryPage} onCopy={onCopyHistory} text={text} />
@@ -93,15 +112,12 @@ export default function HomePage({
   );
 }
 
-function countNonEmptyLines(value: string) {
-  return value.split(/\r?\n/).filter((line) => line.trim()).length;
-}
-
-function Summary({ label, value }: { label: string; value: string }) {
+function Summary({ label, value, detail, onClick }: { label: string; value: string; detail?: string; onClick: () => void }) {
   return (
-    <div className="summary-item">
+    <button className="summary-item" type="button" onClick={onClick} aria-label={`${label}：${value}${detail ? `，${detail}` : ""}`}>
       <span>{label}</span>
       <strong>{value}</strong>
-    </div>
+      {detail ? <small>{detail}</small> : null}
+    </button>
   );
 }

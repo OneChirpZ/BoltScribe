@@ -50,12 +50,9 @@ struct PreparedInputStream {
     channels: u16,
 }
 
-#[derive(Debug, Clone, PartialEq)]
 struct InputStreamSpec {
-    device_name: Option<String>,
-    sample_format: cpal::SampleFormat,
-    sample_rate: u32,
-    channels: u16,
+    device_id: String,
+    device_name: String,
 }
 
 #[derive(Default)]
@@ -136,46 +133,16 @@ impl Default for RecorderController {
 
 pub fn request_microphone_permission() -> Result<bool> {
     let audio_config = microphone_permission_audio_config();
-    let device = audio_devices::resolve_input_device(&audio_config)?;
-    let supported_config = device
-        .default_input_config()
-        .context("Failed to get default input config")?;
-    let stream_config = supported_config.config();
-    let err_fn = |err| eprintln!("microphone permission probe stream error: {err}");
-
-    let stream = match supported_config.sample_format() {
-        cpal::SampleFormat::F32 => {
-            device.build_input_stream(&stream_config, move |_data: &[f32], _| {}, err_fn, None)?
-        }
-        cpal::SampleFormat::I16 => {
-            device.build_input_stream(&stream_config, move |_data: &[i16], _| {}, err_fn, None)?
-        }
-        cpal::SampleFormat::U16 => {
-            device.build_input_stream(&stream_config, move |_data: &[u16], _| {}, err_fn, None)?
-        }
-        sample_format => {
-            return Err(anyhow!(
-                "Unsupported input sample format: {sample_format:?}"
-            ));
-        }
-    };
-
-    stream
-        .play()
-        .context("Failed to start microphone permission probe")?;
+    let mut stream = PreparedInputStream::new_and_start(&audio_config, None)?;
     std::thread::sleep(Duration::from_millis(300));
-    drop(stream);
+    stream.cancel();
     Ok(true)
 }
 
 fn microphone_permission_audio_config() -> AudioConfig {
-    if cfg!(target_os = "macos") {
-        AudioConfig::default()
-    } else {
-        ConfigStore::load()
-            .map(|config| config.audio)
-            .unwrap_or_default()
-    }
+    ConfigStore::load()
+        .map(|config| config.audio)
+        .unwrap_or_default()
 }
 
 fn recorder_worker(receiver: mpsc::Receiver<RecorderCommand>) {
@@ -191,30 +158,15 @@ fn recorder_worker(receiver: mpsc::Receiver<RecorderCommand>) {
                 let result = if active {
                     Err(anyhow!("Recording is already active"))
                 } else {
-                    if prepared
-                        .as_ref()
-                        .map(|stream| stream.needs_rebuild(&audio_config).unwrap_or(true))
-                        .unwrap_or(true)
-                    {
-                        prepared = match PreparedInputStream::new(&audio_config) {
-                            Ok(stream) => Some(stream),
-                            Err(err) => {
-                                let _ = reply.send(Err(err));
-                                continue;
-                            }
-                        };
+                    prepared.take();
+                    match PreparedInputStream::new_and_start(&audio_config, audio_sink) {
+                        Ok(stream) => {
+                            prepared = Some(stream);
+                            active = true;
+                            Ok(())
+                        }
+                        Err(err) => Err(err),
                     }
-
-                    let result = prepared
-                        .as_mut()
-                        .ok_or_else(|| anyhow!("Recorder stream is not prepared"))
-                        .and_then(|stream| stream.start(audio_sink));
-                    if result.is_ok() {
-                        active = true;
-                    } else {
-                        prepared = None;
-                    }
-                    result
                 };
                 let _ = reply.send(result);
             }
@@ -247,11 +199,49 @@ fn recorder_worker(receiver: mpsc::Receiver<RecorderCommand>) {
 }
 
 impl PreparedInputStream {
-    fn new(audio_config: &AudioConfig) -> Result<Self> {
-        let (device, supported_config, spec) = selected_input_spec(audio_config)?;
+    fn new_and_start(audio_config: &AudioConfig, audio_sink: Option<AudioSink>) -> Result<Self> {
+        let candidates = audio_devices::input_device_candidates(audio_config)?;
+        let mut failures = Vec::new();
+
+        for candidate in candidates {
+            let label = candidate.name.clone();
+            match Self::from_candidate(candidate) {
+                Ok(mut stream) => match stream.start(audio_sink.clone()) {
+                    Ok(()) => {
+                        eprintln!(
+                            "audio input selected: {} ({})",
+                            stream.spec.device_name, stream.spec.device_id
+                        );
+                        return Ok(stream);
+                    }
+                    Err(err) => failures.push(format!("{label}: start failed: {err:#}")),
+                },
+                Err(err) => failures.push(format!("{label}: prepare failed: {err:#}")),
+            }
+        }
+
+        Err(anyhow!(
+            "No eligible input device could be started: {}",
+            failures.join("; ")
+        ))
+    }
+
+    fn from_candidate(candidate: audio_devices::AudioInputDeviceCandidate) -> Result<Self> {
+        let audio_devices::AudioInputDeviceCandidate {
+            device,
+            id: device_id,
+            name: device_name,
+        } = candidate;
+        let supported_config = device
+            .default_input_config()
+            .with_context(|| format!("Failed to get default input config for {device_name}"))?;
         let sample_rate = supported_config.sample_rate().0;
         let channels = supported_config.channels();
         let stream_config = supported_config.config();
+        let spec = InputStreamSpec {
+            device_id,
+            device_name,
+        };
         let capture = Arc::new(Mutex::new(CaptureState::default()));
         let unhealthy = Arc::new(AtomicBool::new(false));
 
@@ -313,14 +303,6 @@ impl PreparedInputStream {
         })
     }
 
-    fn needs_rebuild(&self, audio_config: &AudioConfig) -> Result<bool> {
-        if self.unhealthy.load(Ordering::SeqCst) {
-            return Ok(true);
-        }
-        let (_, _, current_spec) = selected_input_spec(audio_config)?;
-        Ok(current_spec != self.spec)
-    }
-
     fn start(&mut self, audio_sink: Option<AudioSink>) -> Result<()> {
         {
             let mut capture = self
@@ -352,8 +334,12 @@ impl PreparedInputStream {
             self.unhealthy.store(true, Ordering::SeqCst);
             eprintln!("audio input stream pause failed: {err}");
         }
-        if samples.is_empty() {
-            return Err(anyhow!("No audio samples captured"));
+        if samples.is_empty() || !has_audio_signal(&samples) {
+            self.unhealthy.store(true, Ordering::SeqCst);
+            return Err(anyhow!(
+                "Input device '{}' captured no audio signal; add it to the blacklist or adjust the microphone priority and try again",
+                self.spec.device_name
+            ));
         }
 
         std::fs::create_dir_all(recordings_dir)
@@ -399,22 +385,6 @@ impl PreparedInputStream {
             capture.cancel();
         }
     }
-}
-
-fn selected_input_spec(
-    audio_config: &AudioConfig,
-) -> Result<(cpal::Device, cpal::SupportedStreamConfig, InputStreamSpec)> {
-    let device = audio_devices::resolve_input_device(audio_config)?;
-    let supported_config = device
-        .default_input_config()
-        .context("Failed to get default input config")?;
-    let spec = InputStreamSpec {
-        device_name: device.name().ok(),
-        sample_format: supported_config.sample_format(),
-        sample_rate: supported_config.sample_rate().0,
-        channels: supported_config.channels(),
-    };
-    Ok((device, supported_config, spec))
 }
 
 impl CaptureState {
@@ -484,4 +454,25 @@ fn u16_to_i16(data: &[u16]) -> Vec<i16> {
             centered.clamp(i16::MIN as i32, i16::MAX as i32) as i16
         })
         .collect()
+}
+
+fn has_audio_signal(samples: &[i16]) -> bool {
+    samples.iter().any(|sample| *sample != 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_audio_signal;
+
+    #[test]
+    fn empty_and_bit_perfect_zero_samples_have_no_signal() {
+        assert!(!has_audio_signal(&[]));
+        assert!(!has_audio_signal(&[0, 0, 0, 0]));
+    }
+
+    #[test]
+    fn any_nonzero_sample_counts_as_signal() {
+        assert!(has_audio_signal(&[0, 1, 0]));
+        assert!(has_audio_signal(&[0, -1, 0]));
+    }
 }

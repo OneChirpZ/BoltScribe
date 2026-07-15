@@ -11,7 +11,7 @@
 <p align="center">
   <a href="README.zh-CN.md">中文 README</a>
   ·
-  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.2">Latest Release</a>
+  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.5">Latest Release</a>
   ·
   <a href="#features">Features</a>
   ·
@@ -39,6 +39,7 @@ It runs as a lightweight tray/menu bar app, keeps data on your machine, and prov
 - **Flexible model setup:** use OpenAI-compatible providers, save model presets, and run multi-model race mode.
 - **Local history:** review previous recordings, transcripts, corrected text, logs, and input statistics.
 - **Tray workflow:** keep BoltScribe in the background, start/stop voice input from the tray menu, and optionally use single-click recording on Windows.
+- **Reliable microphone selection:** blacklist unusable devices, rank preferred microphones, and automatically fall back when a candidate cannot capture valid audio.
 - **Configurable local data:** keep the default local data folder or migrate history, stats, and recordings to a custom empty directory from Settings.
 - **Responsive capsule overlay:** the recording capsule is positioned without slow focused-element queries on macOS.
 - **Bilingual interface:** switch between Chinese and English.
@@ -53,12 +54,12 @@ BoltScribe is built with Tauri, React, TypeScript, and Rust. The React frontend 
 
 ### Download
 
-The latest public release is [BoltScribe v1.2.2](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.2).
+The latest public release is [BoltScribe v1.2.5](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.5).
 
 Available artifact:
 
-- macOS Apple Silicon: `BoltScribe_1.2.2_aarch64.dmg`
-- Windows x64: `BoltScribe_1.2.2_x64-setup.exe`
+- macOS Apple Silicon: `BoltScribe_1.2.5_aarch64.dmg`
+- Windows x64: `BoltScribe_1.2.5_x64-setup.exe`
 
 ### Requirements
 
