@@ -11,7 +11,7 @@
 <p align="center">
   <a href="README.zh-CN.md">中文 README</a>
   ·
-  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.5">Latest Release</a>
+  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.3.0">Latest Release</a>
   ·
   <a href="#features">Features</a>
   ·
@@ -54,12 +54,12 @@ BoltScribe is built with Tauri, React, TypeScript, and Rust. The React frontend 
 
 ### Download
 
-The latest public release is [BoltScribe v1.2.5](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.2.5).
+The latest public release is [BoltScribe v1.3.0](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.3.0).
 
 Available artifact:
 
-- macOS Apple Silicon: `BoltScribe_1.2.5_aarch64.dmg`
-- Windows x64: `BoltScribe_1.2.5_x64-setup.exe`
+- macOS Apple Silicon: `BoltScribe_1.3.0_aarch64.dmg`
+- Windows x64: `BoltScribe_1.3.0_x64-setup.exe`
 
 ### Requirements
 

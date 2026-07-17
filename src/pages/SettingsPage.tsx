@@ -1,5 +1,5 @@
-import { useRef, type ChangeEvent } from "react";
-import type { AppConfig, AudioInputDevice, AudioInputDeviceRef, AudioOutputDevice, ConfigImportReport, DataDirInfo, OutputVolumeDuckingConfig } from "../types";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import type { AppConfig, AudioInputDevice, AudioInputDeviceRef, AudioOutputDevice, ConfigImportReport, DataDirInfo, OutputVolumeDuckingConfig, RecordingCleanupPreview, RecordingCleanupUnit } from "../types";
 import Field from "../components/Field";
 import HelpTip from "../components/HelpTip";
 import PanelHeader from "../components/PanelHeader";
@@ -8,6 +8,7 @@ import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrect
 import { hotkeyEnabledSlots, hotkeySlots, soundSourceShortcutKeyOptions, updateHotkey, updateHotkeyEnabled } from "../domain/hotkeys";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
 import { defaultRecordingOverlayScale, maxRecordingOverlayScale, minRecordingOverlayScale } from "../domain/overlay";
+import { cleanupCutoffTimestamp, formatByteCount } from "../domain/historyMaintenance";
 import type { PermissionRequestState } from "../domain/permissions";
 import { supportsDockVisibilityControl, supportsFnLongPressTrigger, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback, supportsTraySingleClickRecording } from "../domain/platform";
 
@@ -30,6 +31,8 @@ export default function SettingsPage({
   onOpenDataDir,
   onChooseDataDir,
   onResetDataDir,
+  onCleanupRecordingFiles,
+  onPreviewRecordingCleanup,
   onRefreshAudioDevices,
   inputMonitoringGranted,
   inputMonitoringPermission,
@@ -39,6 +42,7 @@ export default function SettingsPage({
   importReport,
   canSave,
   canChangeDataDir,
+  canCleanupRecordings,
   text,
 }: {
   config: AppConfig;
@@ -52,6 +56,8 @@ export default function SettingsPage({
   onOpenDataDir: () => void;
   onChooseDataDir: () => void;
   onResetDataDir: () => void;
+  onCleanupRecordingFiles: (amount: number, unit: RecordingCleanupUnit) => Promise<void>;
+  onPreviewRecordingCleanup: (amount: number, unit: RecordingCleanupUnit) => Promise<RecordingCleanupPreview>;
   onRefreshAudioDevices: () => void;
   inputMonitoringGranted: boolean | null;
   inputMonitoringPermission: PermissionRequestState;
@@ -61,9 +67,18 @@ export default function SettingsPage({
   importReport: ConfigImportReport | null;
   canSave: boolean;
   canChangeDataDir: boolean;
+  canCleanupRecordings: boolean;
   text: TextBundle;
 }) {
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [cleanupAmount, setCleanupAmount] = useState("1");
+  const [cleanupUnit, setCleanupUnit] = useState<RecordingCleanupUnit>("week");
+  const [cleaningRecordings, setCleaningRecordings] = useState(false);
+  const [cleanupPreview, setCleanupPreview] = useState<RecordingCleanupPreview | null>(null);
+  const [cleanupPreviewLoading, setCleanupPreviewLoading] = useState(false);
+  const [cleanupPreviewError, setCleanupPreviewError] = useState(false);
+  const [cleanupPreviewRevision, setCleanupPreviewRevision] = useState(0);
+  const cleanupPreviewRequestRef = useRef(0);
   const storageGb = Number((config.retention.max_storage_bytes / bytesPerGb).toFixed(2));
   const canControlDockVisibility = supportsDockVisibilityControl();
   const canUseFnLongPressTrigger = supportsFnLongPressTrigger();
@@ -88,6 +103,60 @@ export default function SettingsPage({
     (device) => !containsInputDeviceRef(inputDevicePriority, device) && !containsInputDeviceRef(inputDeviceBlacklist, device),
   );
   const missingBlacklistedDevices = inputDeviceBlacklist.filter((blocked) => !findInputDevice(blocked, audioDevices));
+  const cleanupAmountNumber = Number(cleanupAmount);
+  const cleanupAmountValid = cleanupCutoffTimestamp(Date.now(), cleanupAmountNumber, cleanupUnit) !== null;
+
+  useEffect(() => {
+    cleanupPreviewRequestRef.current += 1;
+    const requestId = cleanupPreviewRequestRef.current;
+    if (!cleanupAmountValid) {
+      setCleanupPreviewLoading(false);
+      setCleanupPreviewError(false);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setCleanupPreviewLoading(true);
+      setCleanupPreviewError(false);
+      onPreviewRecordingCleanup(cleanupAmountNumber, cleanupUnit)
+        .then((preview) => {
+          if (cleanupPreviewRequestRef.current === requestId) {
+            setCleanupPreview(preview);
+          }
+        })
+        .catch(() => {
+          if (cleanupPreviewRequestRef.current === requestId) {
+            setCleanupPreviewError(true);
+          }
+        })
+        .finally(() => {
+          if (cleanupPreviewRequestRef.current === requestId) {
+            setCleanupPreviewLoading(false);
+          }
+        });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [cleanupAmountNumber, cleanupUnit, cleanupAmountValid, cleanupPreviewRevision, dataDir?.path, onPreviewRecordingCleanup]);
+
+  async function cleanupOldRecordingFiles() {
+    if (!cleanupAmountValid) {
+      return;
+    }
+    const unitLabel = cleanupUnit === "day"
+      ? text.settings.cleanupUnitDay
+      : cleanupUnit === "week"
+        ? text.settings.cleanupUnitWeek
+        : text.settings.cleanupUnitMonth;
+    if (!window.confirm(text.settings.cleanupRecordingsConfirm(cleanupAmountNumber, unitLabel))) {
+      return;
+    }
+    setCleaningRecordings(true);
+    try {
+      await onCleanupRecordingFiles(cleanupAmountNumber, cleanupUnit);
+      setCleanupPreviewRevision((revision) => revision + 1);
+    } finally {
+      setCleaningRecordings(false);
+    }
+  }
 
   function updateMaxRecords(value: string) {
     const max_history_records = clampInt(Number(value), 1, maxHistoryRecords);
@@ -235,15 +304,16 @@ export default function SettingsPage({
           <div className="section-title">
             <h2>{text.settings.languageSection}</h2>
           </div>
-          <Field label={text.settings.language} className="field-medium">
+          <label className="field field-medium settings-language-field">
             <select
+              aria-label={text.settings.language}
               value={config.ui.app_language ?? "zh-CN"}
               onChange={(event) => updateLanguage(event.target.value)}
             >
               <option value="zh-CN">{text.settings.chinese}</option>
               <option value="en-US">{text.settings.english}</option>
             </select>
-          </Field>
+          </label>
         </div>
 
         <div className="settings-section">
@@ -617,6 +687,73 @@ export default function SettingsPage({
           <Field label={text.settings.maxStorage} className="field-compact">
             <input type="number" min="0.01" max={maxStorageGb} step="0.01" value={storageGb} onChange={(event) => updateMaxStorageGb(event.target.value)} />
           </Field>
+          <div className="field-wide recording-cleanup-panel">
+            <div className="recording-cleanup-heading">
+              <strong>{text.settings.cleanupRecordings}</strong>
+              <span>{text.settings.cleanupRecordingsHelp}</span>
+            </div>
+            <div className="recording-cleanup-storage" role="status" aria-live="polite" aria-atomic="true">
+              <div className="recording-cleanup-storage-item">
+                <span>{text.settings.cleanupStorageCurrent}</span>
+                <strong>
+                  {cleanupPreviewError && !cleanupPreview
+                    ? text.settings.cleanupStorageUnavailable
+                    : cleanupPreview
+                      ? formatByteCount(cleanupPreview.recording_bytes)
+                      : text.common.checking}
+                </strong>
+                <small>{cleanupPreview ? text.settings.cleanupStorageFiles(cleanupPreview.recording_files) : ""}</small>
+              </div>
+              <div className="recording-cleanup-storage-item reclaimable">
+                <span>{text.settings.cleanupStorageReclaimable}</span>
+                <strong>
+                  {!cleanupAmountValid
+                    ? "—"
+                    : cleanupPreviewError
+                      ? text.settings.cleanupStorageUnavailable
+                      : cleanupPreview
+                        ? formatByteCount(cleanupPreview.eligible_bytes)
+                        : text.common.checking}
+                </strong>
+                <small>
+                  {cleanupAmountValid && cleanupPreview
+                    ? text.settings.cleanupStorageFiles(cleanupPreview.eligible_files)
+                    : ""}
+                </small>
+              </div>
+            </div>
+            <div className="recording-cleanup-controls">
+              <label>
+                <span>{text.settings.cleanupAmount}</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputMode="numeric"
+                  value={cleanupAmount}
+                  onChange={(event) => setCleanupAmount(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>{text.settings.cleanupUnit}</span>
+                <select value={cleanupUnit} onChange={(event) => setCleanupUnit(event.target.value as RecordingCleanupUnit)}>
+                  <option value="day">{text.settings.cleanupUnitDay}</option>
+                  <option value="week">{text.settings.cleanupUnitWeek}</option>
+                  <option value="month">{text.settings.cleanupUnitMonth}</option>
+                </select>
+              </label>
+              <button
+                className="secondary small recording-cleanup-button"
+                type="button"
+                disabled={!canCleanupRecordings || !cleanupAmountValid || cleaningRecordings}
+                onClick={() => { void cleanupOldRecordingFiles(); }}
+              >
+                {cleaningRecordings ? text.settings.cleaningRecordings : text.settings.cleanupRecordingsAction}
+              </button>
+            </div>
+            {cleanupPreviewLoading && cleanupPreview ? <p className="settings-help-text">{text.settings.cleanupStorageRefreshing}</p> : null}
+            {!canCleanupRecordings ? <p className="settings-help-text warning">{text.settings.cleanupRecordingsBusy}</p> : null}
+          </div>
           <div className="field-wide data-dir-panel">
             <div className="data-dir-heading">
               <div>

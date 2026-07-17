@@ -1,6 +1,6 @@
 [package]
 name = "boltscribe"
-version = "1.2.5"
+version = "1.3.0"
 description = "Local-first macOS and Windows voice input with ASR transcription and LLM correction"
 authors = ["BoltScribe contributors"]
 license = ""
@@ -30,9 +30,13 @@ tungstenite = { version = "0.29.0", features = ["native-tls"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
 core-foundation-sys = "0.8"
+core-graphics = "0.25"
 coreaudio-sys = { version = "0.2", default-features = false, features = ["core_audio"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSWindow"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["libc", "std", "NSApplication", "NSPanel", "NSRunningApplication", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel.git", rev = "a3122e894383aa068ec5365a42994e3ac94ba1b6" }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.54", features = ["Win32_Devices_Properties", "Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_LibraryLoader", "Win32_System_Variant", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"] }

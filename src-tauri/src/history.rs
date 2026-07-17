@@ -1,16 +1,21 @@
 use crate::config::RetentionConfig;
 use crate::corrector::LlmCallLog;
 use crate::paths;
-use anyhow::{Context, Result};
-use chrono::{DateTime, Local, Utc};
+use anyhow::{anyhow, bail, Context, Result};
+use chrono::{DateTime, Duration as ChronoDuration, Local, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard};
 
 const HISTORY_READ_CHUNK_SIZE: u64 = 16 * 1024;
 const STATS_SCHEMA_VERSION: u8 = 1;
+const MAX_RECORDING_CLEANUP_DAYS: u32 = 36_500;
+const MAX_RECORDING_CLEANUP_WEEKS: u32 = 5_200;
+const MAX_RECORDING_CLEANUP_MONTHS: u32 = 1_200;
+static HISTORY_MUTATION_LOCK: Mutex<()> = Mutex::new(());
 
 struct HistoryPage {
     records: Vec<HistoryRecord>,
@@ -21,7 +26,7 @@ struct HistoryPage {
 pub struct HistoryRecord {
     pub id: String,
     pub created_at: DateTime<Utc>,
-    pub audio_path: PathBuf,
+    pub audio_path: Option<PathBuf>,
     pub asr_provider: String,
     pub asr_task_id: Option<String>,
     pub audio_started_at: DateTime<Utc>,
@@ -41,6 +46,36 @@ pub struct HistoryRecord {
     pub asr_duration_ms: Option<u64>,
     pub service_audio_duration_ms: Option<u64>,
     pub total_duration_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct DeleteHistoryResult {
+    pub deleted_records: usize,
+    pub deleted_audio_files: usize,
+    pub freed_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RecordingCleanupResult {
+    pub deleted_files: usize,
+    pub cleared_history_records: usize,
+    pub freed_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RecordingCleanupPreview {
+    pub recording_files: usize,
+    pub recording_bytes: u64,
+    pub eligible_files: usize,
+    pub eligible_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordingCleanupUnit {
+    Day,
+    Week,
+    Month,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -72,6 +107,7 @@ pub struct HistoryStore;
 
 impl HistoryStore {
     pub fn append(record: &HistoryRecord, retention: &RetentionConfig) -> Result<()> {
+        let _guard = history_mutation_guard()?;
         let path = paths::history_path()?;
         let stats_path = paths::input_stats_path()?;
         let recordings_dir = paths::recordings_dir()?;
@@ -83,6 +119,7 @@ impl HistoryStore {
     }
 
     pub fn stats() -> Result<InputStats> {
+        let _guard = history_mutation_guard()?;
         let stats_path = paths::input_stats_path()?;
         let history_paths = history_read_paths()?;
         backfill_stats_from_history(&stats_path, &history_paths)?;
@@ -90,10 +127,77 @@ impl HistoryStore {
     }
 
     pub fn prune(retention: &RetentionConfig) -> Result<()> {
+        let _guard = history_mutation_guard()?;
         let path = paths::history_path()?;
         let recordings_dir = paths::recordings_dir()?;
         prune_path(&path, retention, &recordings_dir)
     }
+
+    pub fn delete(record_id: &str) -> Result<DeleteHistoryResult> {
+        let _guard = history_mutation_guard()?;
+        let history_paths = history_read_paths()?;
+        backfill_stats_from_history(&paths::input_stats_path()?, &history_paths)?;
+        delete_from_paths(&history_paths, &history_recordings_dirs()?, record_id)
+    }
+
+    pub fn cleanup_recordings_older_than(
+        amount: u32,
+        unit: RecordingCleanupUnit,
+    ) -> Result<RecordingCleanupResult> {
+        let cutoff = recording_cleanup_cutoff(Utc::now(), amount, unit)?;
+        let _guard = history_mutation_guard()?;
+        cleanup_recordings_before(&history_read_paths()?, &history_recordings_dirs()?, cutoff)
+    }
+
+    pub fn preview_recording_cleanup(
+        amount: u32,
+        unit: RecordingCleanupUnit,
+    ) -> Result<RecordingCleanupPreview> {
+        let cutoff = recording_cleanup_cutoff(Utc::now(), amount, unit)?;
+        let _guard = history_mutation_guard()?;
+        preview_recording_cleanup_before(
+            &history_read_paths()?,
+            &history_recordings_dirs()?,
+            cutoff,
+        )
+    }
+}
+
+fn recording_cleanup_cutoff(
+    now: DateTime<Utc>,
+    amount: u32,
+    unit: RecordingCleanupUnit,
+) -> Result<DateTime<Utc>> {
+    if amount == 0 {
+        bail!("Recording cleanup age must be greater than zero");
+    }
+
+    match unit {
+        RecordingCleanupUnit::Day => {
+            if amount > MAX_RECORDING_CLEANUP_DAYS {
+                bail!("Recording cleanup days cannot exceed {MAX_RECORDING_CLEANUP_DAYS}");
+            }
+            Ok(now - ChronoDuration::days(i64::from(amount)))
+        }
+        RecordingCleanupUnit::Week => {
+            if amount > MAX_RECORDING_CLEANUP_WEEKS {
+                bail!("Recording cleanup weeks cannot exceed {MAX_RECORDING_CLEANUP_WEEKS}");
+            }
+            Ok(now - ChronoDuration::weeks(i64::from(amount)))
+        }
+        RecordingCleanupUnit::Month => {
+            if amount > MAX_RECORDING_CLEANUP_MONTHS {
+                bail!("Recording cleanup months cannot exceed {MAX_RECORDING_CLEANUP_MONTHS}");
+            }
+            Ok(now - ChronoDuration::days(i64::from(amount) * 30))
+        }
+    }
+}
+
+fn history_mutation_guard() -> Result<MutexGuard<'static, ()>> {
+    HISTORY_MUTATION_LOCK
+        .lock()
+        .map_err(|_| anyhow!("History storage lock is poisoned"))
 }
 
 fn append_to_paths(
@@ -148,6 +252,314 @@ fn prune_path(path: &Path, retention: &RetentionConfig, recordings_dir: &Path) -
     write_records_atomically(path, &kept)?;
     delete_recording_files(&removed, recordings_dir)?;
     Ok(())
+}
+
+struct MutableHistoryLine {
+    raw: String,
+    value: Option<serde_json::Value>,
+    record: Option<HistoryRecord>,
+    removed: bool,
+    changed: bool,
+}
+
+struct MutableHistoryFile {
+    path: PathBuf,
+    lines: Vec<MutableHistoryLine>,
+    changed: bool,
+}
+
+fn load_mutable_history_files(paths: &[PathBuf]) -> Result<Vec<MutableHistoryFile>> {
+    paths
+        .iter()
+        .filter(|path| path.exists())
+        .map(|path| {
+            let file = fs::File::open(path)
+                .with_context(|| format!("Failed to open {}", path.display()))?;
+            let mut lines = Vec::new();
+            for raw in BufReader::new(file).lines() {
+                let raw = raw?;
+                let value = serde_json::from_str::<serde_json::Value>(&raw).ok();
+                let record = value
+                    .as_ref()
+                    .and_then(|value| serde_json::from_value(value.clone()).ok());
+                lines.push(MutableHistoryLine {
+                    raw,
+                    value,
+                    record,
+                    removed: false,
+                    changed: false,
+                });
+            }
+            Ok(MutableHistoryFile {
+                path: path.clone(),
+                lines,
+                changed: false,
+            })
+        })
+        .collect()
+}
+
+fn audio_path_from_value(value: &serde_json::Value) -> Option<PathBuf> {
+    value
+        .get("audio_path")
+        .and_then(serde_json::Value::as_str)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+}
+
+fn delete_from_paths(
+    history_paths: &[PathBuf],
+    recordings_dirs: &[PathBuf],
+    record_id: &str,
+) -> Result<DeleteHistoryResult> {
+    let record_id = record_id.trim();
+    if record_id.is_empty() {
+        bail!("History record id cannot be empty");
+    }
+
+    let mut history_files = load_mutable_history_files(history_paths)?;
+    let mut removed_audio_paths = HashSet::new();
+    let mut deleted_records = 0usize;
+
+    for history_file in &mut history_files {
+        for line in &mut history_file.lines {
+            let matches = line
+                .value
+                .as_ref()
+                .and_then(|value| value.get("id"))
+                .and_then(serde_json::Value::as_str)
+                == Some(record_id);
+            if !matches {
+                continue;
+            }
+            if let Some(audio_path) = line.value.as_ref().and_then(audio_path_from_value) {
+                removed_audio_paths.insert(audio_path);
+            }
+            line.removed = true;
+            history_file.changed = true;
+            deleted_records += 1;
+        }
+    }
+
+    if deleted_records == 0 {
+        return Ok(DeleteHistoryResult {
+            deleted_records: 0,
+            deleted_audio_files: 0,
+            freed_bytes: 0,
+        });
+    }
+
+    let mut remaining_audio_paths = HashSet::new();
+    for audio_path in history_files
+        .iter()
+        .flat_map(|history_file| history_file.lines.iter())
+        .filter(|line| !line.removed)
+        .filter_map(|line| line.value.as_ref().and_then(audio_path_from_value))
+    {
+        if let Some(audio_path) = normalized_safe_recording_path(&audio_path, recordings_dirs)? {
+            remaining_audio_paths.insert(audio_path);
+        }
+    }
+
+    for history_file in &history_files {
+        if history_file.changed {
+            write_mutable_history_file(history_file)?;
+        }
+    }
+
+    let mut deleted_audio_files = 0usize;
+    let mut freed_bytes = 0u64;
+    for audio_path in removed_audio_paths {
+        let Some(audio_path) = normalized_safe_recording_path(&audio_path, recordings_dirs)? else {
+            continue;
+        };
+        if remaining_audio_paths.contains(&audio_path) || !audio_path.exists() {
+            continue;
+        }
+        freed_bytes = freed_bytes.saturating_add(audio_path.metadata()?.len());
+        fs::remove_file(&audio_path)
+            .with_context(|| format!("Failed to remove {}", audio_path.display()))?;
+        deleted_audio_files += 1;
+    }
+
+    Ok(DeleteHistoryResult {
+        deleted_records,
+        deleted_audio_files,
+        freed_bytes,
+    })
+}
+
+fn cleanup_recordings_before(
+    history_paths: &[PathBuf],
+    recordings_dirs: &[PathBuf],
+    cutoff: DateTime<Utc>,
+) -> Result<RecordingCleanupResult> {
+    let mut history_files = load_mutable_history_files(history_paths)?;
+    let candidate_audio_paths =
+        cleanup_candidate_audio_paths(&history_files, recordings_dirs, cutoff)?;
+
+    let mut cleared_audio_paths = HashSet::new();
+    let mut deleted_files = 0usize;
+    let mut freed_bytes = 0u64;
+
+    for audio_path in candidate_audio_paths {
+        if audio_path.exists() {
+            freed_bytes = freed_bytes.saturating_add(audio_path.metadata()?.len());
+            fs::remove_file(&audio_path)
+                .with_context(|| format!("Failed to remove {}", audio_path.display()))?;
+            deleted_files += 1;
+        }
+        cleared_audio_paths.insert(audio_path);
+    }
+
+    let mut cleared_history_records = 0usize;
+    for history_file in &mut history_files {
+        for line in &mut history_file.lines {
+            let Some(record) = line.record.as_ref() else {
+                continue;
+            };
+            if record.audio_finished_at >= cutoff {
+                continue;
+            }
+            let Some(raw_audio_path) = line.value.as_ref().and_then(audio_path_from_value) else {
+                continue;
+            };
+            let Some(audio_path) =
+                normalized_safe_recording_path(&raw_audio_path, recordings_dirs)?
+            else {
+                continue;
+            };
+            if !cleared_audio_paths.contains(&audio_path) {
+                continue;
+            }
+            if let Some(value) = line.value.as_mut() {
+                value["audio_path"] = serde_json::Value::Null;
+            }
+            if let Some(record) = line.record.as_mut() {
+                record.audio_path = None;
+            }
+            line.changed = true;
+            history_file.changed = true;
+            cleared_history_records += 1;
+        }
+        if history_file.changed {
+            write_mutable_history_file(history_file)?;
+        }
+    }
+
+    Ok(RecordingCleanupResult {
+        deleted_files,
+        cleared_history_records,
+        freed_bytes,
+    })
+}
+
+fn cleanup_candidate_audio_paths(
+    history_files: &[MutableHistoryFile],
+    recordings_dirs: &[PathBuf],
+    cutoff: DateTime<Utc>,
+) -> Result<HashSet<PathBuf>> {
+    let mut protected_audio_paths = HashSet::new();
+    let mut candidate_audio_paths = HashSet::new();
+    for line in history_files
+        .iter()
+        .flat_map(|history_file| history_file.lines.iter())
+    {
+        let Some(raw_audio_path) = line.value.as_ref().and_then(audio_path_from_value) else {
+            continue;
+        };
+        let Some(audio_path) = normalized_safe_recording_path(&raw_audio_path, recordings_dirs)?
+        else {
+            continue;
+        };
+        match &line.record {
+            Some(record) if record.audio_finished_at < cutoff => {
+                candidate_audio_paths.insert(audio_path);
+            }
+            _ => {
+                protected_audio_paths.insert(audio_path);
+            }
+        }
+    }
+    candidate_audio_paths.retain(|path| !protected_audio_paths.contains(path));
+    Ok(candidate_audio_paths)
+}
+
+fn preview_recording_cleanup_before(
+    history_paths: &[PathBuf],
+    recordings_dirs: &[PathBuf],
+    cutoff: DateTime<Utc>,
+) -> Result<RecordingCleanupPreview> {
+    let history_files = load_mutable_history_files(history_paths)?;
+    let candidate_audio_paths =
+        cleanup_candidate_audio_paths(&history_files, recordings_dirs, cutoff)?;
+    let (recording_files, recording_bytes) = recording_storage_usage(recordings_dirs)?;
+    let mut eligible_files = 0usize;
+    let mut eligible_bytes = 0u64;
+    for audio_path in candidate_audio_paths {
+        if !audio_path.exists() {
+            continue;
+        }
+        eligible_bytes = eligible_bytes.saturating_add(audio_path.metadata()?.len());
+        eligible_files += 1;
+    }
+    Ok(RecordingCleanupPreview {
+        recording_files,
+        recording_bytes,
+        eligible_files,
+        eligible_bytes,
+    })
+}
+
+fn recording_storage_usage(recordings_dirs: &[PathBuf]) -> Result<(usize, u64)> {
+    let mut seen = HashSet::new();
+    let mut files = 0usize;
+    let mut bytes = 0u64;
+    for recordings_dir in recordings_dirs {
+        if !recordings_dir.exists() {
+            continue;
+        }
+        for entry in fs::read_dir(recordings_dir)
+            .with_context(|| format!("Failed to read {}", recordings_dir.display()))?
+        {
+            let path = entry?.path();
+            let Some(path) = normalized_safe_recording_path(&path, recordings_dirs)? else {
+                continue;
+            };
+            if !seen.insert(path.clone()) {
+                continue;
+            }
+            let metadata = path.metadata()?;
+            if !metadata.is_file() {
+                continue;
+            }
+            files += 1;
+            bytes = bytes.saturating_add(metadata.len());
+        }
+    }
+    Ok((files, bytes))
+}
+
+fn write_mutable_history_file(history_file: &MutableHistoryFile) -> Result<()> {
+    let temp_path = history_file.path.with_extension("jsonl.tmp");
+    {
+        let mut file = fs::File::create(&temp_path)
+            .with_context(|| format!("Failed to create {}", temp_path.display()))?;
+        for line in &history_file.lines {
+            if line.removed {
+                continue;
+            }
+            if line.changed {
+                if let Some(value) = &line.value {
+                    writeln!(file, "{}", serde_json::to_string(value)?)?;
+                }
+            } else {
+                writeln!(file, "{}", line.raw)?;
+            }
+        }
+        file.sync_all()?;
+    }
+    replace_history_file(&temp_path, &history_file.path)
 }
 
 #[cfg(test)]
@@ -556,8 +968,36 @@ fn write_records_atomically(path: &Path, records: &[HistoryRecord]) -> Result<()
         }
         file.sync_all()?;
     }
-    fs::rename(&temp_path, path)
-        .with_context(|| format!("Failed to replace {}", path.display()))?;
+    replace_history_file(&temp_path, path)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_history_file(temp_path: &Path, path: &Path) -> Result<()> {
+    fs::rename(temp_path, path).with_context(|| format!("Failed to replace {}", path.display()))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn replace_history_file(temp_path: &Path, path: &Path) -> Result<()> {
+    let backup_path = path.with_extension("jsonl.replacing");
+    if backup_path.exists() {
+        fs::remove_file(&backup_path)
+            .with_context(|| format!("Failed to remove {}", backup_path.display()))?;
+    }
+    if path.exists() {
+        fs::rename(path, &backup_path)
+            .with_context(|| format!("Failed to back up {}", path.display()))?;
+    }
+    if let Err(err) = fs::rename(temp_path, path) {
+        if backup_path.exists() {
+            let _ = fs::rename(&backup_path, path);
+        }
+        return Err(err).with_context(|| format!("Failed to replace {}", path.display()));
+    }
+    if backup_path.exists() {
+        fs::remove_file(&backup_path)
+            .with_context(|| format!("Failed to remove {}", backup_path.display()))?;
+    }
     Ok(())
 }
 
@@ -565,12 +1005,14 @@ fn storage_bytes(records: &[HistoryRecord], recordings_dir: &Path) -> Result<u64
     let mut total = 0u64;
     let mut seen = HashSet::new();
     for record in records {
-        if !seen.insert(record.audio_path.clone()) {
+        let Some(audio_path) = record.audio_path.as_ref() else {
+            continue;
+        };
+        if !seen.insert(audio_path.clone()) {
             continue;
         }
-        if is_safe_recording_path(&record.audio_path, recordings_dir)? && record.audio_path.exists()
-        {
-            total += record.audio_path.metadata()?.len();
+        if is_safe_recording_path(audio_path, recordings_dir)? && audio_path.exists() {
+            total += audio_path.metadata()?.len();
         }
     }
     Ok(total)
@@ -579,16 +1021,17 @@ fn storage_bytes(records: &[HistoryRecord], recordings_dir: &Path) -> Result<u64
 fn delete_recording_files(records: &[HistoryRecord], recordings_dir: &Path) -> Result<()> {
     let mut seen = HashSet::new();
     for record in records {
-        if !seen.insert(record.audio_path.clone()) {
+        let Some(audio_path) = record.audio_path.as_ref() else {
+            continue;
+        };
+        if !seen.insert(audio_path.clone()) {
             continue;
         }
-        if !is_safe_recording_path(&record.audio_path, recordings_dir)?
-            || !record.audio_path.exists()
-        {
+        if !is_safe_recording_path(audio_path, recordings_dir)? || !audio_path.exists() {
             continue;
         }
-        fs::remove_file(&record.audio_path)
-            .with_context(|| format!("Failed to remove {}", record.audio_path.display()))?;
+        fs::remove_file(audio_path)
+            .with_context(|| format!("Failed to remove {}", audio_path.display()))?;
     }
     Ok(())
 }
@@ -613,6 +1056,39 @@ fn is_safe_recording_path(path: &Path, recordings_dir: &Path) -> Result<bool> {
         .canonicalize()
         .unwrap_or_else(|_| parent.to_path_buf());
     Ok(parent == recordings_dir)
+}
+
+fn normalized_safe_recording_path(
+    path: &Path,
+    recordings_dirs: &[PathBuf],
+) -> Result<Option<PathBuf>> {
+    for recordings_dir in recordings_dirs {
+        if is_safe_recording_path(path, recordings_dir)? {
+            let Some(file_name) = path.file_name() else {
+                return Ok(None);
+            };
+            let parent = path.parent().unwrap_or_else(|| Path::new(""));
+            let parent = parent
+                .canonicalize()
+                .unwrap_or_else(|_| parent.to_path_buf());
+            return Ok(Some(parent.join(file_name)));
+        }
+    }
+    Ok(None)
+}
+
+fn history_recordings_dirs() -> Result<Vec<PathBuf>> {
+    let current_dir = paths::recordings_dir()?;
+    let legacy_dir = paths::legacy_history_path()?
+        .parent()
+        .map(|parent| parent.join("recordings"));
+    let mut dirs = vec![current_dir];
+    if let Some(legacy_dir) = legacy_dir {
+        if !dirs.contains(&legacy_dir) {
+            dirs.push(legacy_dir);
+        }
+    }
+    Ok(dirs)
 }
 
 fn history_read_paths() -> Result<Vec<PathBuf>> {
@@ -641,7 +1117,7 @@ mod tests {
         HistoryRecord {
             id: id.to_string(),
             created_at: Utc::now(),
-            audio_path: PathBuf::from("/tmp/a.wav"),
+            audio_path: Some(PathBuf::from("/tmp/a.wav")),
             asr_provider: "mock".to_string(),
             asr_task_id: None,
             audio_started_at: Utc::now(),
@@ -696,6 +1172,22 @@ mod tests {
             std::process::id(),
             Utc::now().timestamp_millis()
         ))
+    }
+
+    fn utc(timestamp: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(timestamp)
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    fn write_history_lines(path: &Path, lines: &[String]) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        let mut file = fs::File::create(path).unwrap();
+        for line in lines {
+            writeln!(file, "{line}").unwrap();
+        }
     }
 
     #[test]
@@ -1114,11 +1606,11 @@ mod tests {
 
         let records = [
             HistoryRecord {
-                audio_path: safe_path.clone(),
+                audio_path: Some(safe_path.clone()),
                 ..sample_record("safe", None)
             },
             HistoryRecord {
-                audio_path: unsafe_path.clone(),
+                audio_path: Some(unsafe_path.clone()),
                 ..sample_record("unsafe", None)
             },
         ];
@@ -1127,5 +1619,500 @@ mod tests {
         assert!(!safe_path.exists());
         assert!(unsafe_path.exists());
         let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn delete_history_record_preserves_unrelated_raw_lines_and_unknown_fields() {
+        let base = temp_dir("delete-preserves-raw-lines");
+        let history_path = base.join("history.jsonl");
+        let recordings_dir = base.join("recordings");
+        fs::create_dir_all(&recordings_dir).unwrap();
+
+        let deleted_audio_path = recordings_dir.join("deleted.wav");
+        let kept_audio_path = recordings_dir.join("kept.wav");
+        fs::write(&deleted_audio_path, b"delete me").unwrap();
+        fs::write(&kept_audio_path, b"keep me").unwrap();
+
+        let deleted_record = HistoryRecord {
+            audio_path: Some(deleted_audio_path.clone()),
+            ..sample_record("delete-me", None)
+        };
+        let kept_record = HistoryRecord {
+            audio_path: Some(kept_audio_path.clone()),
+            ..sample_record("keep-me", None)
+        };
+        let mut kept_value = serde_json::to_value(kept_record).unwrap();
+        kept_value["future_field"] = serde_json::json!({ "enabled": true });
+        let kept_raw_line = format!("  {}  ", serde_json::to_string(&kept_value).unwrap());
+        let malformed_line = "{this is not valid json".to_string();
+        write_history_lines(
+            &history_path,
+            &[
+                serde_json::to_string(&deleted_record).unwrap(),
+                kept_raw_line.clone(),
+                malformed_line.clone(),
+            ],
+        );
+
+        let result = delete_from_paths(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            "delete-me",
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            DeleteHistoryResult {
+                deleted_records: 1,
+                deleted_audio_files: 1,
+                freed_bytes: 9,
+            }
+        );
+        assert!(!deleted_audio_path.exists());
+        assert!(kept_audio_path.exists());
+        assert_eq!(
+            fs::read_to_string(&history_path).unwrap(),
+            format!("{kept_raw_line}\n{malformed_line}\n")
+        );
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn delete_history_record_keeps_audio_referenced_by_another_record() {
+        let base = temp_dir("delete-keeps-shared-audio");
+        let history_path = base.join("history.jsonl");
+        let recordings_dir = base.join("recordings");
+        fs::create_dir_all(&recordings_dir).unwrap();
+
+        let shared_audio_path = recordings_dir.join("shared.wav");
+        fs::write(&shared_audio_path, b"shared").unwrap();
+        let records = [
+            HistoryRecord {
+                audio_path: Some(shared_audio_path.clone()),
+                ..sample_record("delete-me", None)
+            },
+            HistoryRecord {
+                audio_path: Some(shared_audio_path.clone()),
+                ..sample_record("keep-me", None)
+            },
+        ];
+        write_history_lines(
+            &history_path,
+            &records
+                .iter()
+                .map(|record| serde_json::to_string(record).unwrap())
+                .collect::<Vec<_>>(),
+        );
+
+        let result = delete_from_paths(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            "delete-me",
+        )
+        .unwrap();
+
+        assert_eq!(result.deleted_records, 1);
+        assert_eq!(result.deleted_audio_files, 0);
+        assert_eq!(result.freed_bytes, 0);
+        assert!(shared_audio_path.exists());
+        let remaining = read_records_in_file_order(&history_path).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, "keep-me");
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn delete_history_record_normalizes_shared_audio_paths_before_deleting() {
+        let base = temp_dir("delete-normalizes-shared-audio");
+        let history_path = base.join("history.jsonl");
+        let recordings_dir = base.join("recordings");
+        fs::create_dir_all(&recordings_dir).unwrap();
+
+        let shared_audio_path = recordings_dir.join("shared.wav");
+        let equivalent_audio_path = recordings_dir.join(".").join("shared.wav");
+        fs::write(&shared_audio_path, b"shared").unwrap();
+        let records = [
+            HistoryRecord {
+                audio_path: Some(shared_audio_path.clone()),
+                ..sample_record("delete-me", None)
+            },
+            HistoryRecord {
+                audio_path: Some(equivalent_audio_path),
+                ..sample_record("keep-me", None)
+            },
+        ];
+        write_history_lines(
+            &history_path,
+            &records
+                .iter()
+                .map(|record| serde_json::to_string(record).unwrap())
+                .collect::<Vec<_>>(),
+        );
+
+        let result = delete_from_paths(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            "delete-me",
+        )
+        .unwrap();
+
+        assert_eq!(result.deleted_audio_files, 0);
+        assert!(shared_audio_path.exists());
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn delete_history_record_never_removes_audio_outside_recordings_dirs() {
+        let base = temp_dir("delete-rejects-unsafe-audio");
+        let history_path = base.join("history.jsonl");
+        let recordings_dir = base.join("recordings");
+        let outside_dir = base.join("outside");
+        fs::create_dir_all(&recordings_dir).unwrap();
+        fs::create_dir_all(&outside_dir).unwrap();
+
+        let outside_audio_path = outside_dir.join("outside.wav");
+        fs::write(&outside_audio_path, b"must remain").unwrap();
+        let record = HistoryRecord {
+            audio_path: Some(outside_audio_path.clone()),
+            ..sample_record("delete-me", None)
+        };
+        write_history_lines(&history_path, &[serde_json::to_string(&record).unwrap()]);
+
+        let result = delete_from_paths(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            "delete-me",
+        )
+        .unwrap();
+
+        assert_eq!(result.deleted_records, 1);
+        assert_eq!(result.deleted_audio_files, 0);
+        assert_eq!(result.freed_bytes, 0);
+        assert!(outside_audio_path.exists());
+        assert!(read_records_in_file_order(&history_path)
+            .unwrap()
+            .is_empty());
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn cleanup_uses_audio_finished_at_and_keeps_history_with_null_audio_path() {
+        let base = temp_dir("cleanup-uses-audio-finished-at");
+        let history_path = base.join("history.jsonl");
+        let recordings_dir = base.join("recordings");
+        fs::create_dir_all(&recordings_dir).unwrap();
+
+        let old_audio_path = recordings_dir.join("old.wav");
+        let recent_audio_path = recordings_dir.join("recent.wav");
+        let boundary_audio_path = recordings_dir.join("boundary.wav");
+        fs::write(&old_audio_path, b"old").unwrap();
+        fs::write(&recent_audio_path, b"recent").unwrap();
+        fs::write(&boundary_audio_path, b"boundary").unwrap();
+
+        let cutoff = utc("2026-07-09T12:00:00Z");
+        let mut old_record = sample_record("old-audio", None);
+        old_record.created_at = utc("2026-07-15T12:00:00Z");
+        old_record.audio_finished_at = utc("2026-07-08T12:00:00Z");
+        old_record.audio_path = Some(old_audio_path.clone());
+
+        let mut recent_record = sample_record("recent-audio", None);
+        recent_record.created_at = utc("2025-01-01T12:00:00Z");
+        recent_record.audio_finished_at = utc("2026-07-10T12:00:00Z");
+        recent_record.audio_path = Some(recent_audio_path.clone());
+
+        let mut boundary_record = sample_record("boundary-audio", None);
+        boundary_record.audio_finished_at = cutoff;
+        boundary_record.audio_path = Some(boundary_audio_path.clone());
+
+        let mut old_value = serde_json::to_value(old_record).unwrap();
+        old_value["future_field"] = serde_json::json!("preserved");
+        write_history_lines(
+            &history_path,
+            &[
+                serde_json::to_string(&old_value).unwrap(),
+                serde_json::to_string(&recent_record).unwrap(),
+                serde_json::to_string(&boundary_record).unwrap(),
+            ],
+        );
+
+        let result = cleanup_recordings_before(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            cutoff,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            RecordingCleanupResult {
+                deleted_files: 1,
+                cleared_history_records: 1,
+                freed_bytes: 3,
+            }
+        );
+        assert!(!old_audio_path.exists());
+        assert!(recent_audio_path.exists());
+        assert!(boundary_audio_path.exists());
+
+        let contents = fs::read_to_string(&history_path).unwrap();
+        let values = contents
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(values.len(), 3);
+        let old_value = values
+            .iter()
+            .find(|value| value["id"] == "old-audio")
+            .unwrap();
+        assert!(old_value["audio_path"].is_null());
+        assert_eq!(old_value["future_field"], "preserved");
+        assert_eq!(
+            values
+                .iter()
+                .find(|value| value["id"] == "recent-audio")
+                .unwrap()["audio_path"],
+            recent_audio_path.to_string_lossy().as_ref()
+        );
+        assert_eq!(
+            values
+                .iter()
+                .find(|value| value["id"] == "boundary-audio")
+                .unwrap()["audio_path"],
+            boundary_audio_path.to_string_lossy().as_ref()
+        );
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn cleanup_never_removes_audio_outside_recordings_dirs() {
+        let base = temp_dir("cleanup-rejects-unsafe-audio");
+        let history_path = base.join("history.jsonl");
+        let recordings_dir = base.join("recordings");
+        let outside_dir = base.join("outside");
+        fs::create_dir_all(&recordings_dir).unwrap();
+        fs::create_dir_all(&outside_dir).unwrap();
+
+        let outside_audio_path = outside_dir.join("outside.wav");
+        fs::write(&outside_audio_path, b"must remain").unwrap();
+        let mut old_record = sample_record("outside-audio", None);
+        old_record.audio_finished_at = utc("2026-07-01T12:00:00Z");
+        old_record.audio_path = Some(outside_audio_path.clone());
+        write_history_lines(
+            &history_path,
+            &[serde_json::to_string(&old_record).unwrap()],
+        );
+
+        let result = cleanup_recordings_before(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            utc("2026-07-09T12:00:00Z"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            RecordingCleanupResult {
+                deleted_files: 0,
+                cleared_history_records: 0,
+                freed_bytes: 0,
+            }
+        );
+        assert!(outside_audio_path.exists());
+        let records = read_records_in_file_order(&history_path).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].audio_path.as_ref(), Some(&outside_audio_path));
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn cleanup_keeps_old_audio_when_a_new_record_shares_its_path() {
+        let base = temp_dir("cleanup-protects-shared-audio");
+        let history_path = base.join("history.jsonl");
+        let recordings_dir = base.join("recordings");
+        fs::create_dir_all(&recordings_dir).unwrap();
+
+        let shared_audio_path = recordings_dir.join("shared.wav");
+        fs::write(&shared_audio_path, b"shared").unwrap();
+        let mut old_record = sample_record("old-reference", None);
+        old_record.audio_finished_at = utc("2026-07-01T12:00:00Z");
+        old_record.audio_path = Some(shared_audio_path.clone());
+        let mut new_record = sample_record("new-reference", None);
+        new_record.audio_finished_at = utc("2026-07-15T12:00:00Z");
+        new_record.audio_path = Some(shared_audio_path.clone());
+        write_history_lines(
+            &history_path,
+            &[
+                serde_json::to_string(&old_record).unwrap(),
+                serde_json::to_string(&new_record).unwrap(),
+            ],
+        );
+
+        let result = cleanup_recordings_before(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            utc("2026-07-09T12:00:00Z"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            RecordingCleanupResult {
+                deleted_files: 0,
+                cleared_history_records: 0,
+                freed_bytes: 0,
+            }
+        );
+        assert!(shared_audio_path.exists());
+        let records = read_records_in_file_order(&history_path).unwrap();
+        assert_eq!(records.len(), 2);
+        assert!(records.iter().all(|record| record.audio_path.is_some()));
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn cleanup_missing_audio_is_idempotent_and_clears_history_once() {
+        let base = temp_dir("cleanup-missing-audio-idempotent");
+        let history_path = base.join("history.jsonl");
+        let recordings_dir = base.join("recordings");
+        fs::create_dir_all(&recordings_dir).unwrap();
+
+        let missing_audio_path = recordings_dir.join("missing.wav");
+        let mut old_record = sample_record("missing-audio", None);
+        old_record.audio_finished_at = utc("2026-07-01T12:00:00Z");
+        old_record.audio_path = Some(missing_audio_path);
+        write_history_lines(
+            &history_path,
+            &[serde_json::to_string(&old_record).unwrap()],
+        );
+
+        let first = cleanup_recordings_before(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            utc("2026-07-09T12:00:00Z"),
+        )
+        .unwrap();
+        let second = cleanup_recordings_before(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            utc("2026-07-09T12:00:00Z"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            first,
+            RecordingCleanupResult {
+                deleted_files: 0,
+                cleared_history_records: 1,
+                freed_bytes: 0,
+            }
+        );
+        assert_eq!(
+            second,
+            RecordingCleanupResult {
+                deleted_files: 0,
+                cleared_history_records: 0,
+                freed_bytes: 0,
+            }
+        );
+        let records = read_records_in_file_order(&history_path).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].id, "missing-audio");
+        assert!(records[0].audio_path.is_none());
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn cleanup_preview_matches_cleanup_and_counts_recording_directory_usage() {
+        let base = temp_dir("cleanup-preview");
+        let history_path = base.join("history.jsonl");
+        let recordings_dir = base.join("recordings");
+        fs::create_dir_all(&recordings_dir).unwrap();
+
+        let old_audio_path = recordings_dir.join("old.wav");
+        let recent_audio_path = recordings_dir.join("recent.wav");
+        let orphan_audio_path = recordings_dir.join("orphan.wav");
+        fs::write(&old_audio_path, b"old").unwrap();
+        fs::write(&recent_audio_path, b"recent").unwrap();
+        fs::write(&orphan_audio_path, b"orphan!").unwrap();
+        fs::write(recordings_dir.join("ignored.txt"), b"ignored").unwrap();
+
+        let mut old_record = sample_record("old", None);
+        old_record.audio_finished_at = utc("2026-07-01T12:00:00Z");
+        old_record.audio_path = Some(old_audio_path.clone());
+        let mut recent_record = sample_record("recent", None);
+        recent_record.audio_finished_at = utc("2026-07-15T12:00:00Z");
+        recent_record.audio_path = Some(recent_audio_path.clone());
+        write_history_lines(
+            &history_path,
+            &[
+                serde_json::to_string(&old_record).unwrap(),
+                serde_json::to_string(&recent_record).unwrap(),
+            ],
+        );
+
+        let cutoff = utc("2026-07-09T12:00:00Z");
+        let preview = preview_recording_cleanup_before(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            cutoff,
+        )
+        .unwrap();
+        assert_eq!(
+            preview,
+            RecordingCleanupPreview {
+                recording_files: 3,
+                recording_bytes: 16,
+                eligible_files: 1,
+                eligible_bytes: 3,
+            }
+        );
+
+        let cleanup = cleanup_recordings_before(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            cutoff,
+        )
+        .unwrap();
+        assert_eq!(cleanup.freed_bytes, preview.eligible_bytes);
+        assert_eq!(cleanup.deleted_files, preview.eligible_files);
+
+        let after = preview_recording_cleanup_before(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            cutoff,
+        )
+        .unwrap();
+        assert_eq!(after.recording_files, 2);
+        assert_eq!(after.recording_bytes, 13);
+        assert_eq!(after.eligible_files, 0);
+        assert_eq!(after.eligible_bytes, 0);
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn recording_cleanup_cutoff_supports_days_weeks_and_thirty_day_months() {
+        let now = utc("2026-03-31T12:34:56Z");
+
+        assert_eq!(
+            recording_cleanup_cutoff(now, 3, RecordingCleanupUnit::Day).unwrap(),
+            utc("2026-03-28T12:34:56Z")
+        );
+        assert_eq!(
+            recording_cleanup_cutoff(now, 2, RecordingCleanupUnit::Week).unwrap(),
+            utc("2026-03-17T12:34:56Z")
+        );
+        assert_eq!(
+            recording_cleanup_cutoff(now, 1, RecordingCleanupUnit::Month).unwrap(),
+            utc("2026-03-01T12:34:56Z")
+        );
+
+        for unit in [
+            RecordingCleanupUnit::Day,
+            RecordingCleanupUnit::Week,
+            RecordingCleanupUnit::Month,
+        ] {
+            assert!(recording_cleanup_cutoff(now, 0, unit).is_err());
+        }
     }
 }

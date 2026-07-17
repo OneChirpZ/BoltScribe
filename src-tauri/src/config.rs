@@ -176,6 +176,8 @@ pub struct CorrectionConfig {
     #[serde(default)]
     pub dictionary_text: String,
     #[serde(default)]
+    pub disabled_dictionary_terms: Vec<String>,
+    #[serde(default)]
     pub correction_rules_text: String,
     #[serde(default)]
     pub correction_rules: Vec<CorrectionRule>,
@@ -281,6 +283,7 @@ impl Default for AppConfig {
                 prompt_template: default_prompt_template(),
                 variables: Vec::new(),
                 dictionary_text: String::new(),
+                disabled_dictionary_terms: Vec::new(),
                 correction_rules_text: String::new(),
                 correction_rules: Vec::new(),
                 dictionary: Vec::new(),
@@ -321,6 +324,10 @@ impl AppConfig {
         {
             self.correction.prompt_template = default_prompt_template();
         }
+        self.correction.disabled_dictionary_terms = normalize_disabled_dictionary_terms(
+            &self.correction.dictionary_text,
+            &self.correction.disabled_dictionary_terms,
+        );
         let (dictionary, migrated_rules) = migrate_dictionary_rules(&self.correction.dictionary);
         self.correction.dictionary = normalize_dictionary(&dictionary);
         self.correction.correction_rules.extend(migrated_rules);
@@ -781,6 +788,10 @@ fn fill_missing_correction_text_fields(
         config.correction.correction_rules_text =
             legacy_correction_rules_text_from_rules(&config.correction.correction_rules);
     }
+    config.correction.disabled_dictionary_terms = normalize_disabled_dictionary_terms(
+        &config.correction.dictionary_text,
+        &config.correction.disabled_dictionary_terms,
+    );
 }
 
 fn legacy_dictionary_text_from_entries(dictionary: &[DictionaryEntry]) -> String {
@@ -829,6 +840,36 @@ fn normalize_string_list(items: &[String]) -> Vec<String> {
             continue;
         }
         normalized.push(value.to_string());
+    }
+    normalized
+}
+
+fn normalize_disabled_dictionary_terms(
+    dictionary_text: &str,
+    disabled_terms: &[String],
+) -> Vec<String> {
+    let dictionary_terms = dictionary_text
+        .lines()
+        .filter_map(|line| {
+            let term = line.trim();
+            (!term.is_empty()).then(|| (term.to_lowercase(), term.to_string()))
+        })
+        .collect::<Vec<_>>();
+    let mut normalized = Vec::new();
+    let mut seen_keys = Vec::new();
+    for disabled_term in disabled_terms {
+        let key = disabled_term.trim().to_lowercase();
+        if key.is_empty() || seen_keys.contains(&key) {
+            continue;
+        }
+        let Some((_, term)) = dictionary_terms
+            .iter()
+            .find(|(dictionary_key, _)| dictionary_key == &key)
+        else {
+            continue;
+        };
+        seen_keys.push(key);
+        normalized.push(term.clone());
     }
     normalized
 }
@@ -1169,6 +1210,11 @@ fn config_schema_value() -> Result<serde_json::Value> {
             "name": "",
             "value": ""
         }),
+    );
+    set_schema_array(
+        &mut schema,
+        &["correction", "disabled_dictionary_terms"],
+        serde_json::json!(""),
     );
     set_schema_array(
         &mut schema,
@@ -1573,6 +1619,57 @@ mod tests {
         let config: AppConfig = serde_json::from_value(value).unwrap();
 
         assert!(config.correction.variables.is_empty());
+    }
+
+    #[test]
+    fn missing_disabled_dictionary_terms_defaults_to_empty_list() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value["correction"]
+            .as_object_mut()
+            .unwrap()
+            .remove("disabled_dictionary_terms");
+
+        let config: AppConfig = serde_json::from_value(value).unwrap();
+
+        assert!(config.correction.disabled_dictionary_terms.is_empty());
+    }
+
+    #[test]
+    fn disabled_dictionary_terms_are_trimmed_and_deduplicated() {
+        let mut config = AppConfig::default();
+        config.correction.dictionary_text = "Codex\nBoltScribe".to_string();
+        config.correction.disabled_dictionary_terms = vec![
+            " codex ".to_string(),
+            "CODEX".to_string(),
+            String::new(),
+            "BoltScribe".to_string(),
+            "Removed term".to_string(),
+        ];
+
+        config.normalize();
+
+        assert_eq!(
+            config.correction.disabled_dictionary_terms,
+            vec!["Codex".to_string(), "BoltScribe".to_string()]
+        );
+    }
+
+    #[test]
+    fn import_reports_invalid_disabled_dictionary_term_items() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value["correction"]["dictionary_text"] = serde_json::json!("Codex");
+        value["correction"]["disabled_dictionary_terms"] = serde_json::json!(["Codex", 42]);
+
+        let result = ConfigStore::import_json(&value.to_string()).unwrap();
+
+        assert!(result
+            .report
+            .invalid_fields
+            .contains(&"correction.disabled_dictionary_terms[1]".to_string()));
+        assert_eq!(
+            result.config.correction.disabled_dictionary_terms,
+            vec!["Codex".to_string()]
+        );
     }
 
     #[test]

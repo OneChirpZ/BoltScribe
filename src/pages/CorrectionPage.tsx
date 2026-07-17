@@ -5,6 +5,7 @@ import TokenButton from "../components/TokenButton";
 import type { TextBundle } from "../domain/i18n";
 import type { CorrectionSection } from "../domain/navigation";
 import { buildPromptPreview, isBuiltinVariable, normalizeVariableName, variableToken } from "../domain/promptTemplate";
+import { enabledDictionaryText, reconcileDisabledDictionaryTerms } from "../domain/correctionText";
 
 const promptEditors = ["system", "template", "variables"] as const;
 type PromptEditor = (typeof promptEditors)[number];
@@ -21,16 +22,21 @@ export default function CorrectionPage({
   text: TextBundle;
 }) {
   const dictionaryText = config.correction.dictionary_text ?? "";
+  const disabledDictionaryTerms = config.correction.disabled_dictionary_terms ?? [];
   const correctionRulesText = config.correction.correction_rules_text ?? "";
+  const promptDictionaryText = useMemo(
+    () => enabledDictionaryText(dictionaryText, disabledDictionaryTerms),
+    [dictionaryText, disabledDictionaryTerms],
+  );
   const promptPreview = useMemo(
     () => buildPromptPreview(
       config.correction.user_requirements,
-      dictionaryText,
+      promptDictionaryText,
       correctionRulesText,
       config.correction.variables,
       config.correction.prompt_template,
     ),
-    [config.correction.user_requirements, dictionaryText, correctionRulesText, config.correction.variables, config.correction.prompt_template],
+    [config.correction.user_requirements, promptDictionaryText, correctionRulesText, config.correction.variables, config.correction.prompt_template],
   );
   const templateRef = useRef<HTMLTextAreaElement>(null);
   const promptTabsId = useId();
@@ -50,6 +56,17 @@ export default function CorrectionPage({
       correction: {
         ...config.correction,
         dictionary_text: value,
+        disabled_dictionary_terms: reconcileDisabledDictionaryTerms(value, disabledDictionaryTerms),
+      },
+    });
+  }
+
+  function updateDisabledDictionaryTerms(disabled_dictionary_terms: string[]) {
+    onChange({
+      ...config,
+      correction: {
+        ...config.correction,
+        disabled_dictionary_terms,
       },
     });
   }
@@ -153,7 +170,14 @@ export default function CorrectionPage({
         ) : null}
 
         {section === "dictionary" ? (
-          <CorrectionLineEditor kind="dictionary" value={dictionaryText} onChange={updateDictionaryLines} text={text} />
+          <CorrectionLineEditor
+            kind="dictionary"
+            value={dictionaryText}
+            disabledDictionaryTerms={disabledDictionaryTerms}
+            onChange={updateDictionaryLines}
+            onDisabledDictionaryTermsChange={updateDisabledDictionaryTerms}
+            text={text}
+          />
         ) : null}
 
         {section === "rules" ? (

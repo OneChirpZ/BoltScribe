@@ -195,6 +195,41 @@ pub(crate) fn load_stats() -> Result<history::InputStats, String> {
 }
 
 #[tauri::command]
+pub(crate) fn delete_history_record(
+    app: tauri::AppHandle<Wry>,
+    state: State<'_, workflow::AppState>,
+    id: String,
+) -> Result<history::DeleteHistoryResult, String> {
+    let result = state
+        .run_while_inactive(|| history::HistoryStore::delete(&id))
+        .map_err(|err| err.to_string())?;
+    let _ = app.emit("history://updated", ());
+    Ok(result)
+}
+
+#[tauri::command]
+pub(crate) fn cleanup_recording_files(
+    app: tauri::AppHandle<Wry>,
+    state: State<'_, workflow::AppState>,
+    amount: u32,
+    unit: history::RecordingCleanupUnit,
+) -> Result<history::RecordingCleanupResult, String> {
+    let result = state
+        .run_while_inactive(|| history::HistoryStore::cleanup_recordings_older_than(amount, unit))
+        .map_err(|err| err.to_string())?;
+    let _ = app.emit("history://updated", ());
+    Ok(result)
+}
+
+#[tauri::command]
+pub(crate) fn preview_recording_cleanup(
+    amount: u32,
+    unit: history::RecordingCleanupUnit,
+) -> Result<history::RecordingCleanupPreview, String> {
+    history::HistoryStore::preview_recording_cleanup(amount, unit).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 pub(crate) fn get_status(state: State<'_, workflow::AppState>) -> workflow::WorkflowStatus {
     state.status()
 }

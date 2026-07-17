@@ -1,5 +1,7 @@
 import type { WorkflowStatus } from "../types";
-import type { TextBundle } from "./i18n";
+import type { AppLanguage, TextBundle } from "./i18n";
+
+export const recordingOverlayBaseWidth = (language: AppLanguage) => language === "en-US" ? 400 : 340;
 
 export const defaultRecordingOverlayScale = 0.5;
 export const minRecordingOverlayScale = 0.25;
@@ -10,7 +12,7 @@ export function recordingOverlayLabel(status: WorkflowStatus, text: TextBundle) 
   if (status.mode === "error" || message.includes("失败") || message.includes("错误")) {
     return text.overlay.failed;
   }
-  if (status.mode === "recording") {
+  if (status.mode === "starting" || status.mode === "recording") {
     return text.overlay.listening;
   }
 
@@ -34,7 +36,7 @@ export function recordingOverlayPhase(status: WorkflowStatus) {
   if (status.mode === "error" || message.includes("失败") || message.includes("错误")) {
     return "phase-error";
   }
-  if (status.mode === "recording") {
+  if (status.mode === "starting" || status.mode === "recording") {
     return "phase-listening";
   }
   if (message.includes("粘贴")) {

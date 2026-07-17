@@ -9,6 +9,8 @@ export default function HistoryPage({
   history,
   onRefresh,
   onCopy,
+  onDelete,
+  canDelete,
   onOpenFullHistory,
   footer,
   text,
@@ -17,11 +19,28 @@ export default function HistoryPage({
   history: HistoryRecord[];
   onRefresh: () => void;
   onCopy: (text: string, label: string) => void;
+  onDelete: (record: HistoryRecord) => Promise<void>;
+  canDelete: boolean;
   onOpenFullHistory?: () => void;
   footer?: ReactNode;
   text: TextBundle;
 }) {
   const [logRecord, setLogRecord] = useState<HistoryRecord | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function requestDelete(record: HistoryRecord) {
+    const createdAt = new Date(record.created_at).toLocaleString();
+    if (!window.confirm(text.history.deleteConfirm(createdAt))) {
+      return;
+    }
+    setDeletingId(record.id);
+    try {
+      await onDelete(record);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   const action = (
     <div className="history-header-actions">
       <button className="secondary small" onClick={onRefresh}>{text.common.refresh}</button>
@@ -37,6 +56,7 @@ export default function HistoryPage({
         {history.map((record) => {
           const correctedText = record.corrected_text || record.pasted_text;
           const displayText = correctedText || record.raw_text || record.workflow_error || text.history.noText;
+          const deleting = deletingId === record.id;
           return (
             <article className="history-item" key={record.id}>
               <div className="history-item-header">
@@ -46,11 +66,15 @@ export default function HistoryPage({
                   {record.workflow_error ? <span className="warning">{text.history.workflowFailed}</span> : null}
                   {record.correction_error ? <span className="warning">{text.history.correctionFallback}</span> : null}
                   {record.injection_error ? <span className="warning">{text.history.pasteFailed}</span> : null}
+                  {!record.audio_path ? <span className="history-audio-cleared">{text.history.audioCleared}</span> : null}
                 </div>
                 <div className="history-actions">
                   <button className="secondary small history-action-log" type="button" onClick={() => setLogRecord(record)}>{text.history.viewLog}</button>
                   <button className="secondary small history-action-corrected" type="button" disabled={!correctedText.trim()} onClick={() => onCopy(correctedText, text.history.correctedLabel)}>{text.history.copyCorrected}</button>
                   <button className="secondary small history-action-raw" type="button" disabled={!record.raw_text.trim()} onClick={() => onCopy(record.raw_text, text.history.rawLabel)}>{text.history.copyRaw}</button>
+                  <button className="secondary small history-action-delete" type="button" disabled={!canDelete || deletingId !== null} onClick={() => { void requestDelete(record); }}>
+                    {deleting ? text.history.deleting : text.history.delete}
+                  </button>
                 </div>
               </div>
               <p>{displayText}</p>

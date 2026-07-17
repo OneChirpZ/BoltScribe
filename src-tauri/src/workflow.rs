@@ -5,10 +5,11 @@ use crate::history::{self, HistoryRecord, HistoryStore};
 use crate::injector;
 use crate::output_volume::{self, OutputVolumeDuckingSession};
 use crate::paths;
-use crate::recorder::{RecordedAudio, RecorderController};
+use crate::recorder::{AudioLevelMeter, PendingRecordingStop, RecordedAudio, RecorderController};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -25,6 +26,7 @@ pub struct AppState {
 
 #[derive(Default)]
 struct WorkflowRuntime {
+    starting: bool,
     recording: bool,
     processing: bool,
     status: WorkflowStatus,
@@ -54,6 +56,26 @@ struct WorkflowTask {
     cancel_token: Arc<AtomicBool>,
 }
 
+struct StopContext {
+    task: WorkflowTask,
+    config: Option<AppConfig>,
+    live_asr: Option<VolcengineLiveAsrSession>,
+    live_asr_start_error: Option<String>,
+    volume_ducking: Option<OutputVolumeDuckingSession>,
+    pending_stop: Option<PendingRecordingStop>,
+}
+
+enum ToggleAction {
+    Busy,
+    Start(WorkflowTask),
+    Stop(Box<StopContext>),
+}
+
+struct TogglePlan {
+    status: WorkflowStatus,
+    action: ToggleAction,
+}
+
 impl WorkflowTask {
     fn cancelled(&self) -> bool {
         self.cancel_token.load(Ordering::SeqCst)
@@ -66,6 +88,7 @@ pub struct WorkflowStatus {
     pub message: String,
     pub current_audio_path: Option<String>,
     pub last_record_id: Option<String>,
+    pub revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
@@ -73,9 +96,18 @@ pub struct WorkflowStatus {
 pub enum WorkflowMode {
     #[default]
     Idle,
+    Starting,
     Recording,
     Processing,
     Error,
+}
+
+impl WorkflowRuntime {
+    fn update_status(&mut self, mut status: WorkflowStatus) -> WorkflowStatus {
+        status.revision = self.status.revision.saturating_add(1);
+        self.status = status.clone();
+        status
+    }
 }
 
 impl AppState {
@@ -88,6 +120,7 @@ impl AppState {
                 message: "状态锁读取失败".to_string(),
                 current_audio_path: None,
                 last_record_id: None,
+                revision: 0,
             })
     }
 
@@ -96,9 +129,9 @@ impl AppState {
             .runtime
             .lock()
             .map_err(|_| anyhow!("Failed to lock workflow state"))?;
-        if runtime.recording || runtime.processing {
+        if runtime.starting || runtime.recording || runtime.processing {
             return Err(anyhow!(
-                "Cannot change the data folder while recording or processing"
+                "Cannot modify local data while recording or processing"
             ));
         }
         let result = action();
@@ -113,207 +146,386 @@ pub fn toggle_recording_from_app(app: AppHandle) -> Result<WorkflowStatus> {
 }
 
 pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStatus> {
-    let should_stop = {
+    let plan = {
         let mut runtime = state
             .runtime
             .lock()
             .map_err(|_| anyhow!("Failed to lock workflow state"))?;
-        if runtime.processing {
-            return Ok(runtime.status.clone());
-        }
-
-        if runtime.recording {
-            let task_id = runtime
-                .active_task_id
-                .clone()
-                .ok_or_else(|| anyhow!("Workflow task is missing"))?;
-            let cancel_token = runtime
-                .cancel_token
-                .clone()
-                .ok_or_else(|| anyhow!("Workflow cancel token is missing"))?;
-            let config = runtime.config.take();
-            let live_asr = runtime.live_asr.take();
-            let live_asr_start_error = runtime.live_asr_start_error.take();
-            let volume_ducking = runtime.volume_ducking.take();
-            runtime.recording = false;
-            runtime.processing = true;
-            runtime.status = WorkflowStatus {
-                mode: WorkflowMode::Processing,
-                message: "正在停止录音并处理转写".to_string(),
-                current_audio_path: None,
-                last_record_id: runtime.status.last_record_id.clone(),
-            };
-            Some((
-                task_id,
-                cancel_token,
-                config,
-                live_asr,
-                live_asr_start_error,
-                volume_ducking,
-            ))
-        } else {
-            let total_started_at = Instant::now();
-            let config_started_at = Instant::now();
-            let config = ConfigStore::load()?;
-            log_timing("config load", config_started_at, total_started_at);
-            let task_id = Uuid::new_v4().to_string();
-            let cancel_token = Arc::new(AtomicBool::new(false));
-            let live_asr_started_at = Instant::now();
-            let (live_asr, live_asr_start_error) =
-                match VolcengineLiveAsrSession::start(&config.asr) {
-                    Ok(session) => (Some(session), None),
-                    Err(err) => (None, Some(err.to_string())),
-                };
-            log_timing(
-                "live ASR session start",
-                live_asr_started_at,
-                total_started_at,
-            );
-            let audio_sink = live_asr
-                .as_ref()
-                .and_then(|session| session.audio_sender().ok());
-            let mut volume_ducking =
-                match output_volume::start_ducking_session(&config.audio.output_volume_ducking) {
-                    Ok(session) => session,
-                    Err(err) => {
-                        eprintln!("failed to duck output volume: {err:?}");
-                        None
-                    }
-                };
-            let recorder_started_at = Instant::now();
-            if let Err(err) = state
-                .recorder
-                .start_with_config(audio_sink, config.audio.clone())
-            {
-                restore_output_volume(volume_ducking.take());
-                return Err(err);
-            }
-            log_timing(
-                "recorder.start_with_config",
-                recorder_started_at,
-                total_started_at,
-            );
-            eprintln!(
-                "[Timing] request_start_recording total sync: {}ms",
-                total_started_at.elapsed().as_millis()
-            );
-            runtime.recording = true;
-            runtime.config = Some(config);
-            runtime.live_asr = live_asr;
-            runtime.live_asr_start_error = live_asr_start_error;
-            runtime.volume_ducking = volume_ducking;
-            runtime.active_task_id = Some(task_id);
-            runtime.cancel_token = Some(cancel_token);
-            runtime.status = WorkflowStatus {
-                mode: WorkflowMode::Recording,
-                message: "正在录音，再次按快捷键停止".to_string(),
-                current_audio_path: None,
-                last_record_id: runtime.status.last_record_id.clone(),
-            };
-            let status = runtime.status.clone();
-            drop(runtime);
-            emit_status(&app, &status);
-            return Ok(status);
-        }
+        let plan = prepare_toggle(&mut runtime)?;
+        dispatch_pending_stop(&mut runtime, &state.recorder, plan)
     };
+    publish_status(&app, &plan.status);
 
-    let status = state.status();
-    emit_status(&app, &status);
-
-    if let Some((task_id, cancel_token, config, live_asr, live_asr_start_error, volume_ducking)) =
-        should_stop
-    {
-        let recorder = state.recorder.clone();
-        std::thread::spawn(move || {
-            let task = WorkflowTask {
-                id: task_id,
-                cancel_token,
-            };
-            let task_for_error = task.clone();
-            if let Err(err) = stop_and_process_recording(
-                app.clone(),
-                task,
-                recorder,
-                config,
-                live_asr,
-                live_asr_start_error,
-                volume_ducking,
-            ) {
-                if task_for_error.cancelled() {
-                    return;
+    match plan.action {
+        ToggleAction::Busy => {}
+        ToggleAction::Start(task) => {
+            let recorder = state.recorder.clone();
+            std::thread::spawn(move || start_recording_attempt(app, task, recorder));
+        }
+        ToggleAction::Stop(context) => {
+            let mut context = *context;
+            let pending_stop = context
+                .pending_stop
+                .take()
+                .ok_or_else(|| anyhow!("Recorder stop was not dispatched"))?;
+            std::thread::spawn(move || {
+                let task_for_error = context.task.clone();
+                if let Err(err) = stop_and_process_recording(
+                    app.clone(),
+                    context.task,
+                    pending_stop,
+                    context.config,
+                    context.live_asr,
+                    context.live_asr_start_error,
+                    context.volume_ducking,
+                ) {
+                    if task_for_error.cancelled() {
+                        return;
+                    }
+                    let message = format!("处理失败：{err}");
+                    set_status_for_task(
+                        &app,
+                        &task_for_error.id,
+                        WorkflowStatus {
+                            mode: WorkflowMode::Processing,
+                            message: message.clone(),
+                            current_audio_path: None,
+                            last_record_id: None,
+                            revision: 0,
+                        },
+                        true,
+                    );
+                    std::thread::sleep(Duration::from_millis(700));
+                    set_status_for_task(
+                        &app,
+                        &task_for_error.id,
+                        WorkflowStatus {
+                            mode: WorkflowMode::Error,
+                            message,
+                            current_audio_path: None,
+                            last_record_id: None,
+                            revision: 0,
+                        },
+                        false,
+                    );
                 }
-                let message = format!("处理失败：{err}");
-                set_status_for_task(
-                    &app,
-                    &task_for_error.id,
-                    WorkflowStatus {
-                        mode: WorkflowMode::Processing,
-                        message: message.clone(),
-                        current_audio_path: None,
-                        last_record_id: None,
-                    },
-                    true,
-                );
-                std::thread::sleep(Duration::from_millis(700));
-                set_status_for_task(
-                    &app,
-                    &task_for_error.id,
-                    WorkflowStatus {
-                        mode: WorkflowMode::Error,
-                        message,
-                        current_audio_path: None,
-                        last_record_id: None,
-                    },
-                    false,
-                );
-            }
+            });
+        }
+    }
+
+    Ok(plan.status)
+}
+
+fn prepare_toggle(runtime: &mut WorkflowRuntime) -> Result<TogglePlan> {
+    if runtime.starting {
+        let status = runtime.update_status(WorkflowStatus {
+            mode: WorkflowMode::Starting,
+            message: "正在启动麦克风，请稍候".to_string(),
+            current_audio_path: None,
+            last_record_id: runtime.status.last_record_id.clone(),
+            revision: 0,
+        });
+        return Ok(TogglePlan {
+            status,
+            action: ToggleAction::Busy,
         });
     }
 
-    Ok(status)
+    if runtime.processing {
+        let status = runtime.update_status(WorkflowStatus {
+            mode: WorkflowMode::Processing,
+            message: "上一段内容仍在处理中，请稍候".to_string(),
+            current_audio_path: runtime.status.current_audio_path.clone(),
+            last_record_id: runtime.status.last_record_id.clone(),
+            revision: 0,
+        });
+        return Ok(TogglePlan {
+            status,
+            action: ToggleAction::Busy,
+        });
+    }
+
+    if runtime.recording {
+        let task = WorkflowTask {
+            id: runtime
+                .active_task_id
+                .clone()
+                .ok_or_else(|| anyhow!("Workflow task is missing"))?,
+            cancel_token: runtime
+                .cancel_token
+                .clone()
+                .ok_or_else(|| anyhow!("Workflow cancel token is missing"))?,
+        };
+        let context = StopContext {
+            task,
+            config: runtime.config.take(),
+            live_asr: runtime.live_asr.take(),
+            live_asr_start_error: runtime.live_asr_start_error.take(),
+            volume_ducking: runtime.volume_ducking.take(),
+            pending_stop: None,
+        };
+        runtime.recording = false;
+        runtime.processing = true;
+        let status = runtime.update_status(WorkflowStatus {
+            mode: WorkflowMode::Processing,
+            message: "正在停止录音并处理转写".to_string(),
+            current_audio_path: None,
+            last_record_id: runtime.status.last_record_id.clone(),
+            revision: 0,
+        });
+        return Ok(TogglePlan {
+            status,
+            action: ToggleAction::Stop(Box::new(context)),
+        });
+    }
+
+    let task = WorkflowTask {
+        id: Uuid::new_v4().to_string(),
+        cancel_token: Arc::new(AtomicBool::new(false)),
+    };
+    runtime.starting = true;
+    runtime.active_task_id = Some(task.id.clone());
+    runtime.cancel_token = Some(task.cancel_token.clone());
+    let status = runtime.update_status(WorkflowStatus {
+        mode: WorkflowMode::Starting,
+        message: "正在启动麦克风，请稍候".to_string(),
+        current_audio_path: None,
+        last_record_id: runtime.status.last_record_id.clone(),
+        revision: 0,
+    });
+    Ok(TogglePlan {
+        status,
+        action: ToggleAction::Start(task),
+    })
+}
+
+fn dispatch_pending_stop(
+    runtime: &mut WorkflowRuntime,
+    recorder: &RecorderController,
+    mut plan: TogglePlan,
+) -> TogglePlan {
+    let ToggleAction::Stop(context) = &mut plan.action else {
+        return plan;
+    };
+
+    let dispatch_result = paths::recordings_dir().and_then(|path| recorder.begin_stop(path));
+    match dispatch_result {
+        Ok(pending_stop) => {
+            context.pending_stop = Some(pending_stop);
+            plan
+        }
+        Err(err) => {
+            context.task.cancel_token.store(true, Ordering::SeqCst);
+            let cleanup_error = recorder.cancel().err();
+            restore_output_volume(context.volume_ducking.take());
+
+            runtime.starting = false;
+            runtime.recording = false;
+            runtime.processing = false;
+            runtime.config = None;
+            runtime.live_asr = None;
+            runtime.live_asr_start_error = None;
+            runtime.volume_ducking = None;
+            runtime.active_task_id = None;
+            runtime.cancel_token = None;
+            let last_record_id = runtime.status.last_record_id.clone();
+            let cleanup_suffix = cleanup_error
+                .map(|cleanup_err| format!("；清理录音器失败：{cleanup_err:#}"))
+                .unwrap_or_default();
+            let status = runtime.update_status(WorkflowStatus {
+                mode: WorkflowMode::Error,
+                message: format!("停止录音失败：{err:#}{cleanup_suffix}"),
+                current_audio_path: None,
+                last_record_id,
+                revision: 0,
+            });
+            TogglePlan {
+                status,
+                action: ToggleAction::Busy,
+            }
+        }
+    }
+}
+
+fn start_recording_attempt(app: AppHandle, task: WorkflowTask, recorder: RecorderController) {
+    let total_started_at = Instant::now();
+    let config_started_at = Instant::now();
+    let config = match ConfigStore::load() {
+        Ok(config) => config,
+        Err(err) => {
+            fail_recording_start(&app, &task.id, &err);
+            return;
+        }
+    };
+    log_timing("config load", config_started_at, total_started_at);
+
+    let live_asr_started_at = Instant::now();
+    let (live_asr, live_asr_start_error) = match VolcengineLiveAsrSession::start(&config.asr) {
+        Ok(session) => (Some(session), None),
+        Err(err) => (None, Some(err.to_string())),
+    };
+    log_timing(
+        "live ASR session start",
+        live_asr_started_at,
+        total_started_at,
+    );
+    let audio_sink = live_asr
+        .as_ref()
+        .and_then(|session| session.audio_sender().ok());
+    let mut volume_ducking =
+        match output_volume::start_ducking_session(&config.audio.output_volume_ducking) {
+            Ok(session) => session,
+            Err(err) => {
+                eprintln!("failed to duck output volume: {err:?}");
+                None
+            }
+        };
+    let recorder_started_at = Instant::now();
+    let audio_level_meter = AudioLevelMeter::new();
+    if let Err(err) = recorder.start_with_config(
+        audio_sink,
+        Some(audio_level_meter.clone()),
+        config.audio.clone(),
+    ) {
+        audio_level_meter.stop();
+        restore_output_volume(volume_ducking.take());
+        fail_recording_start(&app, &task.id, &err);
+        return;
+    }
+    log_timing(
+        "recorder.start_with_config",
+        recorder_started_at,
+        total_started_at,
+    );
+    eprintln!(
+        "[Timing] request_start_recording total sync: {}ms",
+        total_started_at.elapsed().as_millis()
+    );
+
+    let mut config = Some(config);
+    let mut live_asr = live_asr;
+    let update = app.try_state::<AppState>().and_then(|state| {
+        let mut runtime = state.runtime.lock().ok()?;
+        if !runtime.starting || runtime.active_task_id.as_deref() != Some(task.id.as_str()) {
+            return None;
+        }
+        runtime.starting = false;
+        runtime.recording = true;
+        runtime.config = config.take();
+        runtime.live_asr = live_asr.take();
+        runtime.live_asr_start_error = live_asr_start_error;
+        runtime.volume_ducking = volume_ducking.take();
+        let last_record_id = runtime.status.last_record_id.clone();
+        Some(runtime.update_status(WorkflowStatus {
+            mode: WorkflowMode::Recording,
+            message: "正在录音，再次按快捷键停止".to_string(),
+            current_audio_path: None,
+            last_record_id,
+            revision: 0,
+        }))
+    });
+
+    if let Some(status) = update {
+        spawn_audio_level_emitter(app.clone(), audio_level_meter);
+        publish_status(&app, &status);
+        return;
+    }
+
+    audio_level_meter.stop();
+    if let Err(err) = recorder.cancel() {
+        eprintln!("failed to cancel stale recording start: {err:?}");
+    }
+    restore_output_volume(volume_ducking.take());
+}
+
+fn fail_recording_start(app: &AppHandle, task_id: &str, error: &anyhow::Error) {
+    eprintln!("recording start failed: {error:#}");
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let Ok(mut runtime) = state.runtime.lock() else {
+        return;
+    };
+    if !runtime.starting || runtime.active_task_id.as_deref() != Some(task_id) {
+        return;
+    }
+
+    runtime.starting = false;
+    runtime.recording = false;
+    runtime.processing = false;
+    runtime.config = None;
+    runtime.live_asr = None;
+    runtime.live_asr_start_error = None;
+    runtime.volume_ducking = None;
+    runtime.active_task_id = None;
+    runtime.cancel_token = None;
+    let last_record_id = runtime.status.last_record_id.clone();
+    let status = runtime.update_status(WorkflowStatus {
+        mode: WorkflowMode::Error,
+        message: format!("录音启动失败：{error:#}"),
+        current_audio_path: None,
+        last_record_id,
+        revision: 0,
+    });
+    drop(runtime);
+    publish_status(app, &status);
 }
 
 pub fn cancel_current_workflow(app: AppHandle, state: &AppState) -> Result<WorkflowStatus> {
-    let (status, should_cancel_recorder, volume_ducking) = {
+    let status = {
         let mut runtime = state
             .runtime
             .lock()
             .map_err(|_| anyhow!("Failed to lock workflow state"))?;
-        if !runtime.recording && !runtime.processing {
+        if runtime.starting {
             return Ok(runtime.status.clone());
         }
+        if !runtime.recording && !runtime.processing {
+            if runtime.status.mode != WorkflowMode::Error {
+                return Ok(runtime.status.clone());
+            }
+            let current_audio_path = runtime.status.current_audio_path.clone();
+            let last_record_id = runtime.status.last_record_id.clone();
+            runtime.update_status(WorkflowStatus {
+                mode: WorkflowMode::Idle,
+                message: "就绪".to_string(),
+                current_audio_path,
+                last_record_id,
+                revision: 0,
+            })
+        } else {
+            if let Some(token) = &runtime.cancel_token {
+                token.store(true, Ordering::SeqCst);
+            }
 
-        if let Some(token) = &runtime.cancel_token {
-            token.store(true, Ordering::SeqCst);
+            let cancel_error = state.recorder.cancel().err();
+            restore_output_volume(runtime.volume_ducking.take());
+            runtime.starting = false;
+            runtime.recording = false;
+            runtime.processing = false;
+            runtime.config = None;
+            runtime.live_asr = None;
+            runtime.live_asr_start_error = None;
+            runtime.active_task_id = None;
+            runtime.cancel_token = None;
+            let current_audio_path = runtime.status.current_audio_path.clone();
+            let last_record_id = runtime.status.last_record_id.clone();
+            runtime.update_status(WorkflowStatus {
+                mode: if cancel_error.is_some() {
+                    WorkflowMode::Error
+                } else {
+                    WorkflowMode::Idle
+                },
+                message: cancel_error
+                    .map(|err| format!("取消录音失败：{err:#}"))
+                    .unwrap_or_else(|| "已取消本次转写".to_string()),
+                current_audio_path,
+                last_record_id,
+                revision: 0,
+            })
         }
-
-        let was_recording = runtime.recording;
-        runtime.recording = false;
-        runtime.processing = false;
-        runtime.config = None;
-        runtime.live_asr = None;
-        runtime.live_asr_start_error = None;
-        let volume_ducking = runtime.volume_ducking.take();
-        runtime.active_task_id = None;
-        runtime.cancel_token = None;
-        runtime.status = WorkflowStatus {
-            mode: WorkflowMode::Idle,
-            message: "已取消本次转写".to_string(),
-            current_audio_path: runtime.status.current_audio_path.clone(),
-            last_record_id: runtime.status.last_record_id.clone(),
-        };
-        (runtime.status.clone(), was_recording, volume_ducking)
     };
-    emit_status(&app, &status);
-
-    let cancel_result = if should_cancel_recorder {
-        state.recorder.cancel()
-    } else {
-        Ok(())
-    };
-    restore_output_volume(volume_ducking);
-    cancel_result?;
-
+    publish_status(&app, &status);
     Ok(status)
 }
 
@@ -328,7 +540,7 @@ fn restore_output_volume(session: Option<OutputVolumeDuckingSession>) {
 fn stop_and_process_recording(
     app: AppHandle,
     task: WorkflowTask,
-    recorder: RecorderController,
+    pending_stop: PendingRecordingStop,
     config: Option<AppConfig>,
     live_asr: Option<VolcengineLiveAsrSession>,
     live_asr_start_error: Option<String>,
@@ -339,15 +551,8 @@ fn stop_and_process_recording(
         .as_ref()
         .map(|config| config.retention.clone())
         .unwrap_or_default();
-    let recordings_dir = match paths::recordings_dir() {
-        Ok(path) => path,
-        Err(err) => {
-            restore_output_volume(volume_ducking);
-            return Err(err);
-        }
-    };
     let recorder_stop_started_at = Instant::now();
-    let recorded = recorder.stop(recordings_dir);
+    let recorded = pending_stop.wait();
     restore_output_volume(volume_ducking);
     let recorded = recorded?;
     log_timing("recorder.stop", recorder_stop_started_at, total_started_at);
@@ -378,6 +583,7 @@ fn stop_and_process_recording(
                     message: "未检测到语音，已忽略本次转写".to_string(),
                     current_audio_path: Some(recorded.path.display().to_string()),
                     last_record_id: None,
+                    revision: 0,
                 },
                 false,
             );
@@ -423,6 +629,7 @@ fn process_recording(
             message: "录音已保存，正在调用语音识别".to_string(),
             current_audio_path: Some(audio_path.display().to_string()),
             last_record_id: None,
+            revision: 0,
         },
         true,
     ) {
@@ -464,6 +671,7 @@ fn process_recording(
             message: "语音识别完成，正在纠错".to_string(),
             current_audio_path: Some(audio_path.display().to_string()),
             last_record_id: None,
+            revision: 0,
         },
         true,
     ) {
@@ -487,6 +695,7 @@ fn process_recording(
             message: "正在粘贴文本".to_string(),
             current_audio_path: Some(audio_path.display().to_string()),
             last_record_id: None,
+            revision: 0,
         },
         true,
     ) {
@@ -510,6 +719,7 @@ fn process_recording(
                 message: "粘贴完成".to_string(),
                 current_audio_path: Some(audio_path.display().to_string()),
                 last_record_id: None,
+                revision: 0,
             },
             true,
         ) {
@@ -521,7 +731,7 @@ fn process_recording(
     let record = HistoryRecord {
         id: recorded.id.clone(),
         created_at: Utc::now(),
-        audio_path,
+        audio_path: Some(audio_path.clone()),
         asr_provider: asr_output.provider,
         asr_task_id: asr_output.task_id,
         audio_started_at: recorded.started_at,
@@ -555,8 +765,9 @@ fn process_recording(
             } else {
                 "处理完成，已粘贴纠错文本".to_string()
             },
-            current_audio_path: Some(record.audio_path.display().to_string()),
+            current_audio_path: Some(audio_path.display().to_string()),
             last_record_id: Some(record.id),
+            revision: 0,
         },
         false,
     );
@@ -596,6 +807,7 @@ fn transcribe_with_live_fallback(
                         message: "实时识别失败，正在使用录音文件重试".to_string(),
                         current_audio_path: Some(recorded.path.display().to_string()),
                         last_record_id: None,
+                        revision: 0,
                     },
                     true,
                 );
@@ -785,7 +997,7 @@ fn append_failed_history(
     let record = HistoryRecord {
         id: recorded.id,
         created_at: Utc::now(),
-        audio_path: recorded.path,
+        audio_path: Some(recorded.path),
         asr_provider: "volcengine".to_string(),
         asr_task_id: None,
         audio_started_at: recorded.started_at,
@@ -824,6 +1036,7 @@ fn set_status_for_task(
         return false;
     }
 
+    runtime.starting = false;
     runtime.processing = keep_processing;
     if status.mode == WorkflowMode::Idle || status.mode == WorkflowMode::Error {
         runtime.recording = false;
@@ -831,23 +1044,120 @@ fn set_status_for_task(
         runtime.active_task_id = None;
         runtime.cancel_token = None;
     }
-    runtime.status = status.clone();
+    let status = runtime.update_status(status);
     drop(runtime);
-    emit_status(app, &status);
+    publish_status(app, &status);
     true
 }
 
-fn emit_status(app: &AppHandle, status: &WorkflowStatus) {
+fn publish_status(app: &AppHandle, status: &WorkflowStatus) {
+    if !status_is_current(app, status.revision) {
+        return;
+    }
     crate::windows::sync_overlay_window(app, status);
+    if !status_is_current(app, status.revision) {
+        return;
+    }
     if let Err(err) = crate::tray::sync_voice_input_label(app, status) {
         eprintln!("failed to sync tray voice input item: {err}");
     }
-    let _ = app.emit("workflow://status", status);
+    if !status_is_current(app, status.revision) {
+        return;
+    }
+    if let Err(err) = app.emit("workflow://status", status) {
+        eprintln!("failed to emit workflow status: {err}");
+    }
+}
+
+fn status_is_current(app: &AppHandle, revision: u64) -> bool {
+    let Some(state) = app.try_state::<AppState>() else {
+        return true;
+    };
+    state
+        .runtime
+        .lock()
+        .map(|runtime| runtime.status.revision == revision)
+        .unwrap_or(false)
+}
+
+const AUDIO_LEVEL_BASELINE_SAMPLES: usize = 10;
+const AUDIO_LEVEL_HISTORY_SAMPLES: usize = 40;
+
+#[derive(Default)]
+struct AdaptiveAudioLevel {
+    dbfs_history: VecDeque<f32>,
+}
+
+impl AdaptiveAudioLevel {
+    fn normalize(&mut self, dbfs: Option<f32>) -> f32 {
+        let Some(dbfs) = dbfs.filter(|level| *level >= -90.0) else {
+            return 0.0;
+        };
+
+        self.dbfs_history.push_back(dbfs);
+        if self.dbfs_history.len() > AUDIO_LEVEL_HISTORY_SAMPLES {
+            self.dbfs_history.pop_front();
+        }
+        if self.dbfs_history.len() < AUDIO_LEVEL_BASELINE_SAMPLES {
+            return 0.0;
+        }
+
+        let mut sorted = self.dbfs_history.iter().copied().collect::<Vec<_>>();
+        sorted.sort_by(f32::total_cmp);
+        let noise_floor_index = ((sorted.len() - 1) as f32 * 0.2).round() as usize;
+        let noise_floor = sorted[noise_floor_index];
+        ((dbfs - noise_floor - 6.0) / 24.0)
+            .clamp(0.0, 1.0)
+            .powf(0.8)
+    }
+}
+
+fn spawn_audio_level_emitter(app: AppHandle, meter: AudioLevelMeter) {
+    std::thread::spawn(move || {
+        let mut normalizer = AdaptiveAudioLevel::default();
+        let mut smoothed = 0.0_f32;
+        while meter.is_active() {
+            let level = normalizer.normalize(meter.take_level());
+            let response = if level >= smoothed { 0.72 } else { 0.24 };
+            smoothed += (level - smoothed) * response;
+            // The frontend listener uses Tauri's global `Any` target. A targeted
+            // `emit_to("overlay", ...)` does not reach that listener in Tauri 2.
+            let _ = app.emit("audio://level", smoothed.clamp(0.0, 1.0));
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let _ = app.emit("audio://level", 0.0_f32);
+    });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adaptive_audio_level_suppresses_device_noise_and_preserves_speech() {
+        let mut built_in = AdaptiveAudioLevel::default();
+        for _ in 0..AUDIO_LEVEL_BASELINE_SAMPLES {
+            built_in.normalize(Some(-42.0));
+        }
+        assert_eq!(built_in.normalize(Some(-38.0)), 0.0);
+        assert!(built_in.normalize(Some(-20.0)) > 0.7);
+
+        let mut external = AdaptiveAudioLevel::default();
+        for _ in 0..AUDIO_LEVEL_BASELINE_SAMPLES {
+            external.normalize(Some(-64.0));
+        }
+        assert_eq!(external.normalize(Some(-60.0)), 0.0);
+        assert!(external.normalize(Some(-38.0)) > 0.8);
+    }
+
+    #[test]
+    fn adaptive_audio_level_ignores_missing_and_digital_silence_samples() {
+        let mut level = AdaptiveAudioLevel::default();
+
+        assert_eq!(level.normalize(None), 0.0);
+        assert_eq!(level.normalize(Some(-96.0)), 0.0);
+        assert!(level.dbfs_history.is_empty());
+    }
 
     #[test]
     fn inactive_workflow_allows_guarded_action() {
@@ -858,10 +1168,15 @@ mod tests {
 
     #[test]
     fn active_workflow_rejects_guarded_action() {
-        for (recording, processing) in [(true, false), (false, true)] {
+        for (starting, recording, processing) in [
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+        ] {
             let state = AppState::default();
             {
                 let mut runtime = state.runtime.lock().unwrap();
+                runtime.starting = starting;
                 runtime.recording = recording;
                 runtime.processing = processing;
             }
@@ -875,6 +1190,71 @@ mod tests {
             assert!(result.is_err());
             assert!(!called.get());
         }
+    }
+
+    #[test]
+    fn idle_toggle_enters_starting_before_device_initialization() {
+        let mut runtime = WorkflowRuntime::default();
+
+        let plan = prepare_toggle(&mut runtime).unwrap();
+
+        assert_eq!(plan.status.mode, WorkflowMode::Starting);
+        assert_eq!(plan.status.revision, 1);
+        assert!(runtime.starting);
+        assert!(!runtime.recording);
+        assert!(runtime.active_task_id.is_some());
+        assert!(matches!(plan.action, ToggleAction::Start(_)));
+    }
+
+    #[test]
+    fn repeated_toggle_while_starting_cannot_stop_the_pending_recording() {
+        let mut runtime = WorkflowRuntime::default();
+        let first = prepare_toggle(&mut runtime).unwrap();
+        let task_id = runtime.active_task_id.clone();
+
+        let second = prepare_toggle(&mut runtime).unwrap();
+
+        assert!(matches!(first.action, ToggleAction::Start(_)));
+        assert!(matches!(second.action, ToggleAction::Busy));
+        assert_eq!(second.status.mode, WorkflowMode::Starting);
+        assert_eq!(second.status.revision, 2);
+        assert_eq!(runtime.active_task_id, task_id);
+        assert!(runtime.starting);
+        assert!(!runtime.recording);
+        assert!(!runtime.processing);
+    }
+
+    #[test]
+    fn toggle_while_processing_returns_visible_busy_feedback() {
+        let mut runtime = WorkflowRuntime {
+            processing: true,
+            ..Default::default()
+        };
+
+        let plan = prepare_toggle(&mut runtime).unwrap();
+
+        assert!(matches!(plan.action, ToggleAction::Busy));
+        assert_eq!(plan.status.mode, WorkflowMode::Processing);
+        assert_eq!(plan.status.message, "上一段内容仍在处理中，请稍候");
+        assert_eq!(plan.status.revision, 1);
+    }
+
+    #[test]
+    fn only_recording_toggle_creates_a_stop_action() {
+        let token = Arc::new(AtomicBool::new(false));
+        let mut runtime = WorkflowRuntime {
+            recording: true,
+            active_task_id: Some("task-1".to_string()),
+            cancel_token: Some(token),
+            ..Default::default()
+        };
+
+        let plan = prepare_toggle(&mut runtime).unwrap();
+
+        assert!(matches!(plan.action, ToggleAction::Stop(_)));
+        assert_eq!(plan.status.mode, WorkflowMode::Processing);
+        assert!(!runtime.recording);
+        assert!(runtime.processing);
     }
 
     #[test]

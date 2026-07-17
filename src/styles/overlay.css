@@ -5,14 +5,14 @@
   bottom: 32px;
   z-index: 20;
   display: grid;
-  grid-template-columns: auto 1px auto auto;
+  grid-template-columns: minmax(0, 1fr) 1px 68px auto;
   align-items: center;
-  gap: 18px;
-  width: 314px;
+  gap: 12px;
+  width: var(--recording-overlay-width, 340px);
   height: 78px;
   border: 1px solid rgba(255, 255, 255, 0.13);
   border-radius: 999px;
-  padding: 0 18px 0 36px;
+  padding: 0 14px 0 30px;
   color: #ffffff;
   background: rgba(14, 17, 12, 0.94);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
@@ -21,6 +21,7 @@
   user-select: none;
   transform: translateX(-50%);
   transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+  animation: overlay-enter 160ms ease-out both;
 }
 
 .overlay-shell {
@@ -54,7 +55,13 @@
   cursor: pointer;
   font-size: 20px;
   line-height: 1;
-  transition: background 140ms ease, border-color 140ms ease;
+  opacity: 1;
+  transition: opacity 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+.overlay-cancel-placeholder {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .overlay-cancel:hover {
@@ -94,11 +101,15 @@
   box-shadow: inset 0 0 0 1px rgba(255, 190, 184, 0.28), inset 0 0 20px rgba(255, 94, 84, 0.18);
 }
 
-.recording-overlay span {
+.overlay-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 25px;
   font-weight: 800;
   line-height: 1;
   letter-spacing: 0;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -108,19 +119,63 @@
   background: rgba(255, 255, 255, 0.55);
 }
 
+.voice-visual {
+  position: relative;
+  width: 68px;
+  height: 42px;
+}
+
+.startup-spinner {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.76);
+  transition: opacity 200ms ease, transform 220ms ease;
+}
+
+.startup-spinner::before {
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: rgba(255, 255, 255, 0.94);
+  border-radius: 999px;
+  content: "";
+  animation: startup-spinner-rotate 680ms linear infinite;
+}
+
 .voice-bars {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 2px;
+  width: 68px;
   height: 42px;
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity 180ms ease 40ms, transform 220ms ease 40ms;
+}
+
+.overlay-transition-starting .startup-spinner {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.overlay-transition-starting .voice-bars {
+  opacity: 0;
+  transform: scale(0.82);
 }
 
 .voice-bars b {
   display: block;
-  width: 4px;
+  width: 3px;
+  height: 4px;
+  opacity: 0.5;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.86);
-  animation: voice-pulse 980ms ease-in-out infinite;
+  transition: height 70ms linear, opacity 70ms linear, background 140ms ease;
 }
 
 .recording-overlay.phase-processing .voice-bars b,
@@ -137,40 +192,21 @@
   background: #ffaaa3;
 }
 
-.voice-bars b:nth-child(1) {
-  height: 16px;
-  animation-delay: -260ms;
-}
-
-.voice-bars b:nth-child(2) {
-  height: 30px;
-  animation-delay: -80ms;
-}
-
-.voice-bars b:nth-child(3) {
-  height: 42px;
-}
-
-.voice-bars b:nth-child(4) {
-  height: 24px;
-  animation-delay: -180ms;
-}
-
-.voice-bars b:nth-child(5) {
-  height: 34px;
-  animation-delay: -360ms;
-}
-
-@keyframes voice-pulse {
-  0%,
-  100% {
-    transform: scaleY(0.45);
-    opacity: 0.72;
+@keyframes overlay-enter {
+  from {
+    opacity: 0;
+    filter: brightness(0.92);
   }
 
-  50% {
-    transform: scaleY(1);
+  to {
     opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+@keyframes startup-spinner-rotate {
+  to {
+    transform: rotate(360deg);
   }
 }
 
@@ -204,5 +240,21 @@
     filter: brightness(1);
     border-color: rgba(72, 212, 128, 0.42);
     box-shadow: inset 0 0 0 1px rgba(72, 212, 128, 0.16), inset 0 0 10px rgba(72, 212, 128, 0.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .recording-overlay {
+    animation: none;
+  }
+
+  .startup-spinner,
+  .voice-bars,
+  .overlay-cancel {
+    transition: none;
+  }
+
+  .startup-spinner::before {
+    animation: none;
   }
 }

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, DataDirInfo, HistoryRecord, InputStats, WorkflowStatus } from "../types";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, DataDirInfo, HistoryRecord, InputStats, RecordingCleanupUnit, WorkflowStatus } from "../types";
 import type { CorrectionSection, Page } from "../domain/navigation";
 import type { PermissionRequestState } from "../domain/permissions";
 import { appLanguage, translations } from "../domain/i18n";
 import { requiresAccessibilityPermission, supportsFnLongPressTrigger } from "../domain/platform";
-import { emptyStatus } from "../domain/workflow";
+import { emptyStatus, latestWorkflowStatus, subscribeToWorkflowStatus } from "../domain/workflow";
+import { formatByteCount } from "../domain/historyMaintenance";
 import NavButton from "../components/NavButton";
 import InputStatsCard from "../components/InputStatsCard";
 import PermissionGuide from "../components/PermissionGuide";
@@ -13,11 +14,17 @@ import HistoryRecordsPage from "../pages/HistoryRecordsPage";
 import ModelsPage from "../pages/ModelsPage";
 import CorrectionPage from "../pages/CorrectionPage";
 import SettingsPage from "../pages/SettingsPage";
-import { accessibilityPermissionGranted, applyFnTrigger, chooseDataDir, copyTextToClipboard, exportConfig as exportConfigCommand, getAppVersion, getDataDir, getStatus, hideMainWindow, importConfig as importConfigCommand, inputMonitoringPermissionGranted, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadAudioInputDevices, loadAudioOutputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, openGitHubRepository, openInputMonitoringSettings, requestAccessibilityPermission, requestInputMonitoringPermission as requestInputMonitoringPermissionCommand, requestMicrophonePermission as requestMicrophonePermissionCommand, resetDataDir as resetDataDirCommand, saveConfig, setDataDir as setDataDirCommand, toggleRecording as toggleRecordingCommand } from "./tauriApi";
+import { accessibilityPermissionGranted, applyFnTrigger, chooseDataDir, cleanupRecordingFiles as cleanupRecordingFilesCommand, copyTextToClipboard, deleteHistoryRecord as deleteHistoryRecordCommand, exportConfig as exportConfigCommand, getAppVersion, getDataDir, getStatus, hideMainWindow, importConfig as importConfigCommand, inputMonitoringPermissionGranted, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadAudioInputDevices, loadAudioOutputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, openGitHubRepository, openInputMonitoringSettings, previewRecordingCleanup as previewRecordingCleanupCommand, requestAccessibilityPermission, requestInputMonitoringPermission as requestInputMonitoringPermissionCommand, requestMicrophonePermission as requestMicrophonePermissionCommand, resetDataDir as resetDataDirCommand, saveConfig, setDataDir as setDataDirCommand, toggleRecording as toggleRecordingCommand } from "./tauriApi";
 
 const appIconUrl = new URL("../assets/app-icon.png", import.meta.url).href;
 const recentHistoryLimit = 6;
 const historyPageSize = 20;
+const noticeDurationMs = 5_000;
+
+interface QueuedNotice {
+  id: number;
+  message: string;
+}
 
 type PendingConfigAction =
   | { kind: "page"; page: Page; correctionSection?: CorrectionSection }
@@ -40,7 +47,7 @@ export default function MainApp() {
   const [historyPageRecords, setHistoryPageRecords] = useState<HistoryRecord[]>([]);
   const [historyPageIndex, setHistoryPageIndex] = useState(0);
   const [historyHasOlder, setHistoryHasOlder] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [noticeQueue, setNoticeQueue] = useState<QueuedNotice[]>([]);
   const [busy, setBusy] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [accessibilityGranted, setAccessibilityGranted] = useState<boolean | null>(null);
@@ -59,6 +66,22 @@ export default function MainApp() {
   const unsavedCancelButtonRef = useRef<HTMLButtonElement | null>(null);
   const focusBeforeUnsavedDialogRef = useRef<HTMLElement | null>(null);
   const historyPageIndexRef = useRef(historyPageIndex);
+  const nextNoticeIdRef = useRef(0);
+  const currentNotice = noticeQueue[0] ?? null;
+
+  const setNotice = useCallback((message: string) => {
+    const normalized = message.trim();
+    if (!normalized) {
+      return;
+    }
+    nextNoticeIdRef.current += 1;
+    const notice = { id: nextNoticeIdRef.current, message: normalized };
+    setNoticeQueue((queue) => [...queue, notice]);
+  }, []);
+
+  const dismissNotice = useCallback((noticeId: number) => {
+    setNoticeQueue((queue) => queue[0]?.id === noticeId ? queue.slice(1) : queue);
+  }, []);
 
   async function refreshHistory() {
     const records = await loadHistory(recentHistoryLimit);
@@ -96,26 +119,36 @@ export default function MainApp() {
 
   async function loadHistoryPage(pageIndex: number) {
     const records = await loadHistory(historyPageSize + 1, pageIndex * historyPageSize);
+    const pageRecords = records.slice(0, historyPageSize);
     historyPageIndexRef.current = pageIndex;
     setHistoryPageIndex(pageIndex);
-    setHistoryPageRecords(records.slice(0, historyPageSize));
+    setHistoryPageRecords(pageRecords);
     setHistoryHasOlder(records.length > historyPageSize);
+    return pageRecords;
+  }
+
+  async function refreshHistoryViews(fallbackFromEmptyPage = false) {
+    await refreshHistory();
+    if (pageRef.current !== "history") {
+      return;
+    }
+    const currentPage = historyPageIndexRef.current;
+    const records = await loadHistoryPage(currentPage);
+    if (fallbackFromEmptyPage && records.length === 0 && currentPage > 0) {
+      await loadHistoryPage(currentPage - 1);
+    }
   }
 
   async function refreshAll() {
     const loadedConfig = await loadConfig();
     applyLoadedConfig(loadedConfig);
-    const [statusResult, historyResult, statsResult, dataDirResult, accessibilityResult] = await Promise.allSettled([
-      getStatus(),
+    const [historyResult, statsResult, dataDirResult, accessibilityResult] = await Promise.allSettled([
       loadHistory(recentHistoryLimit),
       loadStats(),
       getDataDir(),
       accessibilityPermissionGranted(),
     ]);
 
-    if (statusResult.status === "fulfilled") {
-      setStatus(statusResult.value);
-    }
     if (historyResult.status === "fulfilled") {
       setHistory(historyResult.value);
     }
@@ -132,7 +165,7 @@ export default function MainApp() {
       }
     }
 
-    const errors = [statusResult, historyResult, statsResult, dataDirResult, accessibilityResult]
+    const errors = [historyResult, statsResult, dataDirResult, accessibilityResult]
       .filter((result): result is PromiseRejectedResult => result.status === "rejected")
       .map((result) => String(result.reason));
     if (errors.length > 0) {
@@ -141,16 +174,18 @@ export default function MainApp() {
   }
 
   useEffect(() => {
+    const stopStatusSubscription = subscribeToWorkflowStatus({
+      listen: listenWorkflowStatus,
+      getSnapshot: getStatus,
+      onStatus: (nextStatus) => setStatus((current) => latestWorkflowStatus(current, nextStatus)),
+      onError: (error) => setNotice(String(error)),
+    });
     getAppVersion().then(setAppVersion).catch(() => setAppVersion(""));
     refreshAll().catch((error) => setNotice(String(error)));
     refreshAudioDevices().catch((error) => setNotice(String(error)));
-    const unlistenStatus = listenWorkflowStatus(setStatus);
     const unlistenHistory = listenHistoryUpdated(() => {
-      refreshHistory().catch((error) => setNotice(String(error)));
+      refreshHistoryViews(true).catch((error) => setNotice(String(error)));
       refreshStats().catch((error) => setNotice(String(error)));
-      if (pageRef.current === "history") {
-        loadHistoryPage(historyPageIndexRef.current).catch((error) => setNotice(String(error)));
-      }
     });
     const unlistenConfig = listenConfigUpdated((updatedConfig) => {
       if (isConfigDirty(configRef.current, savedConfigRef.current)) {
@@ -164,7 +199,7 @@ export default function MainApp() {
       requestWindowClose();
     });
     return () => {
-      unlistenStatus.then((fn) => fn());
+      stopStatusSubscription();
       unlistenHistory.then((fn) => fn());
       unlistenConfig.then((fn) => fn());
       unlistenClose.then((fn) => fn());
@@ -198,13 +233,13 @@ export default function MainApp() {
   }, [accessibilityGranted]);
 
   useEffect(() => {
-    if (!notice) {
+    if (!currentNotice) {
       return;
     }
 
-    const timer = window.setTimeout(() => setNotice(""), 10000);
+    const timer = window.setTimeout(() => dismissNotice(currentNotice.id), noticeDurationMs);
     return () => window.clearTimeout(timer);
-  }, [notice]);
+  }, [currentNotice?.id, dismissNotice]);
 
   useEffect(() => {
     if (!pendingConfigAction) {
@@ -364,8 +399,7 @@ export default function MainApp() {
     setBusy(true);
     try {
       const nextStatus = await toggleRecordingCommand();
-      setStatus(nextStatus);
-      setNotice("");
+      setStatus((current) => latestWorkflowStatus(current, nextStatus));
     } catch (error) {
       setNotice(String(error));
     } finally {
@@ -496,6 +530,44 @@ export default function MainApp() {
     }
   }
 
+  async function deleteHistory(record: HistoryRecord) {
+    setBusy(true);
+    try {
+      const result = await deleteHistoryRecordCommand(record.id);
+      await refreshHistoryViews(true);
+      setNotice(result.deleted_records === 0
+        ? text.notices.historyDeleteNotFound
+        : text.notices.historyDeleted(
+          result.deleted_records,
+          result.deleted_audio_files,
+          formatByteCount(result.freed_bytes),
+        ));
+    } catch (error) {
+      setNotice(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cleanupOldRecordingFiles(amount: number, unit: RecordingCleanupUnit) {
+    setBusy(true);
+    try {
+      const result = await cleanupRecordingFilesCommand(amount, unit);
+      await refreshHistoryViews();
+      setNotice(result.deleted_files === 0 && result.cleared_history_records === 0
+        ? text.notices.noRecordingsCleaned
+        : text.notices.recordingsCleaned(
+          result.deleted_files,
+          result.cleared_history_records,
+          formatByteCount(result.freed_bytes),
+        ));
+    } catch (error) {
+      setNotice(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function exportCurrentConfig() {
     const currentConfig = configRef.current;
     if (!currentConfig) {
@@ -611,7 +683,8 @@ export default function MainApp() {
 
   const canSave = Boolean(config) && !busy;
   const canSaveChanges = canSave && hasUnsavedChanges;
-  const canChangeDataDir = canSave && status.mode !== "recording" && status.mode !== "processing";
+  const canMutateHistory = !busy && status.mode !== "starting" && status.mode !== "recording" && status.mode !== "processing";
+  const canChangeDataDir = canSave && canMutateHistory;
   const showSaveBar = Boolean(config) && (hasUnsavedChanges || page === "models" || page === "correction" || page === "settings");
   const correctionNavItems: Array<{ section: CorrectionSection; label: string }> = [
     { section: "requirements", label: text.correction.requirementsNav },
@@ -730,6 +803,8 @@ export default function MainApp() {
               onOpenModels={() => requestPageChange("models")}
               onOpenCorrectionSection={requestCorrectionSection}
               onCopyHistory={copyHistoryText}
+              onDeleteHistory={deleteHistory}
+              canDeleteHistory={canMutateHistory}
               language={language}
               text={text}
             />
@@ -744,6 +819,8 @@ export default function MainApp() {
               onPreviousPage={() => changeHistoryPage(Math.max(0, historyPageIndex - 1))}
               onNextPage={() => changeHistoryPage(historyPageIndex + 1)}
               onCopyHistory={copyHistoryText}
+              onDeleteHistory={deleteHistory}
+              canDeleteHistory={canMutateHistory}
               text={text}
             />
           ) : null}
@@ -766,6 +843,8 @@ export default function MainApp() {
               onOpenDataDir={() => { void openAppDir(); }}
               onChooseDataDir={() => { void changeDataDir(); }}
               onResetDataDir={() => { void resetDataDir(); }}
+              onCleanupRecordingFiles={cleanupOldRecordingFiles}
+              onPreviewRecordingCleanup={previewRecordingCleanupCommand}
               onRefreshAudioDevices={() => { void refreshAudioDevices().catch((error) => setNotice(String(error))); }}
               inputMonitoringGranted={inputMonitoringGranted}
               inputMonitoringPermission={inputMonitoringPermission}
@@ -775,6 +854,7 @@ export default function MainApp() {
               importReport={configImportReport}
               canSave={canSave}
               canChangeDataDir={canChangeDataDir}
+              canCleanupRecordings={canChangeDataDir}
               text={text}
             />
           ) : null}
@@ -836,10 +916,10 @@ export default function MainApp() {
           text={text}
         />
       ) : null}
-      {notice ? (
-        <div className="toast" role="status" aria-live="polite">
-          <span>{notice}</span>
-          <button className="toast-close" type="button" onClick={() => setNotice("")} aria-label={text.notices.closeNotice}>×</button>
+      {currentNotice ? (
+        <div className="toast" key={currentNotice.id} role="status" aria-live="polite" aria-atomic="true">
+          <span>{currentNotice.message}</span>
+          <button className="toast-close" type="button" onClick={() => dismissNotice(currentNotice.id)} aria-label={text.notices.closeNotice}>×</button>
         </div>
       ) : null}
     </div>

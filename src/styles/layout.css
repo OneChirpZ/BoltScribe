@@ -785,6 +785,7 @@
   animation-delay: -320ms;
 }
 
+.status-starting .status-visual,
 .status-processing .status-visual,
 .status-error .status-visual {
   border-color: rgba(245, 184, 75, 0.42);

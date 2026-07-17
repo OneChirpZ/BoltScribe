@@ -81,6 +81,48 @@ export function parseDictionaryText(text: string): DictionaryLine[] {
   });
 }
 
+export function normalizedKey(value: string) {
+  return value.trim().toLowerCase();
+}
+
+export function reconcileDisabledDictionaryTerms(text: string, disabledTerms: string[]) {
+  const disabledKeys = new Set((disabledTerms ?? []).map(normalizedKey).filter(Boolean));
+  const seen = new Set<string>();
+  const reconciled: string[] = [];
+  for (const line of parseDictionaryText(text)) {
+    if (line.kind !== "entry") {
+      continue;
+    }
+    const key = normalizedKey(line.term);
+    if (!key || !disabledKeys.has(key) || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    reconciled.push(line.term);
+  }
+  return reconciled;
+}
+
+export function setDictionaryTermDisabled(text: string, disabledTerms: string[], value: string, disabled: boolean) {
+  const key = normalizedKey(value);
+  const disabledKeys = new Set((disabledTerms ?? []).map(normalizedKey).filter(Boolean));
+  if (disabled) {
+    if (key) disabledKeys.add(key);
+  } else {
+    disabledKeys.delete(key);
+  }
+  return reconcileDisabledDictionaryTerms(text, [...disabledKeys]);
+}
+
+export function enabledDictionaryText(text: string, disabledTerms: string[]) {
+  const disabled = new Set((disabledTerms ?? []).map(normalizedKey).filter(Boolean));
+  return parseDictionaryText(text)
+    .filter((line): line is Extract<DictionaryLine, { kind: "entry" }> => line.kind === "entry")
+    .map((line) => line.term)
+    .filter((term) => !disabled.has(normalizedKey(term)))
+    .join("\n");
+}
+
 export function parseCorrectionRulesText(text: string): CorrectionRuleLine[] {
   return scanTextLines(text).map((range) => parseCorrectionRuleLine(range));
 }

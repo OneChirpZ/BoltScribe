@@ -2,6 +2,7 @@ use crate::config::{CorrectionConfig, LlmConfig, PromptVariable};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
+use std::collections::HashSet;
 use std::fmt;
 use std::time::{Duration, Instant};
 
@@ -186,14 +187,31 @@ impl LlmProvider for OpenAiCompatibleCorrector {
 }
 
 pub fn build_correction_prompt(raw_text: &str, correction: &CorrectionConfig) -> String {
+    let dictionary_text = enabled_dictionary_text(
+        &correction.dictionary_text,
+        &correction.disabled_dictionary_terms,
+    );
     let prompt = correction
         .prompt_template
         .replace("{{user_requirements}}", correction.user_requirements.trim())
-        .replace("{{dictionary}}", &correction.dictionary_text)
+        .replace("{{dictionary}}", &dictionary_text)
         .replace("{{correction_rules}}", &correction.correction_rules_text)
         .replace("{{raw_text}}", raw_text.trim());
 
     apply_prompt_variables(prompt, &correction.variables)
+}
+
+fn enabled_dictionary_text(dictionary_text: &str, disabled_terms: &[String]) -> String {
+    let disabled_keys = disabled_terms
+        .iter()
+        .map(|term| term.trim().to_lowercase())
+        .collect::<HashSet<_>>();
+    dictionary_text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !disabled_keys.contains(&line.to_lowercase()))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn apply_prompt_variables(mut prompt: String, variables: &[PromptVariable]) -> String {
@@ -454,6 +472,7 @@ mod tests {
                 .to_string(),
             variables: Vec::new(),
             dictionary_text: "LDFC".to_string(),
+            disabled_dictionary_terms: Vec::new(),
             correction_rules_text: String::new(),
             correction_rules: Vec::new(),
             dictionary: Vec::new(),
@@ -477,6 +496,7 @@ mod tests {
                 value: "技术讨论".to_string(),
             }],
             dictionary_text: "LDFC\nCodex".to_string(),
+            disabled_dictionary_terms: Vec::new(),
             correction_rules_text: "艾迪 -> ID".to_string(),
             correction_rules: Vec::new(),
             dictionary: Vec::new(),
@@ -491,6 +511,29 @@ mod tests {
     }
 
     #[test]
+    fn prompt_excludes_disabled_dictionary_terms_without_removing_them_from_config() {
+        let correction = CorrectionConfig {
+            enabled: true,
+            user_requirements: String::new(),
+            prompt_template: "词典={{dictionary}}\n原文={{raw_text}}".to_string(),
+            variables: Vec::new(),
+            dictionary_text: "BoltScribe\nCodex\nCodex CLI\nLDFC".to_string(),
+            disabled_dictionary_terms: vec![" codex ".to_string()],
+            correction_rules_text: String::new(),
+            correction_rules: Vec::new(),
+            dictionary: Vec::new(),
+        };
+
+        let prompt = build_correction_prompt("测试", &correction);
+
+        assert_eq!(prompt, "词典=BoltScribe\nCodex CLI\nLDFC\n原文=测试");
+        assert_eq!(
+            correction.dictionary_text,
+            "BoltScribe\nCodex\nCodex CLI\nLDFC"
+        );
+    }
+
+    #[test]
     fn prompt_uses_raw_correction_rules_text() {
         let correction = CorrectionConfig {
             enabled: true,
@@ -498,6 +541,7 @@ mod tests {
             prompt_template: "规则={{correction_rules}}\n原文={{raw_text}}".to_string(),
             variables: Vec::new(),
             dictionary_text: String::new(),
+            disabled_dictionary_terms: Vec::new(),
             correction_rules_text: "艾迪 => ID # 英文缩写".to_string(),
             correction_rules: Vec::new(),
             dictionary: Vec::new(),

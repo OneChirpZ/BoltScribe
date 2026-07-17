@@ -177,6 +177,10 @@ struct VoiceInputMenuState {
 
 fn voice_input_menu_state(mode: &workflow::WorkflowMode) -> VoiceInputMenuState {
     match mode {
+        workflow::WorkflowMode::Starting => VoiceInputMenuState {
+            label: "正在启动语音输入",
+            enabled: false,
+        },
         workflow::WorkflowMode::Recording => VoiceInputMenuState {
             label: "停止语音输入",
             enabled: true,
@@ -398,6 +402,17 @@ mod tests {
             voice_input_menu_state(&workflow::WorkflowMode::Processing),
             VoiceInputMenuState {
                 label: "开始语音输入",
+                enabled: false,
+            }
+        );
+    }
+
+    #[test]
+    fn voice_input_menu_item_is_disabled_while_starting() {
+        assert_eq!(
+            voice_input_menu_state(&workflow::WorkflowMode::Starting),
+            VoiceInputMenuState {
+                label: "正在启动语音输入",
                 enabled: false,
             }
         );

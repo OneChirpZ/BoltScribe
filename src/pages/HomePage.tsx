@@ -23,6 +23,8 @@ export default function HomePage({
   onOpenModels,
   onOpenCorrectionSection,
   onCopyHistory,
+  onDeleteHistory,
+  canDeleteHistory,
   language,
   text,
 }: {
@@ -41,6 +43,8 @@ export default function HomePage({
   onOpenModels: () => void;
   onOpenCorrectionSection: (section: CorrectionSection) => void;
   onCopyHistory: (text: string, label: string) => void;
+  onDeleteHistory: (record: HistoryRecord) => Promise<void>;
+  canDeleteHistory: boolean;
   language: AppLanguage;
   text: TextBundle;
 }) {
@@ -73,7 +77,7 @@ export default function HomePage({
           </div>
         </div>
         <div className="action-row">
-          <button className={status.mode === "recording" ? "primary danger" : "primary"} disabled={busy || status.mode === "processing"} onClick={onToggle}>
+          <button className={status.mode === "recording" ? "primary danger" : "primary"} disabled={busy || status.mode === "starting" || status.mode === "processing"} onClick={onToggle}>
             {status.mode === "recording" ? text.home.stopAndProcess : text.home.startRecording}
           </button>
           <button className="secondary" type="button" onClick={onOpenPermissionGuide}>{text.home.permissionGuide}</button>
@@ -107,7 +111,7 @@ export default function HomePage({
           />
         </div>
       </section>
-      <HistoryPage title={text.home.latestHistory} history={history} onRefresh={onRefreshHistory} onOpenFullHistory={onOpenHistoryPage} onCopy={onCopyHistory} text={text} />
+      <HistoryPage title={text.home.latestHistory} history={history} onRefresh={onRefreshHistory} onOpenFullHistory={onOpenHistoryPage} onCopy={onCopyHistory} onDelete={onDeleteHistory} canDelete={canDeleteHistory} text={text} />
     </div>
   );
 }

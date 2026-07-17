@@ -1,7 +1,8 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportResult, DataDirInfo, HistoryRecord, InputStats, WorkflowStatus } from "../types";
+import { cleanupCutoffTimestamp } from "../domain/historyMaintenance";
+import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportResult, DataDirInfo, DeleteHistoryResult, HistoryRecord, InputStats, RecordingCleanupPreview, RecordingCleanupResult, RecordingCleanupUnit, WorkflowStatus } from "../types";
 
 export function loadConfig() {
   if (browserPreviewEnabled()) {
@@ -72,6 +73,63 @@ export function loadHistory(limit: number, offset = 0) {
   return invoke<HistoryRecord[]>("load_history", { limit, offset });
 }
 
+export function deleteHistoryRecord(id: string) {
+  if (browserPreviewEnabled()) {
+    const index = previewHistory.findIndex((record) => record.id === id);
+    if (index < 0) {
+      return Promise.resolve<DeleteHistoryResult>({
+        deleted_records: 0,
+        deleted_audio_files: 0,
+        freed_bytes: 0,
+      });
+    }
+    const [record] = previewHistory.splice(index, 1);
+    const deletedAudioFiles = record.audio_path ? 1 : 0;
+    return Promise.resolve<DeleteHistoryResult>({
+      deleted_records: 1,
+      deleted_audio_files: deletedAudioFiles,
+      freed_bytes: deletedAudioFiles * previewRecordingBytes,
+    });
+  }
+  return invoke<DeleteHistoryResult>("delete_history_record", { id });
+}
+
+export function cleanupRecordingFiles(amount: number, unit: RecordingCleanupUnit) {
+  if (browserPreviewEnabled()) {
+    const cutoff = cleanupCutoffTimestamp(Date.now(), amount, unit);
+    if (cutoff === null) {
+      return Promise.reject(new Error("Recording cleanup amount must be a positive integer"));
+    }
+    const preview = browserRecordingCleanupPreview(cutoff);
+    const eligiblePaths = preview.eligiblePaths;
+    let clearedHistoryRecords = 0;
+    for (const record of previewHistory) {
+      if (record.audio_path && eligiblePaths.has(record.audio_path) && Date.parse(record.audio_finished_at) < cutoff) {
+        record.audio_path = null;
+        clearedHistoryRecords += 1;
+      }
+    }
+    return Promise.resolve<RecordingCleanupResult>({
+      deleted_files: preview.eligible_files,
+      cleared_history_records: clearedHistoryRecords,
+      freed_bytes: preview.eligible_bytes,
+    });
+  }
+  return invoke<RecordingCleanupResult>("cleanup_recording_files", { amount, unit });
+}
+
+export function previewRecordingCleanup(amount: number, unit: RecordingCleanupUnit) {
+  if (browserPreviewEnabled()) {
+    const cutoff = cleanupCutoffTimestamp(Date.now(), amount, unit);
+    if (cutoff === null) {
+      return Promise.reject(new Error("Recording cleanup amount must be a positive integer"));
+    }
+    const { eligiblePaths: _eligiblePaths, ...preview } = browserRecordingCleanupPreview(cutoff);
+    return Promise.resolve<RecordingCleanupPreview>(preview);
+  }
+  return invoke<RecordingCleanupPreview>("preview_recording_cleanup", { amount, unit });
+}
+
 export function loadStats() {
   if (browserPreviewEnabled()) {
     return Promise.resolve(clonePreview(previewStats));
@@ -88,9 +146,10 @@ export function getStatus() {
 
 export function toggleRecording() {
   if (browserPreviewEnabled()) {
+    const revision = previewStatus.revision + 1;
     previewStatus = previewStatus.mode === "recording"
-      ? { mode: "idle", message: "就绪", current_audio_path: null, last_record_id: null }
-      : { mode: "recording", message: "正在录音，再次按快捷键停止", current_audio_path: null, last_record_id: null };
+      ? { mode: "idle", message: "就绪", current_audio_path: null, last_record_id: null, revision }
+      : { mode: "recording", message: "正在录音，再次按快捷键停止", current_audio_path: null, last_record_id: null, revision };
     return Promise.resolve(clonePreview(previewStatus));
   }
   return invoke<WorkflowStatus>("toggle_recording");
@@ -98,7 +157,7 @@ export function toggleRecording() {
 
 export function cancelCurrentWorkflow() {
   if (browserPreviewEnabled()) {
-    previewStatus = { mode: "idle", message: "已取消本次转写", current_audio_path: null, last_record_id: null };
+    previewStatus = { mode: "idle", message: "已取消本次转写", current_audio_path: null, last_record_id: null, revision: previewStatus.revision + 1 };
     return Promise.resolve(clonePreview(previewStatus));
   }
   return invoke<WorkflowStatus>("cancel_current_workflow");
@@ -232,6 +291,14 @@ export function listenWorkflowStatus(handler: (status: WorkflowStatus) => void) 
   return listen<WorkflowStatus>("workflow://status", (event) => handler(event.payload));
 }
 
+export function listenAudioLevel(handler: (level: number) => void) {
+  if (browserPreviewEnabled()) {
+    handler(0);
+    return Promise.resolve(() => undefined);
+  }
+  return listen<number>("audio://level", (event) => handler(event.payload));
+}
+
 export function listenHistoryUpdated(handler: () => void) {
   if (browserPreviewEnabled()) {
     return Promise.resolve(() => undefined);
@@ -266,6 +333,7 @@ let previewStatus: WorkflowStatus = {
   message: "就绪",
   current_audio_path: null,
   last_record_id: null,
+  revision: 0,
 };
 
 let previewConfig: AppConfig = {
@@ -325,6 +393,7 @@ let previewConfig: AppConfig = {
     prompt_template: "纠错任务：\n用户要求：\n{{user_requirements}}\n\n用户词典：\n{{dictionary}}\n\n易错词纠正：\n{{correction_rules}}\n\n原始转写：\n{{raw_text}}",
     variables: [{ name: "scene", value: "日常技术沟通" }],
     dictionary_text: "BoltScribe\nCodex\nLDFC",
+    disabled_dictionary_terms: [],
     correction_rules_text: "\"包次\" -> \"BoltScribe\" # 产品名\n\"扣得死\" -> \"Codex\" # 工具名",
     correction_rules: [],
     dictionary: [],
@@ -369,6 +438,8 @@ const previewAudioOutputDevices: AudioOutputDevice[] = [
   { id: "headphones", name: "External Headphones", is_default: false, platform: "macos", supports_volume_control: true, supports_mute_control: true },
 ];
 
+const previewRecordingBytes = 256 * 1024;
+
 const previewHistory: HistoryRecord[] = [
   previewHistoryRecord("1", "2026-05-20T00:50:21+08:00", "在你修改这样的前端展示时，不需要每次重复打包，然后让我来帮你检查，而是你直接把这个前端在浏览器等内容当中渲染出来，直接你来做截图和视觉检查。"),
   previewHistoryRecord("2", "2026-05-20T00:49:16+08:00", "增加最小宽度限制，避免窗口被缩得太小，导致内容挤占和排版错乱。"),
@@ -404,7 +475,7 @@ function previewHistoryRecord(id: string, created_at: string, text: string): His
   return {
     id,
     created_at,
-    audio_path: "",
+    audio_path: `/preview/recordings/${id}.wav`,
     asr_provider: "volcengine",
     asr_task_id: null,
     audio_started_at: created_at,
@@ -423,5 +494,28 @@ function previewHistoryRecord(id: string, created_at: string, text: string): His
     asr_duration_ms: 820,
     service_audio_duration_ms: 2700,
     total_duration_ms: 3611,
+  };
+}
+
+function browserRecordingCleanupPreview(cutoff: number): RecordingCleanupPreview & { eligiblePaths: Set<string> } {
+  const recordingPaths = new Set<string>();
+  const candidatePaths = new Set<string>();
+  const protectedPaths = new Set<string>();
+  for (const record of previewHistory) {
+    if (!record.audio_path) continue;
+    recordingPaths.add(record.audio_path);
+    if (Date.parse(record.audio_finished_at) < cutoff) {
+      candidatePaths.add(record.audio_path);
+    } else {
+      protectedPaths.add(record.audio_path);
+    }
+  }
+  const eligiblePaths = new Set([...candidatePaths].filter((path) => !protectedPaths.has(path)));
+  return {
+    recording_files: recordingPaths.size,
+    recording_bytes: recordingPaths.size * previewRecordingBytes,
+    eligible_files: eligiblePaths.size,
+    eligible_bytes: eligiblePaths.size * previewRecordingBytes,
+    eligiblePaths,
   };
 }

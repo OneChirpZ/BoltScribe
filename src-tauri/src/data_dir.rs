@@ -423,7 +423,7 @@ mod tests {
         HistoryRecord {
             id: "record-1".to_string(),
             created_at: Utc::now(),
-            audio_path,
+            audio_path: Some(audio_path),
             asr_provider: "mock".to_string(),
             asr_task_id: None,
             audio_started_at: Utc::now(),
@@ -473,7 +473,7 @@ mod tests {
         let record: HistoryRecord = serde_json::from_str(history.trim()).unwrap();
         assert_eq!(
             record.audio_path,
-            target.join("recordings").join("recording.wav")
+            Some(target.join("recordings").join("recording.wav"))
         );
         let _ = fs::remove_dir_all(base);
     }

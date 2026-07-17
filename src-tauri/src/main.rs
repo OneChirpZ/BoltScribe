@@ -25,17 +25,22 @@ mod workflow;
 
 use commands::{
     accessibility_permission_granted, apply_fn_trigger, cancel_current_workflow, choose_data_dir,
-    copy_text_to_clipboard, export_config, get_data_dir, get_status, hide_main_window,
-    import_config, input_monitoring_permission_granted, load_audio_input_devices,
-    load_audio_output_devices, load_config, load_history, load_stats, open_accessibility_settings,
-    open_app_dir, open_github_repository, open_input_monitoring_settings,
-    request_accessibility_permission, request_input_monitoring_permission,
-    request_microphone_permission, reset_data_dir, save_config, set_data_dir, toggle_recording,
+    cleanup_recording_files, copy_text_to_clipboard, delete_history_record, export_config,
+    get_data_dir, get_status, hide_main_window, import_config, input_monitoring_permission_granted,
+    load_audio_input_devices, load_audio_output_devices, load_config, load_history, load_stats,
+    open_accessibility_settings, open_app_dir, open_github_repository,
+    open_input_monitoring_settings, preview_recording_cleanup, request_accessibility_permission,
+    request_input_monitoring_permission, request_microphone_permission, reset_data_dir,
+    save_config, set_data_dir, toggle_recording,
 };
 use tauri::{Emitter, RunEvent};
 
 fn main() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_nspanel::init());
+
+    let app = builder
         .plugin(shortcuts::global_shortcut_plugin())
         .plugin(tauri_plugin_dialog::init())
         .manage(workflow::AppState::default())
@@ -79,6 +84,9 @@ fn main() {
             load_audio_output_devices,
             load_history,
             load_stats,
+            delete_history_record,
+            cleanup_recording_files,
+            preview_recording_cleanup,
             get_status,
             toggle_recording,
             cancel_current_workflow,

@@ -168,6 +168,16 @@ mod tests {
     }
 
     #[test]
+    fn validates_ctrl_option_command_space_shortcut() {
+        let config = config_with_hotkeys(vec!["Ctrl+Alt+Cmd+Space"]);
+
+        assert_eq!(
+            validate_hotkeys(&config).unwrap().keyboard,
+            vec!["Ctrl+Alt+Cmd+Space".to_string()]
+        );
+    }
+
+    #[test]
     fn rejects_duplicate_shortcuts() {
         let config = config_with_hotkeys(vec!["Ctrl+Shift+Space", "Shift+Ctrl+Space"]);
 

@@ -2,12 +2,14 @@ import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type Keybo
 import type { TextBundle } from "../domain/i18n";
 import {
   appendTextLine,
+  normalizedKey,
   parseCorrectionRulesText,
   parseDictionaryText,
   removeTextLine,
   replaceTextLine,
   serializeCorrectionRule,
   serializeDictionaryItem,
+  setDictionaryTermDisabled,
   type CorrectionRuleLine,
   type DictionaryLine,
   type TextLineRange,
@@ -18,12 +20,16 @@ type EditorMode = "items" | "text";
 export default function CorrectionLineEditor({
   kind,
   value,
+  disabledDictionaryTerms = [],
   onChange,
+  onDisabledDictionaryTermsChange,
   text,
 }: {
   kind: "dictionary" | "rules";
   value: string;
+  disabledDictionaryTerms?: string[];
   onChange: (value: string) => void;
+  onDisabledDictionaryTermsChange?: (terms: string[]) => void;
   text: TextBundle;
 }) {
   const [mode, setMode] = useState<EditorMode>("items");
@@ -33,6 +39,9 @@ export default function CorrectionLineEditor({
   const dictionaryLines = useMemo(() => kind === "dictionary" ? parseDictionaryText(value) : [], [kind, value]);
   const ruleLines = useMemo(() => kind === "rules" ? parseCorrectionRulesText(value) : [], [kind, value]);
   const dictionaryEntries = dictionaryLines.filter((line): line is Extract<DictionaryLine, { kind: "entry" }> => line.kind === "entry");
+  const disabledTermSet = new Set(disabledDictionaryTerms.map(normalizedKey).filter(Boolean));
+  const enabledDictionaryEntries = dictionaryEntries.filter((line) => !disabledTermSet.has(normalizedKey(line.term)));
+  const disabledDictionaryEntries = dictionaryEntries.filter((line) => disabledTermSet.has(normalizedKey(line.term)));
   const rules = ruleLines.filter((line): line is Extract<CorrectionRuleLine, { kind: "rule" }> => line.kind === "rule");
   const unparsedRules = ruleLines.filter((line): line is Extract<CorrectionRuleLine, { kind: "unparsed" }> => line.kind === "unparsed");
   const duplicateTerms = duplicateKeys(dictionaryEntries.map((line) => line.term));
@@ -67,26 +76,39 @@ export default function CorrectionLineEditor({
 
       {mode === "text" ? (
         <div
-          className="correction-bulk-panel"
+          className="correction-bulk-workspace"
           id={`${modeTabsId}-text-panel`}
           role="tabpanel"
           aria-labelledby={`${modeTabsId}-text-tab`}
         >
-          <label className="correction-fill-field">
-            <span className="field-label">
-              {kind === "dictionary" ? text.correction.dictionaryTextLabel : text.correction.rulesTextLabel}
-            </span>
-            <textarea
-              ref={bulkEditorRef}
-              className="correction-bulk-editor"
+          <div className="correction-bulk-panel">
+            <label className="correction-fill-field">
+              <span className="field-label">
+                {kind === "dictionary" ? text.correction.dictionaryTextLabel : text.correction.rulesTextLabel}
+              </span>
+              <textarea
+                ref={bulkEditorRef}
+                className="correction-bulk-editor"
+                value={value}
+                spellCheck={false}
+                onChange={(event) => onChange(event.target.value)}
+              />
+            </label>
+            <p className="correction-format-help">
+              {kind === "dictionary" ? text.correction.dictionaryHelp : text.correction.correctionRulesHelp}
+            </p>
+          </div>
+          {kind === "dictionary" ? (
+            <DisabledDictionarySection
               value={value}
-              spellCheck={false}
-              onChange={(event) => onChange(event.target.value)}
+              entries={disabledDictionaryEntries}
+              disabledTerms={disabledDictionaryTerms}
+              duplicateTerms={duplicateTerms}
+              onChange={onChange}
+              onDisabledTermsChange={onDisabledDictionaryTermsChange}
+              text={text}
             />
-          </label>
-          <p className="correction-format-help">
-            {kind === "dictionary" ? text.correction.dictionaryHelp : text.correction.correctionRulesHelp}
-          </p>
+          ) : null}
         </div>
       ) : (
         <div
@@ -98,9 +120,12 @@ export default function CorrectionLineEditor({
           {kind === "dictionary" ? (
             <DictionaryItems
               value={value}
-              entries={dictionaryEntries}
+              entries={enabledDictionaryEntries}
+              disabledEntries={disabledDictionaryEntries}
+              disabledTerms={disabledDictionaryTerms}
               duplicateTerms={duplicateTerms}
               onChange={onChange}
+              onDisabledTermsChange={onDisabledDictionaryTermsChange}
               text={text}
             />
           ) : (
@@ -181,14 +206,20 @@ function ModeSwitch({
 function DictionaryItems({
   value,
   entries,
+  disabledEntries,
+  disabledTerms,
   duplicateTerms,
   onChange,
+  onDisabledTermsChange,
   text,
 }: {
   value: string;
   entries: Array<Extract<DictionaryLine, { kind: "entry" }>>;
+  disabledEntries: Array<Extract<DictionaryLine, { kind: "entry" }>>;
+  disabledTerms: string[];
   duplicateTerms: Set<string>;
   onChange: (value: string) => void;
+  onDisabledTermsChange?: (terms: string[]) => void;
   text: TextBundle;
 }) {
   const [newTerm, setNewTerm] = useState("");
@@ -233,39 +264,120 @@ function DictionaryItems({
         {addError ? <span className="field-error">{addError}</span> : null}
       </form>
       <p className="correction-format-help">{text.correction.dictionaryItemHelp}</p>
-      <div className="dictionary-chip-list" role="list">
-        {entries.length === 0 ? <div className="structured-empty">{text.correction.emptyDictionary}</div> : null}
+      <section className="dictionary-term-section">
+        <div className="dictionary-term-section-heading">
+          <strong>{text.correction.enabledDictionaryTerms}</strong>
+          <span>{text.correction.itemCount(entries.length)}</span>
+        </div>
+        <div className="dictionary-chip-list" role="list">
+          {entries.length === 0 ? (
+            <div className="structured-empty dictionary-empty-state">
+              {disabledEntries.length === 0 ? text.correction.emptyDictionary : text.correction.emptyEnabledDictionary}
+            </div>
+          ) : null}
+          {entries.map((line) => (
+            <DictionaryRow
+              key={line.range.index}
+              line={line}
+              duplicate={duplicateTerms.has(normalizedKey(line.term))}
+              disabled={false}
+              onToggle={() => onDisabledTermsChange?.(setDictionaryTermDisabled(value, disabledTerms, line.term, true))}
+              onDelete={() => onChange(removeTextLine(value, line.range))}
+              text={text}
+            />
+          ))}
+        </div>
+      </section>
+      <DisabledDictionarySection
+        value={value}
+        entries={disabledEntries}
+        disabledTerms={disabledTerms}
+        duplicateTerms={duplicateTerms}
+        onChange={onChange}
+        onDisabledTermsChange={onDisabledTermsChange}
+        text={text}
+      />
+    </>
+  );
+}
+
+function DisabledDictionarySection({
+  value,
+  entries,
+  disabledTerms,
+  duplicateTerms,
+  onChange,
+  onDisabledTermsChange,
+  text,
+}: {
+  value: string;
+  entries: Array<Extract<DictionaryLine, { kind: "entry" }>>;
+  disabledTerms: string[];
+  duplicateTerms: Set<string>;
+  onChange: (value: string) => void;
+  onDisabledTermsChange?: (terms: string[]) => void;
+  text: TextBundle;
+}) {
+  return (
+    <section className="dictionary-term-section disabled-dictionary-section">
+      <div className="dictionary-term-section-heading">
+        <strong>{text.correction.disabledDictionaryTerms}</strong>
+        <span>{text.correction.itemCount(entries.length)}</span>
+      </div>
+      <p className="correction-format-help">{text.correction.disabledDictionaryHelp}</p>
+      <div
+        className={`dictionary-chip-list disabled-dictionary-list${entries.length === 0 ? " empty" : ""}`}
+        role="list"
+      >
+        {entries.length === 0 ? <div className="structured-empty dictionary-empty-state">{text.correction.emptyDisabledDictionary}</div> : null}
         {entries.map((line) => (
           <DictionaryRow
             key={line.range.index}
             line={line}
             duplicate={duplicateTerms.has(normalizedKey(line.term))}
+            disabled
+            onToggle={() => onDisabledTermsChange?.(setDictionaryTermDisabled(value, disabledTerms, line.term, false))}
             onDelete={() => onChange(removeTextLine(value, line.range))}
             text={text}
           />
         ))}
       </div>
-    </>
+    </section>
   );
 }
 
 function DictionaryRow({
   line,
   duplicate,
+  disabled,
+  onToggle,
   onDelete,
   text,
 }: {
   line: Extract<DictionaryLine, { kind: "entry" }>;
   duplicate: boolean;
+  disabled: boolean;
+  onToggle: () => void;
   onDelete: () => void;
   text: TextBundle;
 }) {
   const duplicateDescriptionId = `${line.range.index}-duplicate-term`;
+  const className = ["dictionary-chip", duplicate ? "duplicate" : "", disabled ? "disabled" : ""]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <span className={duplicate ? "dictionary-chip duplicate" : "dictionary-chip"} role="listitem">
+    <span className={className} role="listitem">
       <span className="dictionary-chip-text" title={line.term}>{line.term}</span>
       {duplicate ? <span className="visually-hidden" id={duplicateDescriptionId}>{text.correction.duplicateTerm}</span> : null}
+      <button
+        className="dictionary-chip-toggle"
+        type="button"
+        onClick={onToggle}
+        aria-label={disabled ? text.correction.enableTerm(line.term) : text.correction.disableTerm(line.term)}
+      >
+        {disabled ? text.correction.enableTermAction : text.correction.disableTermAction}
+      </button>
       <button
         className="dictionary-chip-remove"
         type="button"
@@ -443,10 +555,6 @@ function RuleRow({
       {duplicate ? <span className="structured-row-warning">{text.correction.duplicateRule}</span> : null}
     </div>
   );
-}
-
-function normalizedKey(value: string) {
-  return value.trim().toLocaleLowerCase();
 }
 
 function duplicateKeys(values: string[]) {

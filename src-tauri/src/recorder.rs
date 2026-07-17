@@ -6,13 +6,72 @@ use cpal::traits::{DeviceTrait, StreamTrait};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU32, Ordering},
     Arc, Mutex,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 pub type AudioSink = mpsc::Sender<AudioChunk>;
+const EMPTY_AUDIO_LEVEL: f32 = f32::NEG_INFINITY;
+const RECORDER_START_TIMEOUT: Duration = Duration::from_secs(8);
+const INITIAL_AUDIO_READY_TIMEOUT: Duration = Duration::from_millis(600);
+const INITIAL_AUDIO_READY_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+#[derive(Clone)]
+pub struct AudioLevelMeter {
+    level_bits: Arc<AtomicU32>,
+    active: Arc<AtomicBool>,
+}
+
+impl AudioLevelMeter {
+    pub fn new() -> Self {
+        Self {
+            level_bits: Arc::new(AtomicU32::new(EMPTY_AUDIO_LEVEL.to_bits())),
+            active: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    fn publish(&self, level: f32) {
+        let level = level.clamp(-96.0, 0.0);
+        let mut current = self.level_bits.load(Ordering::Relaxed);
+        while f32::from_bits(current) < level {
+            match self.level_bits.compare_exchange_weak(
+                current,
+                level.to_bits(),
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(next) => current = next,
+            }
+        }
+    }
+
+    pub fn take_level(&self) -> Option<f32> {
+        let level = f32::from_bits(
+            self.level_bits
+                .swap(EMPTY_AUDIO_LEVEL.to_bits(), Ordering::Relaxed),
+        );
+        level.is_finite().then_some(level)
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active.load(Ordering::Relaxed)
+    }
+
+    pub fn stop(&self) {
+        self.active.store(false, Ordering::Relaxed);
+        self.level_bits
+            .store(EMPTY_AUDIO_LEVEL.to_bits(), Ordering::Relaxed);
+    }
+}
+
+impl Default for AudioLevelMeter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct AudioChunk {
@@ -26,9 +85,14 @@ pub struct RecorderController {
     sender: mpsc::Sender<RecorderCommand>,
 }
 
+pub(crate) struct PendingRecordingStop {
+    reply_receiver: mpsc::Receiver<Result<RecordedAudio>>,
+}
+
 enum RecorderCommand {
     Start {
         audio_sink: Option<AudioSink>,
+        audio_level_meter: Option<AudioLevelMeter>,
         audio_config: AudioConfig,
         reply: mpsc::Sender<Result<()>>,
     },
@@ -45,9 +109,48 @@ struct PreparedInputStream {
     stream: cpal::Stream,
     capture: Arc<Mutex<CaptureState>>,
     unhealthy: Arc<AtomicBool>,
+    initial_audio_readiness: InitialAudioReadiness,
     spec: InputStreamSpec,
     sample_rate: u32,
     channels: u16,
+}
+
+#[derive(Clone, Default)]
+struct InitialAudioReadiness {
+    signal_seen: Arc<AtomicBool>,
+}
+
+impl InitialAudioReadiness {
+    fn reset(&self) {
+        self.signal_seen.store(false, Ordering::SeqCst);
+    }
+
+    fn observe(&self, samples: &[i16]) {
+        if has_audio_signal(samples) {
+            self.signal_seen.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn wait(&self, unhealthy: &AtomicBool, timeout: Duration) -> Result<()> {
+        let started_at = Instant::now();
+        loop {
+            if self.signal_seen.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            if unhealthy.load(Ordering::SeqCst) {
+                return Err(anyhow!(
+                    "Input stream failed before delivering an audio signal"
+                ));
+            }
+            if started_at.elapsed() >= timeout {
+                return Err(anyhow!(
+                    "No audio signal arrived within {}ms",
+                    timeout.as_millis()
+                ));
+            }
+            std::thread::sleep(INITIAL_AUDIO_READY_POLL_INTERVAL);
+        }
+    }
 }
 
 struct InputStreamSpec {
@@ -59,6 +162,7 @@ struct InputStreamSpec {
 struct CaptureState {
     samples: Vec<i16>,
     audio_sink: Option<AudioSink>,
+    audio_level_meter: Option<AudioLevelMeter>,
     started_at: Option<DateTime<Utc>>,
     recording: bool,
 }
@@ -84,22 +188,63 @@ impl RecorderController {
     pub fn start_with_config(
         &self,
         audio_sink: Option<AudioSink>,
+        audio_level_meter: Option<AudioLevelMeter>,
         audio_config: AudioConfig,
+    ) -> Result<()> {
+        self.start_with_config_timeout(
+            audio_sink,
+            audio_level_meter,
+            audio_config,
+            RECORDER_START_TIMEOUT,
+        )
+    }
+
+    fn start_with_config_timeout(
+        &self,
+        audio_sink: Option<AudioSink>,
+        audio_level_meter: Option<AudioLevelMeter>,
+        audio_config: AudioConfig,
+        timeout: Duration,
     ) -> Result<()> {
         let (reply_sender, reply_receiver) = mpsc::channel();
         self.sender
             .send(RecorderCommand::Start {
                 audio_sink,
+                audio_level_meter,
                 audio_config,
                 reply: reply_sender,
             })
             .map_err(|_| anyhow!("Recorder worker is not running"))?;
-        reply_receiver
-            .recv()
-            .map_err(|_| anyhow!("Recorder worker did not reply"))?
+        match reply_receiver.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                self.queue_cancel().map_err(|err| {
+                    anyhow!(
+                        "Timed out after {}ms while starting the recorder; failed to queue cleanup: {err:#}",
+                        timeout.as_millis()
+                    )
+                })?;
+                Err(anyhow!(
+                    "Timed out after {}ms while starting the recorder",
+                    timeout.as_millis()
+                ))
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(anyhow!("Recorder worker did not reply"))
+            }
+        }
     }
 
-    pub fn stop(&self, recordings_dir: PathBuf) -> Result<RecordedAudio> {
+    fn queue_cancel(&self) -> Result<()> {
+        let (reply_sender, _reply_receiver) = mpsc::channel();
+        self.sender
+            .send(RecorderCommand::Cancel {
+                reply: reply_sender,
+            })
+            .map_err(|_| anyhow!("Recorder worker is not running"))
+    }
+
+    pub(crate) fn begin_stop(&self, recordings_dir: PathBuf) -> Result<PendingRecordingStop> {
         let (reply_sender, reply_receiver) = mpsc::channel();
         self.sender
             .send(RecorderCommand::Stop {
@@ -107,9 +252,7 @@ impl RecorderController {
                 reply: reply_sender,
             })
             .map_err(|_| anyhow!("Recorder worker is not running"))?;
-        reply_receiver
-            .recv()
-            .map_err(|_| anyhow!("Recorder worker did not reply"))?
+        Ok(PendingRecordingStop { reply_receiver })
     }
 
     pub fn cancel(&self) -> Result<()> {
@@ -125,6 +268,14 @@ impl RecorderController {
     }
 }
 
+impl PendingRecordingStop {
+    pub(crate) fn wait(self) -> Result<RecordedAudio> {
+        self.reply_receiver
+            .recv()
+            .map_err(|_| anyhow!("Recorder worker did not reply"))?
+    }
+}
+
 impl Default for RecorderController {
     fn default() -> Self {
         Self::spawn()
@@ -133,7 +284,7 @@ impl Default for RecorderController {
 
 pub fn request_microphone_permission() -> Result<bool> {
     let audio_config = microphone_permission_audio_config();
-    let mut stream = PreparedInputStream::new_and_start(&audio_config, None)?;
+    let mut stream = PreparedInputStream::new_and_start(&audio_config, None, None)?;
     std::thread::sleep(Duration::from_millis(300));
     stream.cancel();
     Ok(true)
@@ -152,6 +303,7 @@ fn recorder_worker(receiver: mpsc::Receiver<RecorderCommand>) {
         match command {
             RecorderCommand::Start {
                 audio_sink,
+                audio_level_meter,
                 audio_config,
                 reply,
             } => {
@@ -159,7 +311,11 @@ fn recorder_worker(receiver: mpsc::Receiver<RecorderCommand>) {
                     Err(anyhow!("Recording is already active"))
                 } else {
                     prepared.take();
-                    match PreparedInputStream::new_and_start(&audio_config, audio_sink) {
+                    match PreparedInputStream::new_and_start(
+                        &audio_config,
+                        audio_sink,
+                        audio_level_meter,
+                    ) {
                         Ok(stream) => {
                             prepared = Some(stream);
                             active = true;
@@ -199,14 +355,19 @@ fn recorder_worker(receiver: mpsc::Receiver<RecorderCommand>) {
 }
 
 impl PreparedInputStream {
-    fn new_and_start(audio_config: &AudioConfig, audio_sink: Option<AudioSink>) -> Result<Self> {
+    fn new_and_start(
+        audio_config: &AudioConfig,
+        audio_sink: Option<AudioSink>,
+        audio_level_meter: Option<AudioLevelMeter>,
+    ) -> Result<Self> {
         let candidates = audio_devices::input_device_candidates(audio_config)?;
         let mut failures = Vec::new();
 
         for candidate in candidates {
             let label = candidate.name.clone();
             match Self::from_candidate(candidate) {
-                Ok(mut stream) => match stream.start(audio_sink.clone()) {
+                Ok(mut stream) => match stream.start(audio_sink.clone(), audio_level_meter.clone())
+                {
                     Ok(()) => {
                         eprintln!(
                             "audio input selected: {} ({})",
@@ -244,6 +405,7 @@ impl PreparedInputStream {
         };
         let capture = Arc::new(Mutex::new(CaptureState::default()));
         let unhealthy = Arc::new(AtomicBool::new(false));
+        let initial_audio_readiness = InitialAudioReadiness::default();
 
         let unhealthy_for_error = unhealthy.clone();
         let err_fn = move |err| {
@@ -253,10 +415,12 @@ impl PreparedInputStream {
         let stream = match supported_config.sample_format() {
             cpal::SampleFormat::F32 => {
                 let writer_capture = capture.clone();
+                let writer_readiness = initial_audio_readiness.clone();
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[f32], _| {
                         let converted = f32_to_i16(data);
+                        writer_readiness.observe(&converted);
                         write_samples(converted, &writer_capture, sample_rate, channels);
                     },
                     err_fn,
@@ -265,9 +429,11 @@ impl PreparedInputStream {
             }
             cpal::SampleFormat::I16 => {
                 let writer_capture = capture.clone();
+                let writer_readiness = initial_audio_readiness.clone();
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[i16], _| {
+                        writer_readiness.observe(data);
                         write_samples(data.to_vec(), &writer_capture, sample_rate, channels);
                     },
                     err_fn,
@@ -276,10 +442,12 @@ impl PreparedInputStream {
             }
             cpal::SampleFormat::U16 => {
                 let writer_capture = capture.clone();
+                let writer_readiness = initial_audio_readiness.clone();
                 device.build_input_stream(
                     &stream_config,
                     move |data: &[u16], _| {
                         let converted = u16_to_i16(data);
+                        writer_readiness.observe(&converted);
                         write_samples(converted, &writer_capture, sample_rate, channels);
                     },
                     err_fn,
@@ -297,24 +465,48 @@ impl PreparedInputStream {
             stream,
             capture,
             unhealthy,
+            initial_audio_readiness,
             spec,
             sample_rate,
             channels,
         })
     }
 
-    fn start(&mut self, audio_sink: Option<AudioSink>) -> Result<()> {
+    fn start(
+        &mut self,
+        audio_sink: Option<AudioSink>,
+        audio_level_meter: Option<AudioLevelMeter>,
+    ) -> Result<()> {
+        self.unhealthy.store(false, Ordering::SeqCst);
+        self.initial_audio_readiness.reset();
         {
             let mut capture = self
                 .capture
                 .lock()
                 .map_err(|_| anyhow!("Failed to lock recorder capture state"))?;
-            capture.start(audio_sink);
+            capture.start(audio_sink, audio_level_meter);
         }
 
         if let Err(err) = self.stream.play() {
-            self.clear_capture();
+            self.clear_capture(false);
             return Err(err).context("Failed to start microphone stream");
+        }
+
+        if let Err(err) = self
+            .initial_audio_readiness
+            .wait(&self.unhealthy, INITIAL_AUDIO_READY_TIMEOUT)
+        {
+            if let Err(pause_err) = self.stream.pause() {
+                self.unhealthy.store(true, Ordering::SeqCst);
+                eprintln!("audio input stream pause failed: {pause_err}");
+            }
+            self.clear_capture(false);
+            return Err(err).with_context(|| {
+                format!(
+                    "Input device '{}' did not become ready",
+                    self.spec.device_name
+                )
+            });
         }
 
         Ok(())
@@ -373,24 +565,25 @@ impl PreparedInputStream {
     }
 
     fn cancel(&mut self) {
-        self.clear_capture();
+        self.clear_capture(true);
         if let Err(err) = self.stream.pause() {
             self.unhealthy.store(true, Ordering::SeqCst);
             eprintln!("audio input stream pause failed: {err}");
         }
     }
 
-    fn clear_capture(&self) {
+    fn clear_capture(&self, stop_meter: bool) {
         if let Ok(mut capture) = self.capture.lock() {
-            capture.cancel();
+            capture.cancel(stop_meter);
         }
     }
 }
 
 impl CaptureState {
-    fn start(&mut self, audio_sink: Option<AudioSink>) {
+    fn start(&mut self, audio_sink: Option<AudioSink>, audio_level_meter: Option<AudioLevelMeter>) {
         self.samples.clear();
         self.audio_sink = audio_sink;
+        self.audio_level_meter = audio_level_meter;
         self.started_at = Some(Utc::now());
         self.recording = true;
     }
@@ -398,6 +591,9 @@ impl CaptureState {
     fn stop(&mut self) -> Result<(Vec<i16>, DateTime<Utc>)> {
         self.recording = false;
         self.audio_sink = None;
+        if let Some(meter) = self.audio_level_meter.take() {
+            meter.stop();
+        }
         let started_at = self
             .started_at
             .take()
@@ -405,9 +601,14 @@ impl CaptureState {
         Ok((std::mem::take(&mut self.samples), started_at))
     }
 
-    fn cancel(&mut self) {
+    fn cancel(&mut self, stop_meter: bool) {
         self.recording = false;
         self.audio_sink = None;
+        if let Some(meter) = self.audio_level_meter.take() {
+            if stop_meter {
+                meter.stop();
+            }
+        }
         self.started_at = None;
         self.samples.clear();
     }
@@ -419,15 +620,22 @@ fn write_samples(
     sample_rate: u32,
     channels: u16,
 ) {
-    let audio_sink = if let Ok(mut capture) = capture.lock() {
+    let (audio_sink, audio_level_meter) = if let Ok(mut capture) = capture.lock() {
         if !capture.recording {
             return;
         }
         capture.samples.extend_from_slice(&data);
-        capture.audio_sink.clone()
+        (
+            capture.audio_sink.clone(),
+            capture.audio_level_meter.clone(),
+        )
     } else {
-        None
+        (None, None)
     };
+
+    if let Some(meter) = audio_level_meter {
+        meter.publish(audio_level_dbfs(&data));
+    }
 
     if let Some(sender) = audio_sink {
         let _ = sender.send(AudioChunk {
@@ -460,9 +668,35 @@ fn has_audio_signal(samples: &[i16]) -> bool {
     samples.iter().any(|sample| *sample != 0)
 }
 
+fn audio_level_dbfs(samples: &[i16]) -> f32 {
+    if samples.is_empty() {
+        return -96.0;
+    }
+
+    let mean_square = samples
+        .iter()
+        .map(|sample| {
+            let normalized = *sample as f64 / i16::MAX as f64;
+            normalized * normalized
+        })
+        .sum::<f64>()
+        / samples.len() as f64;
+    if mean_square <= f64::EPSILON {
+        return -96.0;
+    }
+
+    (20.0 * mean_square.sqrt().log10()).clamp(-96.0, 0.0) as f32
+}
+
 #[cfg(test)]
 mod tests {
-    use super::has_audio_signal;
+    use super::{
+        audio_level_dbfs, has_audio_signal, AudioLevelMeter, InitialAudioReadiness,
+        RecorderCommand, RecorderController,
+    };
+    use crate::config::AudioConfig;
+    use std::sync::{atomic::AtomicBool, mpsc};
+    use std::time::Duration;
 
     #[test]
     fn empty_and_bit_perfect_zero_samples_have_no_signal() {
@@ -474,5 +708,117 @@ mod tests {
     fn any_nonzero_sample_counts_as_signal() {
         assert!(has_audio_signal(&[0, 1, 0]));
         assert!(has_audio_signal(&[0, -1, 0]));
+    }
+
+    #[test]
+    fn audio_level_reports_dbfs_and_increases_with_signal() {
+        let quiet = audio_level_dbfs(&[64; 512]);
+        let ambient_noise = audio_level_dbfs(&[256; 512]);
+        let speech = audio_level_dbfs(&[4_000; 512]);
+        let loud = audio_level_dbfs(&[20_000; 512]);
+
+        assert_eq!(audio_level_dbfs(&[]), -96.0);
+        assert_eq!(audio_level_dbfs(&[0; 512]), -96.0);
+        assert!((-43.0..-41.0).contains(&ambient_noise));
+        assert!(quiet < ambient_noise);
+        assert!(ambient_noise < speech);
+        assert!(speech < loud);
+        assert!(loud <= 0.0);
+    }
+
+    #[test]
+    fn audio_level_meter_keeps_peak_until_consumed() {
+        let meter = AudioLevelMeter::new();
+        meter.publish(-40.0);
+        meter.publish(-20.0);
+        meter.publish(-30.0);
+
+        assert_eq!(meter.take_level(), Some(-20.0));
+        assert_eq!(meter.take_level(), None);
+        assert!(meter.is_active());
+        meter.stop();
+        assert!(!meter.is_active());
+    }
+
+    #[test]
+    fn initial_audio_readiness_ignores_digital_silence() {
+        let readiness = InitialAudioReadiness::default();
+        let unhealthy = AtomicBool::new(false);
+
+        readiness.observe(&[0, 0, 0]);
+        let error = readiness.wait(&unhealthy, Duration::ZERO).unwrap_err();
+
+        assert!(error.to_string().contains("No audio signal"));
+    }
+
+    #[test]
+    fn initial_audio_readiness_accepts_the_first_nonzero_sample() {
+        let readiness = InitialAudioReadiness::default();
+        let unhealthy = AtomicBool::new(false);
+
+        readiness.observe(&[0, 1, 0]);
+
+        assert!(readiness.wait(&unhealthy, Duration::ZERO).is_ok());
+    }
+
+    #[test]
+    fn initial_audio_readiness_rejects_a_failed_stream() {
+        let readiness = InitialAudioReadiness::default();
+        let unhealthy = AtomicBool::new(true);
+
+        let error = readiness
+            .wait(&unhealthy, Duration::from_secs(1))
+            .unwrap_err();
+
+        assert!(error.to_string().contains("Input stream failed"));
+    }
+
+    #[test]
+    fn recorder_start_timeout_queues_cancel_before_a_future_retry() {
+        let (sender, receiver) = mpsc::channel();
+        let controller = RecorderController { sender };
+        let worker = std::thread::spawn(move || {
+            let start_reply = match receiver.recv().unwrap() {
+                RecorderCommand::Start { reply, .. } => reply,
+                _ => panic!("expected start command"),
+            };
+            std::thread::sleep(Duration::from_millis(30));
+            let saw_cancel = matches!(
+                receiver.recv_timeout(Duration::from_millis(100)),
+                Ok(RecorderCommand::Cancel { .. })
+            );
+            drop(start_reply);
+            saw_cancel
+        });
+
+        let error = controller
+            .start_with_config_timeout(None, None, AudioConfig::default(), Duration::from_millis(5))
+            .unwrap_err();
+
+        assert!(error.to_string().contains("Timed out"));
+        assert!(worker.join().unwrap());
+    }
+
+    #[test]
+    fn begin_stop_queues_the_stop_before_returning_to_the_caller() {
+        let (sender, receiver) = mpsc::channel();
+        let controller = RecorderController { sender };
+        let pending = controller
+            .begin_stop(std::path::PathBuf::from("recordings"))
+            .unwrap();
+
+        let reply = match receiver.try_recv().unwrap() {
+            RecorderCommand::Stop {
+                recordings_dir,
+                reply,
+            } => {
+                assert_eq!(recordings_dir, std::path::PathBuf::from("recordings"));
+                reply
+            }
+            _ => panic!("expected stop command"),
+        };
+        drop(reply);
+
+        assert!(pending.wait().is_err());
     }
 }

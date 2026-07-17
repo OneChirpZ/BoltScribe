@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   appendTextLine,
+  enabledDictionaryText,
   parseCorrectionRulesText,
   parseDictionaryText,
+  reconcileDisabledDictionaryTerms,
   removeTextLine,
   replaceTextLine,
   scanTextLines,
   serializeCorrectionRule,
+  setDictionaryTermDisabled,
 } from "../src/domain/correctionText.ts";
 
 test("scans CRLF lines and preserves untouched text during replacement", () => {
@@ -22,6 +25,32 @@ test("dictionary parsing treats each non-empty physical line as an item", () => 
   const lines = parseDictionaryText(" BoltScribe \n\n#literal");
   assert.deepEqual(lines.map((line) => line.kind), ["entry", "blank", "entry"]);
   assert.equal(lines[0].kind === "entry" ? lines[0].term : "", "BoltScribe");
+});
+
+test("disabled dictionary terms are trimmed, case-insensitively deduplicated, and removed when no matching term remains", () => {
+  assert.deepEqual(
+    reconcileDisabledDictionaryTerms(" BoltScribe \r\nCodex\ncodex\n", [" Codex ", "Codex", "Missing", "codex"]),
+    ["Codex"],
+  );
+  assert.deepEqual(
+    reconcileDisabledDictionaryTerms("BoltScribe\nLDFC", ["Codex", "LDFC"]),
+    ["LDFC"],
+  );
+});
+
+test("disabling and enabling a dictionary term does not delete it", () => {
+  const dictionaryText = "Codex\ncodex\nLDFC\nCodex CLI";
+  assert.deepEqual(setDictionaryTermDisabled(dictionaryText, [], "codex", true), ["Codex"]);
+  const disabled = setDictionaryTermDisabled(dictionaryText, ["codex"], " LDFC ", true);
+  assert.deepEqual(disabled, ["Codex", "LDFC"]);
+  assert.deepEqual(setDictionaryTermDisabled(dictionaryText, disabled, "Codex", false), ["LDFC"]);
+});
+
+test("prompt dictionary text excludes case-insensitive exact matches but not longer terms", () => {
+  assert.equal(
+    enabledDictionaryText(" BoltScribe \r\n\r\nCodex\ncodex\nCodex CLI ", [" Codex "]),
+    "BoltScribe\nCodex CLI",
+  );
 });
 
 test("parses supported arrows, quotes, current notes, and legacy notes", () => {

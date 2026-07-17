@@ -11,6 +11,8 @@ export default function HistoryRecordsPage({
   onPreviousPage,
   onNextPage,
   onCopyHistory,
+  onDeleteHistory,
+  canDeleteHistory,
   text,
 }: {
   history: HistoryRecord[];
@@ -21,6 +23,8 @@ export default function HistoryRecordsPage({
   onPreviousPage: () => void;
   onNextPage: () => void;
   onCopyHistory: (text: string, label: string) => void;
+  onDeleteHistory: (record: HistoryRecord) => Promise<void>;
+  canDeleteHistory: boolean;
   text: TextBundle;
 }) {
   return (
@@ -30,6 +34,8 @@ export default function HistoryRecordsPage({
         history={history}
         onRefresh={onRefresh}
         onCopy={onCopyHistory}
+        onDelete={onDeleteHistory}
+        canDelete={canDeleteHistory}
         text={text}
         footer={
           <div className="history-pagination">

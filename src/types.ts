@@ -124,6 +124,7 @@ export interface CorrectionConfig {
   prompt_template: string;
   variables: PromptVariable[];
   dictionary_text: string;
+  disabled_dictionary_terms: string[];
   correction_rules_text: string;
   correction_rules: CorrectionRule[];
   dictionary: DictionaryEntry[];
@@ -168,16 +169,17 @@ export interface DataDirInfo {
 }
 
 export interface WorkflowStatus {
-  mode: "idle" | "recording" | "processing" | "error";
+  mode: "idle" | "starting" | "recording" | "processing" | "error";
   message: string;
   current_audio_path: string | null;
   last_record_id: string | null;
+  revision: number;
 }
 
 export interface HistoryRecord {
   id: string;
   created_at: string;
-  audio_path: string;
+  audio_path: string | null;
   asr_provider: string;
   asr_task_id: string | null;
   audio_started_at: string;
@@ -196,6 +198,27 @@ export interface HistoryRecord {
   asr_duration_ms: number | null;
   service_audio_duration_ms: number | null;
   total_duration_ms: number;
+}
+
+export type RecordingCleanupUnit = "day" | "week" | "month";
+
+export interface DeleteHistoryResult {
+  deleted_records: number;
+  deleted_audio_files: number;
+  freed_bytes: number;
+}
+
+export interface RecordingCleanupResult {
+  deleted_files: number;
+  cleared_history_records: number;
+  freed_bytes: number;
+}
+
+export interface RecordingCleanupPreview {
+  recording_files: number;
+  recording_bytes: number;
+  eligible_files: number;
+  eligible_bytes: number;
 }
 
 export interface InputStats {
