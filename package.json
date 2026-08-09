@@ -1,6 +1,6 @@
 {
   "name": "boltscribe",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Local-first macOS and Windows voice input with ASR transcription, LLM correction, global hotkeys, and a Tauri tray workflow.",
   "private": true,
   "type": "module",

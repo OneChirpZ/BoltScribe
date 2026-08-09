@@ -1,6 +1,6 @@
 [package]
 name = "boltscribe"
-version = "1.3.0"
+version = "1.4.0"
 description = "Local-first macOS and Windows voice input with ASR transcription and LLM correction"
 authors = ["BoltScribe contributors"]
 license = ""
