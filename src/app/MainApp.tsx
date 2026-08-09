@@ -52,7 +52,7 @@ export default function MainApp() {
     remaining_ms: 60_000,
     noise_margin_db: 12,
     confirmation_ms: 480,
-    noise_window_ms: 2000,
+    noise_window_ms: 800,
     revision: 0,
     error: null,
   });

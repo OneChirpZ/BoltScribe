@@ -38,7 +38,7 @@ volcengine
 
 ## Suggested Social Preview
 
-Use `docs/assets/boltscribe-workflow.svg` or a rendered PNG version of that workflow diagram. Avoid screenshots that expose real history records, API keys, usernames, local paths, or private app content.
+Use `docs/assets/boltscribe-workflow-en.svg` or `docs/assets/boltscribe-workflow-zh.svg`, depending on the audience. Avoid screenshots that expose real history records, API keys, usernames, local paths, or private app content.
 
 ## Pre-Publish Checklist
 

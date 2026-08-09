@@ -16,8 +16,9 @@ export const vadNoiseWindowStepMs = 100;
 
 export const defaultVadNoiseMarginDb = 12;
 export const defaultVadConfirmationMs = 480;
-export const defaultVadNoiseWindowMs = 2000;
+export const defaultVadNoiseWindowMs = 800;
 export const defaultVadInitialSilenceTimeoutSecs = 15;
+export const defaultVadEnabled = false;
 
 export function normalizeSteppedInt(value: number, min: number, max: number, step: number) {
   const finiteValue = Number.isFinite(value) ? value : min;

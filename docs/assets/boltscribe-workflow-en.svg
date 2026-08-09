@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="450" viewBox="0 0 1320 450" role="img" aria-labelledby="title desc">
+  <title id="title">BoltScribe voice input workflow</title>
+  <desc id="desc">A left-to-right workflow showing hotkey activation, local speech detection, real-time transcription, optional text refinement, paste, and local history.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111712"/>
+      <stop offset="0.54" stop-color="#151b22"/>
+      <stop offset="1" stop-color="#251a10"/>
+    </linearGradient>
+    <filter id="card-shadow" x="-25%" y="-25%" width="150%" height="170%">
+      <feDropShadow dx="0" dy="14" stdDeviation="13" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <rect width="1320" height="450" rx="30" fill="url(#background)"/>
+  <circle cx="1210" cy="18" r="170" fill="#2498ff" opacity="0.075"/>
+  <circle cx="92" cy="438" r="168" fill="#f5b84b" opacity="0.075"/>
+
+  <text x="56" y="72" fill="#f6f2e8" font-family="Inter, SF Pro Display, Arial, sans-serif" font-size="30" font-weight="750">BoltScribe workflow</text>
+  <text x="56" y="106" fill="#aab3ac" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="15">Start anywhere. BoltScribe waits for speech, transcribes, refines, pastes, and keeps a local history.</text>
+
+  <g fill="none" stroke="#c99745" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity="0.78">
+    <path d="M224 234h24"/><path d="M242 228l8 6-8 6"/>
+    <path d="M436 234h24"/><path d="M454 228l8 6-8 6"/>
+    <path d="M648 234h24"/><path d="M666 228l8 6-8 6"/>
+    <path d="M860 234h24"/><path d="M878 228l8 6-8 6"/>
+    <path d="M1072 234h24"/><path d="M1090 228l8 6-8 6"/>
+  </g>
+
+  <g transform="translate(44 156)" filter="url(#card-shadow)">
+    <rect width="172" height="156" rx="20" fill="#1e241f" stroke="#465147"/>
+    <rect x="18" y="20" width="58" height="58" rx="17" fill="#101411" stroke="#6d5a32"/>
+    <text x="47" y="60" text-anchor="middle" fill="#ffd77e" font-family="Arial, sans-serif" font-size="31" font-weight="700">⌘</text>
+    <text x="18" y="118" fill="#f6f2e8" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="18" font-weight="700">Hotkey</text>
+    <text x="18" y="142" fill="#aab3ac" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="12">Start or stop</text>
+  </g>
+
+  <g transform="translate(256 156)" filter="url(#card-shadow)">
+    <rect width="172" height="156" rx="20" fill="#182522" stroke="#37665e"/>
+    <rect x="18" y="20" width="58" height="58" rx="17" fill="#10231f" stroke="#3e8b7c"/>
+    <g fill="none" stroke="#6bd8ca" stroke-width="4" stroke-linecap="round">
+      <path d="M31 48v4"/><path d="M39 41v18"/><path d="M47 34v32"/><path d="M55 39v22"/><path d="M63 45v10"/>
+    </g>
+    <text x="18" y="118" fill="#f6f2e8" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="18" font-weight="700">Speech Check</text>
+    <text x="18" y="142" fill="#9dd0c7" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="12">Ignore silence</text>
+  </g>
+
+  <g transform="translate(468 156)" filter="url(#card-shadow)">
+    <rect width="172" height="156" rx="20" fill="#19232d" stroke="#355570"/>
+    <rect x="18" y="20" width="58" height="58" rx="17" fill="#102b45" stroke="#2a7fbe"/>
+    <text x="47" y="57" text-anchor="middle" fill="#8ccbff" font-family="Arial, sans-serif" font-size="22" font-weight="700">Aa</text>
+    <text x="18" y="118" fill="#f6f2e8" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="18" font-weight="700">Transcribe</text>
+    <text x="18" y="142" fill="#9bb9d0" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="12">Real-time text</text>
+  </g>
+
+  <g transform="translate(680 156)" filter="url(#card-shadow)">
+    <rect width="172" height="156" rx="20" fill="#22202b" stroke="#554a70"/>
+    <rect x="18" y="20" width="58" height="58" rx="17" fill="#2d2841" stroke="#7e68aa"/>
+    <path d="M47 29l4 11 11 4-11 4-4 11-4-11-11-4 11-4 4-11z" fill="#cbbcff"/>
+    <circle cx="63" cy="30" r="3" fill="#f0eaff"/>
+    <text x="18" y="118" fill="#f6f2e8" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="18" font-weight="700">Refine</text>
+    <text x="18" y="142" fill="#b9acd2" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="12">Optional cleanup</text>
+  </g>
+
+  <g transform="translate(892 156)" filter="url(#card-shadow)">
+    <rect width="172" height="156" rx="20" fill="#17241b" stroke="#326442"/>
+    <rect x="18" y="20" width="58" height="58" rx="17" fill="#10331f" stroke="#3ca867"/>
+    <path d="M31 49l10 10 21-25" fill="none" stroke="#72e79a" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="18" y="118" fill="#f6f2e8" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="18" font-weight="700">Paste</text>
+    <text x="18" y="142" fill="#a9d8b7" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="12">Active app</text>
+  </g>
+
+  <g transform="translate(1104 156)" filter="url(#card-shadow)">
+    <rect width="172" height="156" rx="20" fill="#24221d" stroke="#5c4c30"/>
+    <rect x="18" y="20" width="58" height="58" rx="17" fill="#2c271e" stroke="#a17b39"/>
+    <g fill="none" stroke="#ffd078" stroke-width="4" stroke-linecap="round">
+      <path d="M31 38h32"/><path d="M31 49h26"/><path d="M31 60h32"/>
+    </g>
+    <text x="18" y="118" fill="#f6f2e8" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="18" font-weight="700">History</text>
+    <text x="18" y="142" fill="#c7bca7" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="12">Review &amp; retry</text>
+  </g>
+
+  <g transform="translate(56 366)">
+    <rect width="1208" height="50" rx="25" fill="#ffffff" fill-opacity="0.05" stroke="#ffffff" stroke-opacity="0.11"/>
+    <text x="28" y="31" fill="#e2ddd2" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="14" font-weight="700">Capsule feedback</text>
+
+    <circle cx="237" cy="25" r="7" fill="#121816" stroke="#60706a"/>
+    <text x="254" y="30" fill="#c9cec8" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="13">Listening</text>
+    <circle cx="405" cy="25" r="7" fill="#f5b84b"/>
+    <text x="422" y="30" fill="#d9d0bf" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="13">Correcting</text>
+    <circle cx="585" cy="25" r="7" fill="#48d480"/>
+    <text x="602" y="30" fill="#c9d9ce" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="13">Complete</text>
+    <circle cx="753" cy="25" r="7" fill="#e96a62"/>
+    <text x="770" y="30" fill="#dac7c5" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="13">Error</text>
+    <text x="1176" y="30" text-anchor="end" fill="#8f9992" font-family="Inter, SF Pro Text, Arial, sans-serif" font-size="12">Local speech check runs before transcription</text>
+  </g>
+</svg>

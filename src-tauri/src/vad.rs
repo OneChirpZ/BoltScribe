@@ -17,8 +17,6 @@ use webrtc_vad::{SampleRate, Vad, VadMode};
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const FRAME_MS: u64 = 20;
 const FRAME_SAMPLES: usize = TARGET_SAMPLE_RATE as usize / 1000 * FRAME_MS as usize;
-const BASE_PRE_ROLL_MS: u64 = 4_000;
-const PRE_ROLL_HEADROOM_MS: u64 = 600;
 const WEBRTC_VAD_MODE: u8 = 3;
 const NOISE_BOOTSTRAP_MIN_NON_VOICE_FRAMES: usize = 12;
 const NOISE_BOOTSTRAP_NON_VOICE_NUMERATOR: usize = 2;
@@ -55,6 +53,28 @@ struct SpeechFrameDecision {
     trigger_threshold_dbfs: f32,
     trigger_progress: f32,
     first_qualified_ms: Option<u64>,
+}
+
+struct PreActivationAudio {
+    chunks: Option<VecDeque<AudioChunk>>,
+}
+
+impl PreActivationAudio {
+    fn new() -> Self {
+        Self {
+            chunks: Some(VecDeque::new()),
+        }
+    }
+
+    fn push(&mut self, chunk: &AudioChunk) {
+        if let Some(chunks) = self.chunks.as_mut() {
+            chunks.push_back(chunk.clone());
+        }
+    }
+
+    fn take_for_activation(&mut self) -> VecDeque<AudioChunk> {
+        self.chunks.take().unwrap_or_default()
+    }
 }
 
 #[derive(Debug)]
@@ -548,15 +568,13 @@ impl VadGate {
 
     pub fn trim(&self) -> Option<AudioTrim> {
         let snapshot = self.snapshot();
+        snapshot.first_voice_ms?;
         let last_activity_ms = snapshot
             .last_vad_activity_ms
             .into_iter()
             .chain(snapshot.last_asr_activity_ms)
             .max()?;
-        Some(AudioTrim {
-            first_voice_ms: snapshot.first_voice_ms?,
-            last_activity_ms,
-        })
+        Some(AudioTrim { last_activity_ms })
     }
 
     pub fn finish(mut self, cancelled: bool) -> GatedAsrResult {
@@ -617,8 +635,7 @@ fn vad_worker(
         config.noise_window_ms,
     );
     let mut frames = Vec::new();
-    let mut pre_roll: VecDeque<(AudioChunk, u64)> = VecDeque::new();
-    let mut pre_roll_ms = 0u64;
+    let mut pre_activation_audio = PreActivationAudio::new();
     let mut activated = false;
     let mut asr_activity_offset_ms = 0u64;
     let mut stopped = false;
@@ -659,18 +676,15 @@ fn vad_worker(
         if stopped {
             break;
         }
+        if initial_silence_timed_out(activated, started_at.elapsed(), timeout) {
+            set_phase(&snapshot, VadPhase::TimedOut, None);
+            break;
+        }
 
         match audio_receiver.recv_timeout(Duration::from_millis(20)) {
             Ok(chunk) => {
                 let was_activated = activated;
-                let duration_ms = chunk_duration_ms(&chunk);
-                pre_roll.push_back((chunk.clone(), duration_ms));
-                pre_roll_ms = pre_roll_ms.saturating_add(duration_ms);
-                while pre_roll_ms > pre_roll_limit_ms(&speech_gate.profile) {
-                    if let Some((_, duration)) = pre_roll.pop_front() {
-                        pre_roll_ms = pre_roll_ms.saturating_sub(duration);
-                    }
-                }
+                pre_activation_audio.push(&chunk);
 
                 if let Ok(mut state) = snapshot.lock() {
                     state.elapsed_ms = started_at.elapsed().as_millis() as u64;
@@ -689,40 +703,20 @@ fn vad_worker(
                             // A real recording fails open: preserve the
                             // existing live-ASR behavior if local conversion
                             // ever fails, while retaining a sanitized note.
-                            activated = true;
-                            asr_activity_offset_ms = started_at.elapsed().as_millis() as u64;
-                            if let Ok(mut state) = snapshot.lock() {
-                                state.phase = VadPhase::Activated;
-                                state.error = Some(diagnostic);
-                                state.revision = state.revision.saturating_add(1);
-                            }
-                            let asr_result = asr_config
-                                .as_ref()
-                                .map(|config| {
-                                    VolcengineLiveAsrSession::start_with_activity(
-                                        config,
-                                        Some(LiveAsrActivity::new()),
-                                    )
-                                    .map(Some)
-                                })
-                                .unwrap_or(Ok(None));
-                            match asr_result {
-                                Ok(Some(session)) => {
-                                    if let Ok(sender) = session.audio_sender() {
-                                        for (buffered, _) in pre_roll.iter() {
-                                            let _ = sender.send(buffered.clone());
-                                        }
-                                    }
-                                    if let Ok(mut slot) = asr_session.lock() {
-                                        *slot = Some(session);
-                                    }
+                            if !activated {
+                                activated = true;
+                                asr_activity_offset_ms = started_at.elapsed().as_millis() as u64;
+                                if let Ok(mut state) = snapshot.lock() {
+                                    state.phase = VadPhase::Activated;
+                                    state.error = Some(diagnostic);
+                                    state.revision = state.revision.saturating_add(1);
                                 }
-                                Ok(None) => {}
-                                Err(start_error) => {
-                                    if let Ok(mut error) = asr_start_error.lock() {
-                                        *error = Some(start_error.to_string());
-                                    }
-                                }
+                                start_live_asr(
+                                    asr_config.as_ref(),
+                                    &mut pre_activation_audio,
+                                    &asr_session,
+                                    &asr_start_error,
+                                );
                             }
                         } else {
                             set_phase(&snapshot, VadPhase::Error, Some(diagnostic));
@@ -763,32 +757,12 @@ fn vad_worker(
                             state.trigger_progress = 1.0;
                             state.revision = state.revision.saturating_add(1);
                         }
-                        let asr_result = match asr_config.as_ref() {
-                            Some(asr_config) => VolcengineLiveAsrSession::start_with_activity(
-                                asr_config,
-                                Some(LiveAsrActivity::new()),
-                            )
-                            .map(Some),
-                            None => Ok(None),
-                        };
-                        match asr_result {
-                            Ok(Some(session)) => {
-                                if let Ok(sender) = session.audio_sender() {
-                                    for (buffered, _) in pre_roll.iter() {
-                                        let _ = sender.send(buffered.clone());
-                                    }
-                                }
-                                if let Ok(mut slot) = asr_session.lock() {
-                                    *slot = Some(session);
-                                }
-                            }
-                            Ok(None) => {}
-                            Err(err) => {
-                                if let Ok(mut error) = asr_start_error.lock() {
-                                    *error = Some(err.to_string());
-                                }
-                            }
-                        }
+                        start_live_asr(
+                            asr_config.as_ref(),
+                            &mut pre_activation_audio,
+                            &asr_session,
+                            &asr_start_error,
+                        );
                     }
                 }
                 if activated && was_activated {
@@ -814,7 +788,7 @@ fn vad_worker(
                         .saturating_sub(elapsed_ms as u128)
                         .min(u64::MAX as u128) as u64;
                 }
-                if !activated && started_at.elapsed() >= timeout {
+                if initial_silence_timed_out(activated, started_at.elapsed(), timeout) {
                     set_phase(&snapshot, VadPhase::TimedOut, None);
                     stopped = true;
                 }
@@ -837,6 +811,41 @@ fn vad_worker(
             None,
         );
     }
+}
+
+fn start_live_asr(
+    asr_config: Option<&AsrConfig>,
+    pre_activation_audio: &mut PreActivationAudio,
+    asr_session: &Arc<Mutex<Option<VolcengineLiveAsrSession>>>,
+    asr_start_error: &Arc<Mutex<Option<String>>>,
+) {
+    let buffered = pre_activation_audio.take_for_activation();
+    let Some(asr_config) = asr_config else {
+        return;
+    };
+    match VolcengineLiveAsrSession::start_with_activity(asr_config, Some(LiveAsrActivity::new())) {
+        Ok(session) => {
+            if let Ok(sender) = session.audio_sender() {
+                for chunk in buffered {
+                    if sender.send(chunk).is_err() {
+                        break;
+                    }
+                }
+            }
+            if let Ok(mut slot) = asr_session.lock() {
+                *slot = Some(session);
+            }
+        }
+        Err(err) => {
+            if let Ok(mut error) = asr_start_error.lock() {
+                *error = Some(err.to_string());
+            }
+        }
+    }
+}
+
+fn initial_silence_timed_out(activated: bool, elapsed: Duration, timeout: Duration) -> bool {
+    !activated && elapsed >= timeout
 }
 
 fn current_asr_activity(session: &Arc<Mutex<Option<VolcengineLiveAsrSession>>>) -> Option<u64> {
@@ -875,12 +884,6 @@ fn gate_profile(noise_margin_db: u32, confirmation_ms: u32, noise_window_ms: u32
         required_voice_frames,
         required_consecutive_frames: (VAD_CONTINUOUS_SPEECH_MS / FRAME_MS as u32) as usize,
     }
-}
-
-fn pre_roll_limit_ms(profile: &GateProfile) -> u64 {
-    BASE_PRE_ROLL_MS.max(
-        profile.noise_window_ms as u64 + profile.confirmation_ms as u64 * 2 + PRE_ROLL_HEADROOM_MS,
-    )
 }
 
 fn fixed_vad_mode() -> VadMode {
@@ -966,13 +969,6 @@ fn percentile(values: impl IntoIterator<Item = f32>, percentile: f32) -> Option<
     sorted.sort_by(f32::total_cmp);
     let index = ((sorted.len() - 1) as f32 * percentile.clamp(0.0, 1.0)).round() as usize;
     sorted.get(index).copied()
-}
-
-fn chunk_duration_ms(chunk: &AudioChunk) -> u64 {
-    if chunk.sample_rate == 0 || chunk.channels == 0 {
-        return 0;
-    }
-    ((chunk.samples.len() as u64 / chunk.channels as u64) * 1000) / chunk.sample_rate as u64
 }
 
 fn chunk_level_dbfs(samples: &[i16]) -> f32 {
@@ -1082,10 +1078,11 @@ fn interpolate(samples: &[i16], position: f64) -> i16 {
 #[cfg(test)]
 mod tests {
     use super::{
-        gate_profile, pre_roll_limit_ms, PcmConverter, SpeechGate, BASE_PRE_ROLL_MS, FRAME_MS,
-        FRAME_SAMPLES,
+        gate_profile, initial_silence_timed_out, PcmConverter, PreActivationAudio, SpeechGate,
+        FRAME_MS, FRAME_SAMPLES,
     };
     use crate::recorder::AudioChunk;
+    use std::time::Duration;
 
     const TEST_NOISE_WINDOW_MS: u32 = 600;
 
@@ -1109,8 +1106,46 @@ mod tests {
         assert_eq!(custom_profile.required_voice_frames, 46);
         assert_eq!(custom_profile.required_consecutive_frames, 12);
         assert_eq!(custom_profile.window_frames, 92);
-        assert_eq!(pre_roll_limit_ms(&default_profile), BASE_PRE_ROLL_MS);
-        assert_eq!(pre_roll_limit_ms(&gate_profile(12, 2_000, 3_000)), 7_600);
+    }
+
+    #[test]
+    fn pre_activation_audio_preserves_long_input_in_order_and_stops_after_activation() {
+        let mut pending = PreActivationAudio::new();
+        for marker in 0..300i16 {
+            pending.push(&AudioChunk {
+                samples: vec![marker; 20],
+                sample_rate: 1_000,
+                channels: 1,
+            });
+        }
+
+        let buffered = pending.take_for_activation();
+        assert_eq!(buffered.len(), 300);
+        assert_eq!(buffered.front().unwrap().samples[0], 0);
+        assert_eq!(buffered.back().unwrap().samples[0], 299);
+
+        pending.push(&AudioChunk {
+            samples: vec![300],
+            sample_rate: 1_000,
+            channels: 1,
+        });
+        assert!(pending.take_for_activation().is_empty());
+    }
+
+    #[test]
+    fn initial_silence_timeout_applies_even_while_audio_keeps_arriving() {
+        let timeout = Duration::from_secs(15);
+        assert!(!initial_silence_timed_out(
+            false,
+            Duration::from_millis(14_999),
+            timeout
+        ));
+        assert!(initial_silence_timed_out(false, timeout, timeout));
+        assert!(!initial_silence_timed_out(
+            true,
+            Duration::from_secs(60),
+            timeout
+        ));
     }
 
     #[test]

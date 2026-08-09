@@ -475,6 +475,13 @@ function clonePreview<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+function browserPreviewLanguage(): "zh-CN" | "en-US" {
+  if (typeof window === "undefined") return "zh-CN";
+  return new URL(window.location.href).searchParams.get("preview-language") === "en-US" ? "en-US" : "zh-CN";
+}
+
+const previewLanguage = browserPreviewLanguage();
+
 let previewStatus: WorkflowStatus = initialBrowserPreviewStatus();
 
 function initialBrowserPreviewStatus(): WorkflowStatus {
@@ -540,23 +547,23 @@ let previewConfig: AppConfig = {
       sound_source_toggle_mute_hotkey: "Cmd+Opt+Ctrl+A",
     },
     voice_activity_detection: {
-      enabled: true,
+      enabled: false,
       noise_margin_db: 12,
       confirmation_ms: 480,
-      noise_window_ms: 2000,
+      noise_window_ms: 800,
       initial_silence_timeout_secs: 15,
     },
   },
   asr: {
     provider: "volcengine",
     auth_mode: "api_key",
-    app_key: "1575344452",
+    app_key: "preview-app-key",
     access_key: "preview-access-key",
     resource_id: "volc.seedasr.sauc.duration",
     stream_url: "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream",
     submit_url: "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit",
     query_url: "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query",
-    language: "zh-CN",
+    language: previewLanguage,
   },
   llm: {
     provider: "openai",
@@ -571,7 +578,7 @@ let previewConfig: AppConfig = {
       { provider: "openai", model: "gpt-5.4-mini" },
       { provider: "volc_ark", model: "doubao-seed-2-0-lite-260428" },
     ],
-    system_prompt: "你是语音输入文本优化器。",
+    system_prompt: previewLanguage === "en-US" ? "Polish the dictated text without changing its meaning." : "在不改变原意的前提下整理语音输入文本。",
     temperature: 1,
     timeout_secs: 12,
     thinking_enabled: false,
@@ -581,17 +588,19 @@ let previewConfig: AppConfig = {
   },
   correction: {
     enabled: true,
-    user_requirements: "保留原意，修正错别字和标点；技术名词保持用户词典中的固定写法。",
+    user_requirements: previewLanguage === "en-US"
+      ? "Keep the original meaning, improve punctuation, and preserve dictionary terms."
+      : "保留原意，修正错别字和标点，并保持词典术语的固定写法。",
     prompt_template: "纠错任务：\n用户要求：\n{{user_requirements}}\n\n用户词典：\n{{dictionary}}\n\n易错词纠正：\n{{correction_rules}}\n\n原始转写：\n{{raw_text}}",
-    variables: [{ name: "scene", value: "日常技术沟通" }],
-    dictionary_text: "BoltScribe\nCodex\nLDFC",
+    variables: [{ name: "scene", value: previewLanguage === "en-US" ? "Everyday notes" : "日常记录" }],
+    dictionary_text: "BoltScribe\nASR\nLLM",
     disabled_dictionary_terms: [],
-    correction_rules_text: "\"包次\" -> \"BoltScribe\" # 产品名\n\"扣得死\" -> \"Codex\" # 工具名",
+    correction_rules_text: "\"Bolt Scribe\" -> \"BoltScribe\" # Product name\n\"voice to text\" -> \"dictation\" # Preferred term",
     correction_rules: [],
     dictionary: [],
   },
   ui: {
-    app_language: "zh-CN",
+    app_language: previewLanguage,
     recording_overlay_scale: 0.5,
     recording_overlay_offset_x: 0,
     recording_overlay_offset_y: 0,
@@ -622,7 +631,7 @@ let previewVadTestStatus: VadTestStatus = {
   remaining_ms: 60_000,
   noise_margin_db: 12,
   confirmation_ms: 480,
-  noise_window_ms: 2000,
+  noise_window_ms: 800,
   revision: 0,
   error: null,
 };
@@ -650,35 +659,24 @@ const previewAudioOutputDevices: AudioOutputDevice[] = [
 
 const previewRecordingBytes = 256 * 1024;
 
-const previewHistory: HistoryRecord[] = [
-  {
-    ...previewHistoryRecord("retry-failure", "2026-07-20T16:39:29+08:00", ""),
-    raw_text: "",
-    corrected_text: "",
-    pasted_text: "",
-    workflow_error: "Failed to connect Volcengine ASR websocket",
-    asr_duration_ms: 30,
-    service_audio_duration_ms: null,
-    live_asr_diagnostics: {
-      connection_attempts: 5,
-      first_connected_after_ms: null,
-      peak_buffered_bytes: 384000,
-      last_error_category: "timeout",
-      fallback_reason: "connection_attempts_exhausted",
-    },
-    total_duration_ms: 30,
-  },
-  previewHistoryRecord("1", "2026-05-20T00:50:21+08:00", "在你修改这样的前端展示时，不需要每次重复打包，然后让我来帮你检查，而是你直接把这个前端在浏览器等内容当中渲染出来，直接你来做截图和视觉检查。"),
-  previewHistoryRecord("2", "2026-05-20T00:49:16+08:00", "增加最小宽度限制，避免窗口被缩得太小，导致内容挤占和排版错乱。"),
-  previewHistoryRecord("3", "2026-05-20T00:48:21+08:00", "优化语音输入浮窗大小滑动条和快捷键 Command 按钮的排版。"),
-];
+const previewHistory: HistoryRecord[] = previewLanguage === "en-US"
+  ? [
+      previewHistoryRecord("1", "2026-08-09T14:36:18+08:00", "Turn today's product discussion into three clear action items, keeping each owner and due date."),
+      previewHistoryRecord("2", "2026-08-09T14:31:42+08:00", "Start recognition only after speech is detected, so accidental silence does not create unnecessary requests."),
+      previewHistoryRecord("3", "2026-08-09T14:24:07+08:00", "Paste the polished transcript into the active document when processing is complete."),
+    ]
+  : [
+      previewHistoryRecord("1", "2026-08-09T14:36:18+08:00", "请把今天的产品讨论整理成三条清晰的行动项，并保留负责人和截止时间。"),
+      previewHistoryRecord("2", "2026-08-09T14:31:42+08:00", "检测到人声后再开始识别，避免安静时产生无效请求。"),
+      previewHistoryRecord("3", "2026-08-09T14:24:07+08:00", "处理完成后，将整理好的文本粘贴到当前文档。"),
+    ];
 
 const previewStats: InputStats = {
-  total_character_count: 17909,
-  total_audio_duration_ms: 69180000,
-  average_chars_per_minute: 168,
+  total_character_count: 18640,
+  total_audio_duration_ms: 6540000,
+  average_chars_per_minute: 171,
   daily: Array.from({ length: 70 }, (_, index) => {
-    const date = new Date();
+    const date = new Date("2026-08-09T12:00:00+08:00");
     date.setHours(0, 0, 0, 0);
     date.setDate(date.getDate() - 69 + index);
     const active = index > 60 ? index - 60 : 0;

@@ -200,7 +200,6 @@ impl RecordedAudio {
 
 #[derive(Debug, Clone, Copy)]
 pub struct AudioTrim {
-    pub first_voice_ms: u64,
     pub last_activity_ms: u64,
 }
 
@@ -631,15 +630,14 @@ fn trim_samples(
     }
     let total_frames = samples.len() / channels as usize;
     let total_ms = (total_frames as u64 * 1000) / sample_rate as u64;
-    let start_ms = trim.first_voice_ms.saturating_sub(600).min(total_ms);
+    let start_ms = 0;
     let end_ms = trim
         .last_activity_ms
         .saturating_add(800)
         .min(total_ms)
         .max(start_ms);
-    let start_frame = ((start_ms as u128 * sample_rate as u128) / 1000) as usize;
     let end_frame = ((end_ms as u128 * sample_rate as u128) / 1000) as usize;
-    let start = (start_frame * channels as usize).min(samples.len());
+    let start = 0;
     let mut end = (end_frame * channels as usize).clamp(start, samples.len());
     if end == start && start < samples.len() {
         end = (start + channels as usize).min(samples.len());
@@ -780,19 +778,35 @@ mod tests {
     }
 
     #[test]
-    fn trim_samples_keeps_preroll_and_tail_without_crossing_capture_bounds() {
+    fn trim_samples_preserves_capture_start_and_only_trims_the_tail() {
         let samples: Vec<i16> = (0..64_000).map(|sample| sample as i16).collect();
+        let expected = samples[..44_800].to_vec();
         let (trimmed, start_ms) = trim_samples(
             samples,
             16_000,
             1,
             AudioTrim {
-                first_voice_ms: 1_000,
                 last_activity_ms: 2_000,
             },
         );
-        assert_eq!(start_ms, 400);
-        assert_eq!(trimmed.len(), 2_400 * 16);
+        assert_eq!(start_ms, 0);
+        assert_eq!(trimmed, expected);
+    }
+
+    #[test]
+    fn trim_samples_keeps_the_full_capture_when_tail_is_out_of_bounds() {
+        let samples: Vec<i16> = (0..32_000).map(|sample| sample as i16).collect();
+        let expected = samples.clone();
+        let (trimmed, start_ms) = trim_samples(
+            samples,
+            16_000,
+            1,
+            AudioTrim {
+                last_activity_ms: 10_000,
+            },
+        );
+        assert_eq!(start_ms, 0);
+        assert_eq!(trimmed, expected);
     }
 
     #[test]

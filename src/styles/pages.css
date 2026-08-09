@@ -269,13 +269,25 @@
 }
 
 .vad-card-copy {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
   min-width: 0;
 }
 
-.vad-card-copy .settings-help-text {
-  max-width: 920px;
+.beta-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border: 1px solid rgba(245, 184, 75, 0.42);
+  border-radius: 999px;
+  padding: 2px 7px;
+  color: #f6dba2;
+  background: rgba(245, 184, 75, 0.1);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .vad-enabled-toggle {
@@ -296,6 +308,18 @@
   min-width: 0;
 }
 
+.vad-field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vad-field-label .help-tip {
+  width: 16px;
+  height: 16px;
+  font-size: 11px;
+}
+
 .vad-range-control {
   grid-template-columns: minmax(120px, 1fr) 88px auto;
   width: 100%;
@@ -306,16 +330,18 @@
   white-space: nowrap;
 }
 
-.vad-fixed-rule {
-  margin: -2px 0 0;
-}
-
 .vad-test-footer {
   display: grid;
   grid-template-columns: minmax(220px, 280px) auto;
   align-items: center;
   justify-content: start;
   gap: 10px;
+}
+
+.vad-test-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .vad-test-capsule {
@@ -407,10 +433,6 @@
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.025);
   font-variant-numeric: tabular-nums;
-}
-
-.vad-test-help {
-  max-width: 980px;
 }
 
 .input-device-priority-list {

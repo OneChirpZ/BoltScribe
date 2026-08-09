@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   defaultVadConfirmationMs,
+  defaultVadEnabled,
   defaultVadNoiseMarginDb,
   defaultVadNoiseWindowMs,
   normalizeVadConfirmationMs,
@@ -13,7 +14,8 @@ import {
 test("VAD defaults match the calibrated gate profile", () => {
   assert.equal(defaultVadNoiseMarginDb, 12);
   assert.equal(defaultVadConfirmationMs, 480);
-  assert.equal(defaultVadNoiseWindowMs, 2000);
+  assert.equal(defaultVadNoiseWindowMs, 800);
+  assert.equal(defaultVadEnabled, false);
 });
 
 test("VAD numeric settings clamp and align to their slider steps", () => {

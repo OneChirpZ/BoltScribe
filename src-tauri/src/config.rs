@@ -573,7 +573,7 @@ fn default_input_device_mode() -> String {
 }
 
 fn default_vad_enabled() -> bool {
-    true
+    false
 }
 
 fn default_vad_noise_margin_db() -> u32 {
@@ -585,7 +585,7 @@ fn default_vad_confirmation_ms() -> u32 {
 }
 
 fn default_vad_noise_window_ms() -> u32 {
-    2_000
+    800
 }
 
 fn default_vad_initial_silence_timeout_secs() -> u32 {
@@ -1885,10 +1885,10 @@ mod tests {
             .unwrap()
             .remove("voice_activity_detection");
         let mut config: AppConfig = serde_json::from_value(value).unwrap();
-        assert!(config.audio.voice_activity_detection.enabled);
+        assert!(!config.audio.voice_activity_detection.enabled);
         assert_eq!(config.audio.voice_activity_detection.noise_margin_db, 12);
         assert_eq!(config.audio.voice_activity_detection.confirmation_ms, 480);
-        assert_eq!(config.audio.voice_activity_detection.noise_window_ms, 2_000);
+        assert_eq!(config.audio.voice_activity_detection.noise_window_ms, 800);
         assert_eq!(
             config
                 .audio
@@ -1925,7 +1925,7 @@ mod tests {
         let legacy: AppConfig = serde_json::from_value(legacy_value).unwrap();
         assert_eq!(legacy.audio.voice_activity_detection.noise_margin_db, 12);
         assert_eq!(legacy.audio.voice_activity_detection.confirmation_ms, 480);
-        assert_eq!(legacy.audio.voice_activity_detection.noise_window_ms, 2_000);
+        assert_eq!(legacy.audio.voice_activity_detection.noise_window_ms, 800);
     }
 
     #[test]

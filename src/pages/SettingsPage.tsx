@@ -15,6 +15,7 @@ import type { PermissionRequestState } from "../domain/permissions";
 import { supportsAudioServiceRestart, supportsDockVisibilityControl, supportsFnLongPressTrigger, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback, supportsTraySingleClickRecording } from "../domain/platform";
 import {
   defaultVadConfirmationMs,
+  defaultVadEnabled,
   defaultVadInitialSilenceTimeoutSecs,
   defaultVadNoiseMarginDb,
   defaultVadNoiseWindowMs,
@@ -142,7 +143,7 @@ export default function SettingsPage({
   const inputDeviceBlacklist = config.audio.input_device_blacklist ?? [];
   const savedVoiceActivityDetection = config.audio.voice_activity_detection;
   const voiceActivityDetection = {
-    enabled: savedVoiceActivityDetection?.enabled ?? true,
+    enabled: savedVoiceActivityDetection?.enabled ?? defaultVadEnabled,
     noise_margin_db: savedVoiceActivityDetection?.noise_margin_db ?? defaultVadNoiseMarginDb,
     confirmation_ms: savedVoiceActivityDetection?.confirmation_ms ?? defaultVadConfirmationMs,
     noise_window_ms: savedVoiceActivityDetection?.noise_window_ms ?? defaultVadNoiseWindowMs,
@@ -670,7 +671,8 @@ export default function SettingsPage({
               <div className="vad-card-header">
                 <div className="vad-card-copy settings-subsection-heading">
                   <h3>{text.settings.vadTitle}</h3>
-                  <p className="settings-help-text">{text.settings.vadHelp}</p>
+                  <span className="beta-badge">{text.settings.vadBetaBadge}</span>
+                  <HelpTip content={text.settings.vadHelp} />
                 </div>
                 <label className="toggle-row vad-enabled-toggle">
                   <input
@@ -684,7 +686,11 @@ export default function SettingsPage({
               </div>
               {voiceActivityDetection.enabled ? (
                 <div className="vad-controls-grid">
-                  <Field label={text.settings.vadInitialSilenceTimeout} className="vad-range-field" group>
+                  <Field
+                    label={<VadFieldLabel label={text.settings.vadInitialSilenceTimeout} help={text.settings.vadInitialSilenceTimeoutHelp} />}
+                    className="vad-range-field"
+                    group
+                  >
                     <VadRangeNumberControl
                       label={text.settings.vadInitialSilenceTimeout}
                       value={voiceActivityDetection.initial_silence_timeout_secs}
@@ -695,7 +701,11 @@ export default function SettingsPage({
                       onChange={(value) => updateVoiceActivityDetection({ initial_silence_timeout_secs: value })}
                     />
                   </Field>
-                  <Field label={text.settings.vadNoiseMargin} className="vad-range-field" group>
+                  <Field
+                    label={<VadFieldLabel label={text.settings.vadNoiseMargin} help={text.settings.vadNoiseMarginHelp} />}
+                    className="vad-range-field"
+                    group
+                  >
                     <VadRangeNumberControl
                       label={text.settings.vadNoiseMargin}
                       value={voiceActivityDetection.noise_margin_db}
@@ -706,7 +716,11 @@ export default function SettingsPage({
                       onChange={(value) => updateVadGateSettings({ noise_margin_db: value })}
                     />
                   </Field>
-                  <Field label={text.settings.vadConfirmationDuration} className="vad-range-field" group>
+                  <Field
+                    label={<VadFieldLabel label={text.settings.vadConfirmationDuration} help={text.settings.vadConfirmationDurationHelp} />}
+                    className="vad-range-field"
+                    group
+                  >
                     <VadRangeNumberControl
                       label={text.settings.vadConfirmationDuration}
                       value={voiceActivityDetection.confirmation_ms}
@@ -717,7 +731,11 @@ export default function SettingsPage({
                       onChange={(value) => updateVadGateSettings({ confirmation_ms: value })}
                     />
                   </Field>
-                  <Field label={text.settings.vadNoiseWindow} className="vad-range-field" group>
+                  <Field
+                    label={<VadFieldLabel label={text.settings.vadNoiseWindow} help={text.settings.vadNoiseWindowHelp} />}
+                    className="vad-range-field"
+                    group
+                  >
                     <VadRangeNumberControl
                       label={text.settings.vadNoiseWindow}
                       value={voiceActivityDetection.noise_window_ms}
@@ -730,9 +748,6 @@ export default function SettingsPage({
                   </Field>
                 </div>
               ) : null}
-              {voiceActivityDetection.enabled ? (
-                <p className="settings-help-text vad-fixed-rule">{text.settings.vadContinuousRequirement}</p>
-              ) : null}
               <div className="vad-test-footer">
                 <div className={`vad-test-capsule ${vadTestVisualState}`}>
                   <span className="vad-test-label" role="status" aria-live="polite">{vadTestLabel}</span>
@@ -741,11 +756,14 @@ export default function SettingsPage({
                     <AudioWaveform samples={vadTestLevelHistory} />
                   </div>
                 </div>
-                {!vadTestRunning ? (
-                  <button className="secondary small" type="button" onClick={onStartVadTest}>{text.settings.vadTest}</button>
-                ) : (
-                  <button className="secondary small" type="button" onClick={onStopVadTest}>{text.settings.vadStopTest}</button>
-                )}
+                <div className="vad-test-actions">
+                  {!vadTestRunning ? (
+                    <button className="secondary small" type="button" onClick={onStartVadTest}>{text.settings.vadTest}</button>
+                  ) : (
+                    <button className="secondary small" type="button" onClick={onStopVadTest}>{text.settings.vadStopTest}</button>
+                  )}
+                  <HelpTip content={text.settings.vadTestHelp} />
+                </div>
               </div>
               {vadTestRunning ? (
                 <div className="vad-test-diagnostics" aria-label={text.settings.vadTesting}>
@@ -755,7 +773,6 @@ export default function SettingsPage({
                   <span>{text.settings.vadTriggerProgress(Math.round(clampNumber(vadTestStatus.trigger_progress, 0, 1) * 100))}</span>
                 </div>
               ) : null}
-              <p className="settings-help-text vad-test-help">{text.settings.vadTestHelp}</p>
             </div>
           </div>
 
@@ -1306,6 +1323,15 @@ function VadRangeNumberControl({
       />
       <span>{unit}</span>
     </div>
+  );
+}
+
+function VadFieldLabel({ label, help }: { label: string; help: string }) {
+  return (
+    <span className="vad-field-label">
+      <span>{label}</span>
+      <HelpTip content={help} />
+    </span>
   );
 }
 

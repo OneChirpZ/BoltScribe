@@ -5,7 +5,7 @@
 <h1 align="center">BoltScribe</h1>
 
 <p align="center">
-  一个简洁的 macOS 和 Windows 语音输入工具，支持全局快捷键、ASR 转写和可选的 LLM 纠错。
+  一个专注的 macOS 和 Windows 语音输入工具，支持全局快捷键、实时转写和可选的 AI 文本整理。
 </p>
 
 <p align="center">
@@ -18,38 +18,38 @@
   <a href="#快速开始">快速开始</a>
 </p>
 
-![BoltScribe 工作流](docs/assets/boltscribe-workflow.svg)
+![BoltScribe 工作流](docs/assets/boltscribe-workflow-zh.svg)
 
 ## 项目简介
 
-BoltScribe 是一个 macOS 和 Windows 语音输入应用。按下全局快捷键开始录音，再次按下结束录音；BoltScribe 会完成语音转写，按需用 OpenAI 兼容模型整理文本，并把结果写入当前应用。
+BoltScribe 可以在桌面任意位置把语音变成可直接使用的文本。按下全局快捷键开始，再次按下结束；应用会完成转写，按需整理文本，并把结果粘贴到当前应用。
 
-它以托盘/菜单栏应用的方式常驻后台，数据保存在本机，并提供历史记录、日志和输入统计。
+它安静地常驻菜单栏或系统托盘，通过清晰的录音反馈展示处理进度，并在本机保留可回顾的历史记录和输入统计。
 
 ## 界面示例
 
-![BoltScribe 中文界面截图](docs/assets/screenshots/ui-screenshot-cn.jpg)
+![BoltScribe 中文界面截图](docs/assets/screenshots/app-overview-zh.jpg)
 
-![BoltScribe 胶囊浮窗截图](docs/assets/screenshots/capsule-cn.jpg)
+<p align="center">
+  <img src="docs/assets/screenshots/capsule-listening.jpg" width="31%" alt="BoltScribe 正在听取胶囊">
+  <img src="docs/assets/screenshots/capsule-correcting.jpg" width="31%" alt="BoltScribe 文本整理胶囊">
+  <img src="docs/assets/screenshots/capsule-completed.jpg" width="31%" alt="BoltScribe 完成胶囊">
+</p>
+
+<p align="center"><sub>正在听取 · 文本整理 · 粘贴完成</sub></p>
 
 ## 功能亮点
 
-- **快捷语音输入：** 在 macOS 或 Windows 任意位置通过全局快捷键开始和结束输入。
-- **ASR 与纠错：** 使用火山引擎 ASR 转写，并可通过 LLM 整理文本。
-- **灵活模型配置：** 支持 OpenAI 兼容服务商、模型预设和多模型竞速。
-- **本地历史记录：** 可查看录音、原始转写、纠错结果、日志和输入统计。
-- **托盘/菜单栏工作流：** 常驻后台，可从托盘菜单开始/停止语音输入，并可在 Windows 上开启单击托盘录音。
-- **可靠的麦克风选择：** 支持屏蔽不可用设备、设置麦克风优先级，并在候选设备无法采集有效音频时自动回退。
-- **本地无人声保护：** 使用 WebRTC VAD、自适应底噪过滤和离线麦克风测试，在确认人声前不消耗 ASR。
-- **可迁移本地数据目录：** 可保留默认本地数据目录，也可在设置中把历史、统计和录音迁移到自定义空目录。
-- **更快的胶囊浮窗：** macOS 上不再通过慢速 focused element 查询定位录音胶囊。
-- **中英文界面：** 支持中文和英文界面切换。
-
-## 架构
-
-![BoltScribe 架构](docs/assets/boltscribe-architecture.svg)
-
-BoltScribe 使用 Tauri、React、TypeScript 和 Rust 构建。React 前端位于 `src`，Tauri 后端位于 `src-tauri/src`。
+- **随处语音输入：** 通过全局快捷键或菜单栏/系统托盘开始和结束输入。
+- **实时语音转写：** 持续展示听取状态；实时服务中断时可自动恢复，并在需要时使用录音文件继续识别。
+- **无人声保护（Beta，默认关闭）：** 确认检测到人声后才开始识别，减少误触后产生的无效请求。检测门槛和等待时间可以调节，并提供完全在本地运行、不调用 ASR 的麦克风测试。
+- **可选文本整理：** 通过可配置的 AI 模型改善标点、表达和术语，支持个人词典、易错词规则和可选的多模型竞速。
+- **可靠音频输入：** 可以设置麦克风优先级、屏蔽不合适的设备，并在采集失败时自动尝试其他输入设备。
+- **清晰录音反馈：** 通过紧凑胶囊和实时波形查看等待说话、正在听取、处理中和完成状态。
+- **舒适录音体验：** 录音时可自动降低或静音其他声音，结束后恢复原音量。
+- **历史与重试：** 查看转写、录音、处理日志和输入统计，并可从历史记录重新处理失败项目。
+- **本地数据管理：** 自定义历史与录音的保存位置、保留上限，并在应用内清理旧录音。
+- **双语桌面应用：** 在 macOS 和 Windows 上使用中文或英文界面。
 
 ## 快速开始
 
@@ -57,7 +57,7 @@ BoltScribe 使用 Tauri、React、TypeScript 和 Rust 构建。React 前端位�
 
 最新公开版本是 [BoltScribe v1.4.0](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.4.0)。
 
-当前发布产物：
+当前可下载版本：
 
 - macOS Apple Silicon：`BoltScribe_1.4.0_aarch64.dmg`
 - Windows x64：`BoltScribe_1.4.0_x64-setup.exe`
@@ -65,100 +65,27 @@ BoltScribe 使用 Tauri、React、TypeScript 和 Rust 构建。React 前端位�
 ### 环境要求
 
 - 支持平台：macOS 11 或更新版本，或 Windows 10/11。
-- Node.js 和 npm。
-- Rust toolchain。
-- 当前平台的 Tauri 构建环境。
-- Windows 构建需要 WebView2 Runtime 和带 C++ 工作负载的 Visual Studio 2022 Build Tools。
-- 火山引擎 ASR 配置。
-- 如果启用 LLM 纠错，需要 OpenAI 兼容的大模型接口和 API Key。
+- 用于语音转写的火山引擎 ASR 配置。
+- 仅在启用文本整理时需要 OpenAI 兼容模型和 API Key。
 
-### 安装依赖
+安装后：
 
-```bash
-npm install
-```
+1. 授予麦克风权限；macOS 还需要辅助功能权限，以便把文本粘贴到当前应用。
+2. 填写语音转写配置，并按需配置用于文本整理的 AI 模型。
+3. 选择快捷键、麦克风和无人声保护设置。
+4. 按快捷键开始口述，再次按下即可停止并粘贴结果。
 
-### 开发运行
+## 日常设置
 
-```bash
-npm run tauri dev
-```
-
-### 构建发布包
-
-```bash
-npm run tauri build
-```
-
-构建产物位于：
-
-```text
-src-tauri/target/release/bundle/
-```
-
-打公开发布包前请先运行：
-
-```bash
-npm run version:check
-```
-
-## 配置
-
-BoltScribe 的用户配置保存在：
-
-```text
-~/.boltscribe/config.json
-```
-
-仓库中提供了默认配置和示例配置：
-
-```text
-config.default.json
-config.example.json
-```
-
-配置内容包括 ASR、LLM 服务商、纠错模板、界面语言、音频输入设备选择、浮窗位置、历史记录保留策略和系统集成选项。
-
-鼠标按键快捷键仅在 Windows 上可用。macOS 上请使用键盘全局快捷键。
+可以直接在应用中调整转写语言、AI 模型、词典、易错词规则、麦克风优先级、无人声保护、浮窗大小与位置、输出音量行为、历史保留和启动选项。
 
 ## 权限
 
 BoltScribe 需要麦克风权限来录音。在 macOS 上，它还需要辅助功能权限来把文本写入当前应用；在 Windows 上，文本写入使用剪贴板和模拟粘贴快捷键。
 
-## 本地数据
+## 隐私与本地数据
 
-运行数据保存在本机：
-
-```text
-~/Library/Application Support/BoltScribe/history.jsonl
-~/Library/Application Support/BoltScribe/input_stats.jsonl
-~/Library/Application Support/BoltScribe/recordings/
-%APPDATA%\BoltScribe\history.jsonl
-%APPDATA%\BoltScribe\input_stats.jsonl
-%APPDATA%\BoltScribe\recordings\
-```
-
-可以在设置中移动数据目录。BoltScribe 会把现有历史、输入统计和录音迁移到选中的空目录，并把自定义目录指针保存在：
-
-```text
-~/.boltscribe/data_dir.txt
-```
-
-默认保留策略：
-
-- 最多 500 条历史记录；
-- 最多 2 GB 录音和历史存储。
-
-## 开发
-
-常用检查命令：
-
-```bash
-npm run build
-cargo test --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-```
+历史、录音、设置和输入统计保存在本机。可以在设置中移动数据目录并控制保留范围。语音和文本只会发送给你配置的转写与文本整理服务；本地麦克风灵敏度测试不会调用这些服务。
 
 ## 许可证
 

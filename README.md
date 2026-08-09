@@ -5,7 +5,7 @@
 <h1 align="center">BoltScribe</h1>
 
 <p align="center">
-  A small macOS and Windows dictation app with global hotkeys, ASR transcription, and optional LLM cleanup.
+  A focused macOS and Windows dictation app with global hotkeys, real-time transcription, and optional AI text cleanup.
 </p>
 
 <p align="center">
@@ -18,38 +18,38 @@
   <a href="#quick-start">Quick Start</a>
 </p>
 
-![BoltScribe workflow](docs/assets/boltscribe-workflow.svg)
+![BoltScribe workflow](docs/assets/boltscribe-workflow-en.svg)
 
 ## Overview
 
-BoltScribe is a desktop voice input app for macOS and Windows. Press a global hotkey to record, press it again to stop, and BoltScribe transcribes your speech, optionally cleans it up with an OpenAI-compatible model, and inserts the result into the active app.
+BoltScribe turns speech into ready-to-use text from anywhere on your desktop. Press a global hotkey to begin, press it again to finish, and the result is transcribed, optionally polished, and pasted into the active app.
 
-It runs as a lightweight tray/menu bar app, keeps data on your machine, and provides history, logs, and input statistics for reviewing past dictation.
+It stays quietly in the menu bar or system tray, provides clear recording feedback, and keeps a searchable local history with input statistics.
 
 ## Screenshots
 
-![BoltScribe settings in English](docs/assets/screenshots/ui-screenshot-en.jpg)
+![BoltScribe interface in English](docs/assets/screenshots/app-overview-en.jpg)
 
-![BoltScribe capsule overlay](docs/assets/screenshots/capsule-cn.jpg)
+<p align="center">
+  <img src="docs/assets/screenshots/capsule-listening.jpg" width="31%" alt="BoltScribe listening capsule">
+  <img src="docs/assets/screenshots/capsule-correcting.jpg" width="31%" alt="BoltScribe correction capsule">
+  <img src="docs/assets/screenshots/capsule-completed.jpg" width="31%" alt="BoltScribe completion capsule">
+</p>
+
+<p align="center"><sub>Listening · Text cleanup · Completed</sub></p>
 
 ## Features
 
-- **Hotkey dictation:** start and stop voice input from anywhere on macOS or Windows.
-- **ASR plus correction:** transcribe speech with Volcengine ASR and optionally refine the text with an LLM.
-- **Flexible model setup:** use OpenAI-compatible providers, save model presets, and run multi-model race mode.
-- **Local history:** review previous recordings, transcripts, corrected text, logs, and input statistics.
-- **Tray workflow:** keep BoltScribe in the background, start/stop voice input from the tray menu, and optionally use single-click recording on Windows.
-- **Reliable microphone selection:** blacklist unusable devices, rank preferred microphones, and automatically fall back when a candidate cannot capture valid audio.
-- **Local no-speech protection:** gate ASR with WebRTC VAD, adaptive noise-floor filtering, and an offline microphone sensitivity test.
-- **Configurable local data:** keep the default local data folder or migrate history, stats, and recordings to a custom empty directory from Settings.
-- **Responsive capsule overlay:** the recording capsule is positioned without slow focused-element queries on macOS.
-- **Bilingual interface:** switch between Chinese and English.
-
-## Architecture
-
-![BoltScribe architecture](docs/assets/boltscribe-architecture.svg)
-
-BoltScribe is built with Tauri, React, TypeScript, and Rust. The React frontend lives in `src`; the Tauri backend lives in `src-tauri/src`.
+- **Dictate from anywhere:** start and stop voice input with global hotkeys or the menu bar/system tray.
+- **Real-time transcription:** see a continuous listening state, with automatic recovery and recorded-audio fallback when the live service is interrupted.
+- **No-speech protection (Beta, off by default):** recognition starts only after speech is confirmed, helping avoid unnecessary requests after accidental activation. Detection thresholds and waiting time are adjustable, with a local microphone test that does not call ASR.
+- **Optional text cleanup:** improve punctuation, phrasing, and terminology with configurable AI models, personal dictionaries, correction rules, and optional multi-model racing.
+- **Reliable audio input:** prioritize preferred microphones, block unsuitable devices, and automatically try another input when capture fails.
+- **Clear recording feedback:** follow waiting, listening, processing, and completion states through the compact capsule and live waveform.
+- **Comfortable recording:** optionally lower or mute other audio while dictating, then restore it automatically.
+- **History and retry:** review transcripts, recordings, processing logs, input statistics, and retry a failed item from history.
+- **Local data control:** choose where history and recordings are stored, set retention limits, and clean up old audio from the app.
+- **Bilingual desktop app:** use BoltScribe in Chinese or English on macOS and Windows.
 
 ## Quick Start
 
@@ -57,7 +57,7 @@ BoltScribe is built with Tauri, React, TypeScript, and Rust. The React frontend 
 
 The latest public release is [BoltScribe v1.4.0](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.4.0).
 
-Available artifact:
+Available downloads:
 
 - macOS Apple Silicon: `BoltScribe_1.4.0_aarch64.dmg`
 - Windows x64: `BoltScribe_1.4.0_x64-setup.exe`
@@ -65,100 +65,27 @@ Available artifact:
 ### Requirements
 
 - Supported platforms: macOS 11 or later, or Windows 10/11.
-- Node.js and npm.
-- Rust toolchain.
-- Tauri build prerequisites for your platform.
-- Windows builds require WebView2 Runtime and Visual Studio 2022 Build Tools with the C++ workload.
-- Volcengine ASR credentials.
-- An OpenAI-compatible LLM endpoint and API key if LLM correction is enabled.
+- Volcengine ASR credentials for transcription.
+- An OpenAI-compatible model and API key only if text cleanup is enabled.
 
-### Install Dependencies
+After installation:
 
-```bash
-npm install
-```
+1. Grant microphone permission. On macOS, also grant Accessibility permission so BoltScribe can paste text into the active app.
+2. Add your transcription credentials and, if desired, configure an AI model for text cleanup.
+3. Choose your hotkeys, microphone, and no-speech protection settings.
+4. Press the hotkey to dictate, then press it again to stop and paste the result.
 
-### Run In Development
+## Everyday Settings
 
-```bash
-npm run tauri dev
-```
-
-### Build A Release Bundle
-
-```bash
-npm run tauri build
-```
-
-Release bundles are generated under:
-
-```text
-src-tauri/target/release/bundle/
-```
-
-Before packaging a public build, run:
-
-```bash
-npm run version:check
-```
-
-## Configuration
-
-BoltScribe stores user configuration in:
-
-```text
-~/.boltscribe/config.json
-```
-
-The repository includes starter configuration files:
-
-```text
-config.default.json
-config.example.json
-```
-
-Configuration covers ASR, LLM providers, correction templates, language, audio input device selection, overlay position, history retention, and system integration.
-
-Mouse-button shortcuts are available on Windows. On macOS, use keyboard global shortcuts.
+BoltScribe lets you adjust transcription language, AI models, dictionaries, correction rules, microphone priority, no-speech protection, overlay size and position, output volume behavior, history retention, and launch options from the app.
 
 ## Permissions
 
 BoltScribe needs Microphone permission to record speech. On macOS, it also needs Accessibility permission to insert text into the active app. On Windows, text insertion uses the clipboard and a synthetic paste shortcut.
 
-## Local Data
+## Privacy and Local Data
 
-Runtime data stays on the local machine:
-
-```text
-~/Library/Application Support/BoltScribe/history.jsonl
-~/Library/Application Support/BoltScribe/input_stats.jsonl
-~/Library/Application Support/BoltScribe/recordings/
-%APPDATA%\BoltScribe\history.jsonl
-%APPDATA%\BoltScribe\input_stats.jsonl
-%APPDATA%\BoltScribe\recordings\
-```
-
-You can move the data directory from Settings. BoltScribe migrates existing history, input stats, and recordings into the selected empty directory and stores the custom directory pointer in:
-
-```text
-~/.boltscribe/data_dir.txt
-```
-
-History retention defaults to:
-
-- at most 500 records;
-- at most 2 GB of recorded audio/history storage.
-
-## Development
-
-Common checks:
-
-```bash
-npm run build
-cargo test --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-```
+History, recordings, settings, and input statistics remain on your device. You can move the data folder and control retention from Settings. Speech and text are sent only to the transcription and text-cleanup services you configure; the local microphone sensitivity test does not use either service.
 
 ## License
 

@@ -102,7 +102,7 @@ export default function HomePage({
           </div>
         </div>
         <div className="summary-grid">
-          <Summary label={text.home.asr} value="火山引擎 WebSocket" onClick={onOpenModels} />
+          <Summary label={text.home.asr} value={language === "zh-CN" ? "火山引擎 WebSocket" : "Volcengine WebSocket"} onClick={onOpenModels} />
           <Summary
             label={text.home.llm}
             value={`${providerLabel(config.llm.provider)} / ${config.llm.model || text.home.unconfigured}`}
