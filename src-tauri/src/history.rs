@@ -1,3 +1,4 @@
+use crate::asr::LiveAsrDiagnostics;
 use crate::config::RetentionConfig;
 use crate::corrector::LlmCallLog;
 use crate::paths;
@@ -45,6 +46,8 @@ pub struct HistoryRecord {
     pub workflow_error: Option<String>,
     pub asr_duration_ms: Option<u64>,
     pub service_audio_duration_ms: Option<u64>,
+    #[serde(default)]
+    pub live_asr_diagnostics: Option<LiveAsrDiagnostics>,
     pub total_duration_ms: u128,
 }
 
@@ -116,6 +119,20 @@ impl HistoryStore {
 
     pub fn load(limit: usize, offset: usize) -> Result<Vec<HistoryRecord>> {
         load_from_paths(&history_read_paths()?, limit, offset)
+    }
+
+    pub fn load_retryable(record_id: &str) -> Result<HistoryRecord> {
+        let _guard = history_mutation_guard()?;
+        load_retryable_from_paths(
+            &history_read_paths()?,
+            &history_recordings_dirs()?,
+            record_id,
+        )
+    }
+
+    pub fn replace(record: &HistoryRecord) -> Result<()> {
+        let _guard = history_mutation_guard()?;
+        replace_in_paths(&history_read_paths()?, &paths::input_stats_path()?, record)
     }
 
     pub fn stats() -> Result<InputStats> {
@@ -225,6 +242,165 @@ fn append_history_record(path: &Path, record: &HistoryRecord) -> Result<()> {
         .with_context(|| format!("Failed to open {}", path.display()))?;
     writeln!(file, "{}", serde_json::to_string(record)?)
         .with_context(|| format!("Failed to append {}", path.display()))?;
+    Ok(())
+}
+
+fn load_retryable_from_paths(
+    history_paths: &[PathBuf],
+    recordings_dirs: &[PathBuf],
+    record_id: &str,
+) -> Result<HistoryRecord> {
+    let record_id = record_id.trim();
+    if record_id.is_empty() {
+        bail!("History record id cannot be empty");
+    }
+
+    for history_path in history_paths {
+        if !history_path.exists() {
+            continue;
+        }
+        let file = fs::File::open(history_path)
+            .with_context(|| format!("Failed to open {}", history_path.display()))?;
+        let lines = BufReader::new(file)
+            .lines()
+            .collect::<std::io::Result<Vec<_>>>()?;
+        for line in lines.iter().rev() {
+            let Ok(mut record) = serde_json::from_str::<HistoryRecord>(line) else {
+                continue;
+            };
+            if record.id != record_id {
+                continue;
+            }
+            if !record
+                .workflow_error
+                .as_deref()
+                .is_some_and(|error| !error.trim().is_empty())
+            {
+                bail!("History record {record_id} is not a failed workflow");
+            }
+            if !record.raw_text.trim().is_empty()
+                || !record.corrected_text.trim().is_empty()
+                || !record.pasted_text.trim().is_empty()
+            {
+                bail!("History record {record_id} already contains transcription text");
+            }
+            let audio_path = record.audio_path.as_deref().ok_or_else(|| {
+                anyhow!("The recording for history record {record_id} is unavailable")
+            })?;
+            record.audio_path = Some(normalized_retry_recording_path(
+                audio_path,
+                recordings_dirs,
+            )?);
+            return Ok(record);
+        }
+    }
+
+    bail!("History record {record_id} was not found")
+}
+
+fn normalized_retry_recording_path(path: &Path, recordings_dirs: &[PathBuf]) -> Result<PathBuf> {
+    if path.extension().and_then(|value| value.to_str()) != Some("wav") {
+        bail!("Retry recording must be a .wav file");
+    }
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        bail!("Retry recording path is outside the recordings directory");
+    }
+
+    let metadata = fs::symlink_metadata(path)
+        .with_context(|| format!("Retry recording {} is unavailable", path.display()))?;
+    if metadata.file_type().is_symlink() {
+        bail!("Retry recording cannot be a symbolic link");
+    }
+    if !metadata.file_type().is_file() {
+        bail!("Retry recording must be a regular file");
+    }
+
+    let normalized_path = path
+        .canonicalize()
+        .with_context(|| format!("Failed to resolve retry recording {}", path.display()))?;
+    let normalized_parent = normalized_path
+        .parent()
+        .ok_or_else(|| anyhow!("Retry recording path has no parent directory"))?;
+    let allowed = recordings_dirs.iter().any(|recordings_dir| {
+        recordings_dir
+            .canonicalize()
+            .is_ok_and(|directory| directory == normalized_parent)
+    });
+    if !allowed {
+        bail!("Retry recording path is outside the recordings directory");
+    }
+
+    Ok(normalized_path)
+}
+
+fn replace_in_paths(
+    history_paths: &[PathBuf],
+    stats_path: &Path,
+    record: &HistoryRecord,
+) -> Result<()> {
+    if record.id.trim().is_empty() {
+        bail!("History record id cannot be empty");
+    }
+    let record_id = record.id.as_str();
+
+    let replacement = serde_json::to_value(record)?;
+    let mut history_files = load_mutable_history_files(history_paths)?;
+    let mut replaced_records = 0usize;
+    for history_file in &mut history_files {
+        for line in &mut history_file.lines {
+            let matches = line
+                .value
+                .as_ref()
+                .and_then(|value| value.get("id"))
+                .and_then(serde_json::Value::as_str)
+                == Some(record_id);
+            if !matches {
+                continue;
+            }
+            let Some(value) = line.value.as_mut() else {
+                continue;
+            };
+            merge_json_fields(value, &replacement)?;
+            line.record = Some(record.clone());
+            line.changed = true;
+            history_file.changed = true;
+            replaced_records += 1;
+        }
+    }
+
+    if replaced_records == 0 {
+        bail!("History record {record_id} was not found");
+    }
+
+    let mut changed_files = Vec::new();
+    if let Some(stats_file) = prepare_stats_file_for_record(stats_path, record)? {
+        changed_files.push(stats_file);
+    }
+    changed_files.extend(
+        history_files
+            .into_iter()
+            .filter(|history_file| history_file.changed),
+    );
+    write_mutable_history_files_atomically(&changed_files)
+}
+
+fn merge_json_fields(
+    target: &mut serde_json::Value,
+    replacement: &serde_json::Value,
+) -> Result<()> {
+    let target = target
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("Stored JSON value is not an object"))?;
+    let replacement = replacement
+        .as_object()
+        .ok_or_else(|| anyhow!("Replacement JSON value is not an object"))?;
+    for (key, value) in replacement {
+        target.insert(key.clone(), value.clone());
+    }
     Ok(())
 }
 
@@ -541,25 +717,105 @@ fn recording_storage_usage(recordings_dirs: &[PathBuf]) -> Result<(usize, u64)> 
 }
 
 fn write_mutable_history_file(history_file: &MutableHistoryFile) -> Result<()> {
-    let temp_path = history_file.path.with_extension("jsonl.tmp");
+    write_file_bytes_atomically(
+        &history_file.path,
+        &mutable_history_file_contents(history_file)?,
+    )
+}
+
+fn write_mutable_history_files_atomically(history_files: &[MutableHistoryFile]) -> Result<()> {
+    let replacements = history_files
+        .iter()
+        .map(|history_file| {
+            Ok((
+                history_file.path.clone(),
+                mutable_history_file_contents(history_file)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    write_file_replacements_with_rollback(&replacements, write_file_bytes_atomically)
+}
+
+fn mutable_history_file_contents(history_file: &MutableHistoryFile) -> Result<Vec<u8>> {
+    let mut contents = Vec::new();
+    for line in &history_file.lines {
+        if line.removed {
+            continue;
+        }
+        if line.changed {
+            if let Some(value) = &line.value {
+                writeln!(contents, "{}", serde_json::to_string(value)?)?;
+            }
+        } else {
+            writeln!(contents, "{}", line.raw)?;
+        }
+    }
+    Ok(contents)
+}
+
+fn write_file_replacements_with_rollback<F>(
+    replacements: &[(PathBuf, Vec<u8>)],
+    mut write_replacement: F,
+) -> Result<()>
+where
+    F: FnMut(&Path, &[u8]) -> Result<()>,
+{
+    let originals = replacements
+        .iter()
+        .map(|(path, _)| {
+            if path.exists() {
+                fs::read(path).map(Some).with_context(|| {
+                    format!("Failed to read {} before replacement", path.display())
+                })
+            } else {
+                Ok(None)
+            }
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    for (index, (path, contents)) in replacements.iter().enumerate() {
+        if let Err(error) = write_replacement(path, contents) {
+            let mut rollback_errors = Vec::new();
+            for rollback_index in (0..=index).rev() {
+                let rollback_path = &replacements[rollback_index].0;
+                let rollback_result = match &originals[rollback_index] {
+                    Some(original) => write_replacement(rollback_path, original),
+                    None if rollback_path.exists() => fs::remove_file(rollback_path)
+                        .with_context(|| format!("Failed to remove {}", rollback_path.display())),
+                    None => Ok(()),
+                };
+                if let Err(rollback_error) = rollback_result {
+                    rollback_errors
+                        .push(format!("{}: {rollback_error:#}", rollback_path.display()));
+                }
+            }
+
+            if rollback_errors.is_empty() {
+                return Err(error);
+            }
+            bail!(
+                "{error:#}; failed to roll back file replacements: {}",
+                rollback_errors.join("; ")
+            );
+        }
+    }
+    Ok(())
+}
+
+fn write_file_bytes_atomically(path: &Path, contents: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create {}", parent.display()))?;
+    }
+    let temp_path = path.with_extension("jsonl.tmp");
     {
         let mut file = fs::File::create(&temp_path)
             .with_context(|| format!("Failed to create {}", temp_path.display()))?;
-        for line in &history_file.lines {
-            if line.removed {
-                continue;
-            }
-            if line.changed {
-                if let Some(value) = &line.value {
-                    writeln!(file, "{}", serde_json::to_string(value)?)?;
-                }
-            } else {
-                writeln!(file, "{}", line.raw)?;
-            }
-        }
+        file.write_all(contents)
+            .with_context(|| format!("Failed to write {}", temp_path.display()))?;
         file.sync_all()?;
     }
-    replace_history_file(&temp_path, &history_file.path)
+    replace_history_file(&temp_path, path)
 }
 
 #[cfg(test)]
@@ -662,6 +918,63 @@ fn append_stats_for_record(path: &Path, record: &HistoryRecord) -> Result<()> {
         return Ok(());
     };
     append_stats_events(path, std::slice::from_ref(&event))
+}
+
+fn prepare_stats_file_for_record(
+    path: &Path,
+    record: &HistoryRecord,
+) -> Result<Option<MutableHistoryFile>> {
+    let replacement = stats_event_from_record(record)
+        .map(serde_json::to_value)
+        .transpose()?;
+    let mut stats_file = if path.exists() {
+        load_mutable_history_files(&[path.to_path_buf()])?
+            .pop()
+            .ok_or_else(|| anyhow!("Failed to load {}", path.display()))?
+    } else {
+        MutableHistoryFile {
+            path: path.to_path_buf(),
+            lines: Vec::new(),
+            changed: false,
+        }
+    };
+
+    let mut found = false;
+    for line in &mut stats_file.lines {
+        let matches = line
+            .value
+            .as_ref()
+            .and_then(|value| value.get("record_id"))
+            .and_then(serde_json::Value::as_str)
+            == Some(record.id.as_str());
+        if !matches {
+            continue;
+        }
+
+        if found || replacement.is_none() {
+            line.removed = true;
+        } else if let (Some(value), Some(replacement)) = (line.value.as_mut(), &replacement) {
+            merge_json_fields(value, replacement)?;
+            line.changed = true;
+        }
+        found = true;
+        stats_file.changed = true;
+    }
+
+    if !found {
+        if let Some(replacement) = replacement {
+            stats_file.lines.push(MutableHistoryLine {
+                raw: String::new(),
+                value: Some(replacement),
+                record: None,
+                removed: false,
+                changed: true,
+            });
+            stats_file.changed = true;
+        }
+    }
+
+    Ok(stats_file.changed.then_some(stats_file))
 }
 
 fn backfill_stats_from_history(stats_path: &Path, history_paths: &[PathBuf]) -> Result<()> {
@@ -995,8 +1308,13 @@ fn replace_history_file(temp_path: &Path, path: &Path) -> Result<()> {
         return Err(err).with_context(|| format!("Failed to replace {}", path.display()));
     }
     if backup_path.exists() {
-        fs::remove_file(&backup_path)
-            .with_context(|| format!("Failed to remove {}", backup_path.display()))?;
+        if let Err(error) = fs::remove_file(&backup_path) {
+            eprintln!(
+                "Warning: replaced {} but failed to remove backup {}: {error}",
+                path.display(),
+                backup_path.display()
+            );
+        }
     }
     Ok(())
 }
@@ -1135,6 +1453,7 @@ mod tests {
             workflow_error: workflow_error.map(str::to_string),
             asr_duration_ms: None,
             service_audio_duration_ms: None,
+            live_asr_diagnostics: None,
             total_duration_ms: 1,
         }
     }
@@ -1191,11 +1510,320 @@ mod tests {
     }
 
     #[test]
+    fn old_history_without_live_asr_diagnostics_remains_readable() {
+        let record = sample_record("legacy", None);
+        let mut value = serde_json::to_value(record).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("live_asr_diagnostics");
+
+        let loaded: HistoryRecord = serde_json::from_value(value).unwrap();
+
+        assert!(loaded.live_asr_diagnostics.is_none());
+    }
+
+    #[test]
     fn history_record_serializes() {
         let record = sample_record("1", None);
         assert!(serde_json::to_string(&record)
             .unwrap()
             .contains("corrected"));
+    }
+
+    #[test]
+    fn load_retryable_requires_failed_record_with_safe_regular_wav() {
+        let base = temp_dir("load-retryable");
+        let history_path = base.join("history.jsonl");
+        let recordings_dir = base.join("recordings");
+        let outside_dir = base.join("outside");
+        fs::create_dir_all(&recordings_dir).unwrap();
+        fs::create_dir_all(&outside_dir).unwrap();
+
+        let safe_path = recordings_dir.join("safe.wav");
+        let missing_path = recordings_dir.join("missing.wav");
+        let directory_path = recordings_dir.join("directory.wav");
+        let wrong_extension_path = recordings_dir.join("recording.mp3");
+        let outside_path = outside_dir.join("outside.wav");
+        fs::write(&safe_path, b"safe wav").unwrap();
+        fs::create_dir_all(&directory_path).unwrap();
+        fs::write(&wrong_extension_path, b"not wav").unwrap();
+        fs::write(&outside_path, b"outside").unwrap();
+
+        let failed_record = |id: &str, audio_path: Option<PathBuf>| {
+            let mut record = sample_record(id, Some("Failed to connect ASR websocket"));
+            record.audio_path = audio_path;
+            record.raw_text.clear();
+            record.corrected_text.clear();
+            record.pasted_text.clear();
+            record
+        };
+        let mut record_with_text = failed_record("has-text", Some(safe_path.clone()));
+        record_with_text.raw_text = "already transcribed".to_string();
+        let mut records = vec![
+            failed_record("safe", Some(recordings_dir.join(".").join("safe.wav"))),
+            sample_record("successful", None),
+            sample_record("blank-error", Some("   ")),
+            failed_record("no-audio", None),
+            failed_record("missing", Some(missing_path)),
+            failed_record("directory", Some(directory_path)),
+            failed_record("wrong-extension", Some(wrong_extension_path)),
+            failed_record("outside", Some(outside_path.clone())),
+            failed_record(
+                "parent-traversal",
+                Some(
+                    recordings_dir
+                        .join("..")
+                        .join("outside")
+                        .join("outside.wav"),
+                ),
+            ),
+            failed_record("relative", Some(PathBuf::from("recordings/safe.wav"))),
+            record_with_text,
+        ];
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let symlink_path = recordings_dir.join("symlink.wav");
+            symlink(&safe_path, &symlink_path).unwrap();
+            records.push(failed_record("symlink", Some(symlink_path)));
+        }
+
+        write_history_lines(
+            &history_path,
+            &records
+                .iter()
+                .map(|record| serde_json::to_string(record).unwrap())
+                .collect::<Vec<_>>(),
+        );
+
+        let loaded = load_retryable_from_paths(
+            std::slice::from_ref(&history_path),
+            std::slice::from_ref(&recordings_dir),
+            " safe ",
+        )
+        .unwrap();
+        assert_eq!(loaded.audio_path, Some(safe_path.canonicalize().unwrap()));
+
+        let mut rejected_ids = vec![
+            "successful",
+            "blank-error",
+            "no-audio",
+            "missing",
+            "directory",
+            "wrong-extension",
+            "outside",
+            "parent-traversal",
+            "relative",
+            "has-text",
+            "unknown",
+            "",
+        ];
+        #[cfg(unix)]
+        rejected_ids.push("symlink");
+        for record_id in rejected_ids {
+            assert!(
+                load_retryable_from_paths(
+                    std::slice::from_ref(&history_path),
+                    std::slice::from_ref(&recordings_dir),
+                    record_id,
+                )
+                .is_err(),
+                "expected {record_id:?} to be rejected"
+            );
+        }
+
+        assert!(outside_path.exists());
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn replace_updates_all_matching_records_and_replaces_stats_without_duplicates() {
+        let base = temp_dir("replace-history-record");
+        let first_history_path = base.join("history.jsonl");
+        let second_history_path = base.join("legacy-history.jsonl");
+        let stats_path = base.join("input_stats.jsonl");
+
+        let first_record = sample_record_with(
+            "retry-me",
+            "2026-07-20T08:00:00Z",
+            "",
+            16_000,
+            Some("Failed to connect ASR websocket"),
+        );
+        let second_record = first_record.clone();
+        let mut first_value = serde_json::to_value(first_record.clone()).unwrap();
+        first_value["future_history_field"] = serde_json::json!({ "source": "current" });
+        let mut second_value = serde_json::to_value(second_record).unwrap();
+        second_value["future_history_field"] = serde_json::json!({ "source": "legacy" });
+        let unrelated_raw = "  {\"future_only\":true}  ".to_string();
+        let malformed_history_raw = "{not valid history json".to_string();
+        write_history_lines(
+            &first_history_path,
+            &[
+                serde_json::to_string(&first_value).unwrap(),
+                unrelated_raw.clone(),
+                malformed_history_raw.clone(),
+            ],
+        );
+        write_history_lines(
+            &second_history_path,
+            &[serde_json::to_string(&second_value).unwrap()],
+        );
+
+        let old_event = InputStatsEvent {
+            schema_version: STATS_SCHEMA_VERSION,
+            record_id: "retry-me".to_string(),
+            date: "2026-07-20".to_string(),
+            character_count: 0,
+            audio_duration_ms: 1_000,
+        };
+        let mut old_event_value = serde_json::to_value(old_event.clone()).unwrap();
+        old_event_value["future_stats_field"] = serde_json::json!("preserved");
+        let duplicate_event = InputStatsEvent {
+            character_count: 999,
+            ..old_event
+        };
+        let malformed_stats_raw = "{not valid stats json".to_string();
+        write_history_lines(
+            &stats_path,
+            &[
+                serde_json::to_string(&old_event_value).unwrap(),
+                serde_json::to_string(&duplicate_event).unwrap(),
+                malformed_stats_raw.clone(),
+            ],
+        );
+
+        let mut replacement = first_record;
+        replacement.raw_text = "你好 world".to_string();
+        replacement.corrected_text = "你好 world".to_string();
+        replacement.pasted_text = "你好 world".to_string();
+        replacement.audio_sample_count = 32_000;
+        replacement.workflow_error = None;
+        replace_in_paths(
+            &[first_history_path.clone(), second_history_path.clone()],
+            &stats_path,
+            &replacement,
+        )
+        .unwrap();
+
+        for (path, expected_source) in [
+            (&first_history_path, "current"),
+            (&second_history_path, "legacy"),
+        ] {
+            let matching = fs::read_to_string(path)
+                .unwrap()
+                .lines()
+                .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                .find(|value| value["id"] == "retry-me")
+                .unwrap();
+            assert_eq!(matching["raw_text"], "你好 world");
+            assert!(matching["workflow_error"].is_null());
+            assert_eq!(
+                matching["future_history_field"],
+                serde_json::json!({ "source": expected_source })
+            );
+        }
+        let first_history_contents = fs::read_to_string(&first_history_path).unwrap();
+        assert!(first_history_contents
+            .lines()
+            .any(|line| line == unrelated_raw));
+        assert!(first_history_contents
+            .lines()
+            .any(|line| line == malformed_history_raw));
+
+        let stats_contents = fs::read_to_string(&stats_path).unwrap();
+        assert!(stats_contents
+            .lines()
+            .any(|line| line == malformed_stats_raw));
+        let matching_events = stats_contents
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter(|value| value["record_id"] == "retry-me")
+            .collect::<Vec<_>>();
+        assert_eq!(matching_events.len(), 1);
+        assert_eq!(matching_events[0]["character_count"], 3);
+        assert_eq!(matching_events[0]["audio_duration_ms"], 2_000);
+        assert_eq!(matching_events[0]["future_stats_field"], "preserved");
+
+        let stats = load_stats_from_sources(
+            &stats_path,
+            &[first_history_path.clone(), second_history_path.clone()],
+        )
+        .unwrap();
+        assert_eq!(stats.total_character_count, 3);
+        assert_eq!(stats.total_audio_duration_ms, 2_000);
+        assert_eq!(
+            stats.daily.iter().map(|day| day.record_count).sum::<u64>(),
+            1
+        );
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn replace_appends_missing_stats_event_and_preserves_malformed_line() {
+        let base = temp_dir("replace-appends-stats");
+        let history_path = base.join("history.jsonl");
+        let stats_path = base.join("input_stats.jsonl");
+        let malformed_stats_raw = "{malformed stats".to_string();
+        let failed_record = sample_record("retry-me", Some("network failure"));
+        write_history_lines(
+            &history_path,
+            &[serde_json::to_string(&failed_record).unwrap()],
+        );
+        write_history_lines(&stats_path, std::slice::from_ref(&malformed_stats_raw));
+
+        let mut replacement = failed_record;
+        replacement.pasted_text = "retry works".to_string();
+        replacement.workflow_error = None;
+        replace_in_paths(
+            std::slice::from_ref(&history_path),
+            &stats_path,
+            &replacement,
+        )
+        .unwrap();
+
+        let contents = fs::read_to_string(&stats_path).unwrap();
+        assert_eq!(contents.lines().next(), Some(malformed_stats_raw.as_str()));
+        assert_eq!(
+            read_stats_events_in_file_order(&stats_path)
+                .unwrap()
+                .iter()
+                .filter(|event| event.record_id == "retry-me")
+                .count(),
+            1
+        );
+        let _ = fs::remove_dir_all(base);
+    }
+
+    #[test]
+    fn multi_file_replacement_rolls_back_already_replaced_files_on_failure() {
+        let base = temp_dir("replacement-rollback");
+        let first_path = base.join("input_stats.jsonl");
+        let second_path = base.join("history.jsonl");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(&first_path, b"old stats\n").unwrap();
+        fs::write(&second_path, b"old history\n").unwrap();
+        let replacements = vec![
+            (first_path.clone(), b"new stats\n".to_vec()),
+            (second_path.clone(), b"new history\n".to_vec()),
+        ];
+        let mut injected_failure = false;
+
+        let result =
+            write_file_replacements_with_rollback(&replacements, |path: &Path, contents: &[u8]| {
+                if path == second_path && !injected_failure {
+                    injected_failure = true;
+                    bail!("injected replacement failure");
+                }
+                write_file_bytes_atomically(path, contents)
+            });
+
+        assert!(result.is_err());
+        assert_eq!(fs::read(&first_path).unwrap(), b"old stats\n");
+        assert_eq!(fs::read(&second_path).unwrap(), b"old history\n");
+        let _ = fs::remove_dir_all(base);
     }
 
     #[test]

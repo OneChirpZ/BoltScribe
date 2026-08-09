@@ -2,7 +2,15 @@ import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { cleanupCutoffTimestamp } from "../domain/historyMaintenance";
-import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportResult, DataDirInfo, DeleteHistoryResult, HistoryRecord, InputStats, RecordingCleanupPreview, RecordingCleanupResult, RecordingCleanupUnit, WorkflowStatus } from "../types";
+import {
+  defaultVadConfirmationMs,
+  defaultVadNoiseMarginDb,
+  defaultVadNoiseWindowMs,
+  normalizeVadConfirmationMs,
+  normalizeVadNoiseMargin,
+  normalizeVadNoiseWindowMs,
+} from "../domain/vadSettings";
+import type { AppConfig, AudioInputDevice, AudioLevelSample, AudioOutputDevice, ConfigImportResult, DataDirInfo, DeleteHistoryResult, HistoryRecord, InputStats, RecordingCleanupPreview, RecordingCleanupResult, RecordingCleanupUnit, VadTestStatus, WorkflowStatus } from "../types";
 
 export function loadConfig() {
   if (browserPreviewEnabled()) {
@@ -59,6 +67,13 @@ export function loadAudioOutputDevices() {
   return invoke<AudioOutputDevice[]>("load_audio_output_devices");
 }
 
+export function restartSystemAudioService() {
+  if (browserPreviewEnabled()) {
+    return Promise.resolve(true);
+  }
+  return invoke<boolean>("restart_system_audio_service");
+}
+
 export function getAppVersion() {
   if (browserPreviewEnabled()) {
     return Promise.resolve(__APP_VERSION__);
@@ -92,6 +107,48 @@ export function deleteHistoryRecord(id: string) {
     });
   }
   return invoke<DeleteHistoryResult>("delete_history_record", { id });
+}
+
+export function retryHistoryRecord(id: string) {
+  if (browserPreviewEnabled()) {
+    const index = previewHistory.findIndex((record) => record.id === id);
+    const record = previewHistory[index];
+    if (!record) {
+      return Promise.reject(new Error("History record not found"));
+    }
+    if (
+      !record.workflow_error
+      || !record.audio_path
+      || record.raw_text.trim() !== ""
+      || record.corrected_text.trim() !== ""
+      || record.pasted_text.trim() !== ""
+    ) {
+      return Promise.reject(new Error("This history record is not eligible for retry"));
+    }
+
+    return new Promise<HistoryRecord>((resolve) => {
+      window.setTimeout(() => {
+        const rawText = "这是一段因为网络连接中断而未能完成识别的录音，现在已经通过手动重试成功转写。";
+        const correctedText = "这是一段因网络连接中断而未能完成识别的录音，现在已通过手动重试成功转写。";
+        const updatedRecord: HistoryRecord = {
+          ...record,
+          asr_task_id: `preview-retry-${record.id}`,
+          raw_text: rawText,
+          corrected_text: correctedText,
+          pasted_text: "",
+          correction_error: null,
+          injection_error: null,
+          workflow_error: null,
+          asr_duration_ms: 860,
+          service_audio_duration_ms: 8_400,
+          total_duration_ms: 1_240,
+        };
+        previewHistory[index] = updatedRecord;
+        resolve(clonePreview(updatedRecord));
+      }, 900);
+    });
+  }
+  return invoke<HistoryRecord>("retry_history_record", { id });
 }
 
 export function cleanupRecordingFiles(amount: number, unit: RecordingCleanupUnit) {
@@ -148,8 +205,8 @@ export function toggleRecording() {
   if (browserPreviewEnabled()) {
     const revision = previewStatus.revision + 1;
     previewStatus = previewStatus.mode === "recording"
-      ? { mode: "idle", message: "就绪", current_audio_path: null, last_record_id: null, revision }
-      : { mode: "recording", message: "正在录音，再次按快捷键停止", current_audio_path: null, last_record_id: null, revision };
+      ? { mode: "idle", stage: "idle", message: "就绪", current_audio_path: null, last_record_id: null, revision }
+      : { mode: "recording", stage: "recording", message: "正在录音，再次按快捷键停止", current_audio_path: null, last_record_id: null, revision };
     return Promise.resolve(clonePreview(previewStatus));
   }
   return invoke<WorkflowStatus>("toggle_recording");
@@ -157,10 +214,88 @@ export function toggleRecording() {
 
 export function cancelCurrentWorkflow() {
   if (browserPreviewEnabled()) {
-    previewStatus = { mode: "idle", message: "已取消本次转写", current_audio_path: null, last_record_id: null, revision: previewStatus.revision + 1 };
+    previewStatus = { mode: "idle", stage: "idle", message: "已取消本次转写", current_audio_path: null, last_record_id: null, revision: previewStatus.revision + 1 };
     return Promise.resolve(clonePreview(previewStatus));
   }
   return invoke<WorkflowStatus>("cancel_current_workflow");
+}
+
+export function startVadTest(audioConfig: AppConfig["audio"]) {
+  if (browserPreviewEnabled()) {
+    const noiseMarginDb = normalizeVadNoiseMargin(
+      audioConfig.voice_activity_detection.noise_margin_db ?? defaultVadNoiseMarginDb,
+    );
+    const confirmationMs = normalizeVadConfirmationMs(
+      audioConfig.voice_activity_detection.confirmation_ms ?? defaultVadConfirmationMs,
+    );
+    const noiseWindowMs = normalizeVadNoiseWindowMs(
+      audioConfig.voice_activity_detection.noise_window_ms ?? defaultVadNoiseWindowMs,
+    );
+    previewVadTestStatus = {
+      ...previewVadTestStatus,
+      mode: "listening",
+      raw_voice_active: false,
+      voice_active: false,
+      noise_calibrated: true,
+      noise_floor: -52,
+      trigger_threshold: Math.min(-1, -52 + noiseMarginDb),
+      trigger_progress: 0,
+      noise_margin_db: noiseMarginDb,
+      confirmation_ms: confirmationMs,
+      noise_window_ms: noiseWindowMs,
+      revision: previewVadTestStatus.revision + 1,
+    };
+    return Promise.resolve(clonePreview(previewVadTestStatus));
+  }
+  return invoke<VadTestStatus>("start_vad_test", { audioConfig });
+}
+
+export function updateVadTestSettings(noiseMarginDb: number, confirmationMs: number, noiseWindowMs: number) {
+  if (browserPreviewEnabled()) {
+    const normalizedMargin = normalizeVadNoiseMargin(noiseMarginDb);
+    const normalizedConfirmation = normalizeVadConfirmationMs(confirmationMs);
+    const normalizedNoiseWindow = normalizeVadNoiseWindowMs(noiseWindowMs);
+    previewVadTestStatus = {
+      ...previewVadTestStatus,
+      noise_margin_db: normalizedMargin,
+      confirmation_ms: normalizedConfirmation,
+      noise_window_ms: normalizedNoiseWindow,
+      trigger_threshold: Math.min(-1, previewVadTestStatus.noise_floor + normalizedMargin),
+      trigger_progress: 0,
+      revision: previewVadTestStatus.revision + 1,
+    };
+    return Promise.resolve(clonePreview(previewVadTestStatus));
+  }
+  return invoke<VadTestStatus>("update_vad_test_settings", { noiseMarginDb, confirmationMs, noiseWindowMs });
+}
+
+export function stopVadTest() {
+  if (browserPreviewEnabled()) {
+    previewVadTestStatus = {
+      ...previewVadTestStatus,
+      mode: "idle",
+      raw_voice_active: false,
+      voice_active: false,
+      trigger_progress: 0,
+      revision: previewVadTestStatus.revision + 1,
+    };
+    return Promise.resolve(clonePreview(previewVadTestStatus));
+  }
+  return invoke<VadTestStatus>("stop_vad_test");
+}
+
+export function getVadTestStatus() {
+  if (browserPreviewEnabled()) {
+    return Promise.resolve(clonePreview(previewVadTestStatus));
+  }
+  return invoke<VadTestStatus>("get_vad_test_status");
+}
+
+export function listenVadTestStatus(handler: (status: VadTestStatus) => void) {
+  if (browserPreviewEnabled()) {
+    return Promise.resolve(() => undefined);
+  }
+  return listen<VadTestStatus>("vad-test://status", (event) => handler(event.payload));
 }
 
 export function openAppDir() {
@@ -291,12 +426,24 @@ export function listenWorkflowStatus(handler: (status: WorkflowStatus) => void) 
   return listen<WorkflowStatus>("workflow://status", (event) => handler(event.payload));
 }
 
-export function listenAudioLevel(handler: (level: number) => void) {
+export function listenAudioLevel(handler: (sample: AudioLevelSample) => void) {
   if (browserPreviewEnabled()) {
-    handler(0);
-    return Promise.resolve(() => undefined);
+    const recordingRevision = previewStatus.mode === "recording" ? previewStatus.revision : 0;
+    if (recordingRevision === 0) {
+      handler({ level: 0, recording_revision: 0 });
+      return Promise.resolve(() => undefined);
+    }
+    const levels = [0.2, 0.4, 0.6, 0.7, 0.8, 0.9, 0.6, 0.4];
+    let index = 0;
+    const emitNextLevel = () => {
+      handler({ level: levels[index % levels.length], recording_revision: recordingRevision });
+      index += 1;
+    };
+    emitNextLevel();
+    const timer = window.setInterval(emitNextLevel, 100);
+    return Promise.resolve(() => window.clearInterval(timer));
   }
-  return listen<number>("audio://level", (event) => handler(event.payload));
+  return listen<AudioLevelSample>("audio://level", (event) => handler(event.payload));
 }
 
 export function listenHistoryUpdated(handler: () => void) {
@@ -328,13 +475,51 @@ function clonePreview<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-let previewStatus: WorkflowStatus = {
-  mode: "idle",
-  message: "就绪",
-  current_audio_path: null,
-  last_record_id: null,
-  revision: 0,
-};
+let previewStatus: WorkflowStatus = initialBrowserPreviewStatus();
+
+function initialBrowserPreviewStatus(): WorkflowStatus {
+  const mode = typeof window === "undefined"
+    ? "idle"
+    : new URL(window.location.href).searchParams.get("preview-status");
+  if (mode === "recording") {
+    return {
+      mode,
+      stage: "recording",
+      message: "正在录音，再次按快捷键停止",
+      current_audio_path: null,
+      last_record_id: null,
+      revision: 1,
+    };
+  }
+  if (mode === "waiting_for_speech") {
+    return {
+      mode: "recording",
+      stage: "waiting_for_speech",
+      message: "等待说话",
+      current_audio_path: null,
+      last_record_id: null,
+      revision: 1,
+    };
+  }
+  if (mode === "file_asr_fallback") {
+    return {
+      mode: "processing",
+      stage: "file_asr_fallback",
+      message: "正在回退到录音文件识别",
+      current_audio_path: "/preview/recordings/fallback.wav",
+      last_record_id: null,
+      revision: 1,
+    };
+  }
+  return {
+    mode: "idle",
+    stage: "idle",
+    message: "就绪",
+    current_audio_path: null,
+    last_record_id: null,
+    revision: 0,
+  };
+}
 
 let previewConfig: AppConfig = {
   hotkey: "PageUp",
@@ -353,6 +538,13 @@ let previewConfig: AppConfig = {
       device_name_whitelist: ["Audient iD4"],
       sound_source_hotkey_fallback_enabled: false,
       sound_source_toggle_mute_hotkey: "Cmd+Opt+Ctrl+A",
+    },
+    voice_activity_detection: {
+      enabled: true,
+      noise_margin_db: 12,
+      confirmation_ms: 480,
+      noise_window_ms: 2000,
+      initial_silence_timeout_secs: 15,
     },
   },
   asr: {
@@ -417,6 +609,24 @@ let previewConfig: AppConfig = {
   },
 };
 
+let previewVadTestStatus: VadTestStatus = {
+  mode: "idle",
+  raw_voice_active: false,
+  voice_active: false,
+  level: -96,
+  noise_calibrated: false,
+  noise_floor: -96,
+  trigger_threshold: -96,
+  trigger_progress: 0,
+  elapsed_ms: 0,
+  remaining_ms: 60_000,
+  noise_margin_db: 12,
+  confirmation_ms: 480,
+  noise_window_ms: 2000,
+  revision: 0,
+  error: null,
+};
+
 const previewDefaultDataDirInfo: DataDirInfo = {
   path: "C:\\Users\\Preview\\AppData\\Roaming\\BoltScribe",
   default_path: "C:\\Users\\Preview\\AppData\\Roaming\\BoltScribe",
@@ -441,6 +651,23 @@ const previewAudioOutputDevices: AudioOutputDevice[] = [
 const previewRecordingBytes = 256 * 1024;
 
 const previewHistory: HistoryRecord[] = [
+  {
+    ...previewHistoryRecord("retry-failure", "2026-07-20T16:39:29+08:00", ""),
+    raw_text: "",
+    corrected_text: "",
+    pasted_text: "",
+    workflow_error: "Failed to connect Volcengine ASR websocket",
+    asr_duration_ms: 30,
+    service_audio_duration_ms: null,
+    live_asr_diagnostics: {
+      connection_attempts: 5,
+      first_connected_after_ms: null,
+      peak_buffered_bytes: 384000,
+      last_error_category: "timeout",
+      fallback_reason: "connection_attempts_exhausted",
+    },
+    total_duration_ms: 30,
+  },
   previewHistoryRecord("1", "2026-05-20T00:50:21+08:00", "在你修改这样的前端展示时，不需要每次重复打包，然后让我来帮你检查，而是你直接把这个前端在浏览器等内容当中渲染出来，直接你来做截图和视觉检查。"),
   previewHistoryRecord("2", "2026-05-20T00:49:16+08:00", "增加最小宽度限制，避免窗口被缩得太小，导致内容挤占和排版错乱。"),
   previewHistoryRecord("3", "2026-05-20T00:48:21+08:00", "优化语音输入浮窗大小滑动条和快捷键 Command 按钮的排版。"),

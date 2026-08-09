@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, DataDirInfo, HistoryRecord, InputStats, RecordingCleanupUnit, WorkflowStatus } from "../types";
+import type { AppConfig, AudioInputDevice, AudioOutputDevice, ConfigImportReport, DataDirInfo, HistoryRecord, InputStats, RecordingCleanupUnit, VadTestStatus, WorkflowStatus } from "../types";
 import type { CorrectionSection, Page } from "../domain/navigation";
 import type { PermissionRequestState } from "../domain/permissions";
 import { appLanguage, translations } from "../domain/i18n";
@@ -14,7 +14,7 @@ import HistoryRecordsPage from "../pages/HistoryRecordsPage";
 import ModelsPage from "../pages/ModelsPage";
 import CorrectionPage from "../pages/CorrectionPage";
 import SettingsPage from "../pages/SettingsPage";
-import { accessibilityPermissionGranted, applyFnTrigger, chooseDataDir, cleanupRecordingFiles as cleanupRecordingFilesCommand, copyTextToClipboard, deleteHistoryRecord as deleteHistoryRecordCommand, exportConfig as exportConfigCommand, getAppVersion, getDataDir, getStatus, hideMainWindow, importConfig as importConfigCommand, inputMonitoringPermissionGranted, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenWorkflowStatus, loadAudioInputDevices, loadAudioOutputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, openGitHubRepository, openInputMonitoringSettings, previewRecordingCleanup as previewRecordingCleanupCommand, requestAccessibilityPermission, requestInputMonitoringPermission as requestInputMonitoringPermissionCommand, requestMicrophonePermission as requestMicrophonePermissionCommand, resetDataDir as resetDataDirCommand, saveConfig, setDataDir as setDataDirCommand, toggleRecording as toggleRecordingCommand } from "./tauriApi";
+import { accessibilityPermissionGranted, applyFnTrigger, cancelCurrentWorkflow as cancelCurrentWorkflowCommand, chooseDataDir, cleanupRecordingFiles as cleanupRecordingFilesCommand, copyTextToClipboard, deleteHistoryRecord as deleteHistoryRecordCommand, exportConfig as exportConfigCommand, getAppVersion, getDataDir, getStatus, getVadTestStatus, hideMainWindow, importConfig as importConfigCommand, inputMonitoringPermissionGranted, listenConfigCloseRequested, listenConfigUpdated, listenHistoryUpdated, listenVadTestStatus, listenWorkflowStatus, loadAudioInputDevices, loadAudioOutputDevices, loadConfig, loadHistory, loadStats, openAccessibilitySettings, openAppDir, openGitHubRepository, openInputMonitoringSettings, previewRecordingCleanup as previewRecordingCleanupCommand, requestAccessibilityPermission, requestInputMonitoringPermission as requestInputMonitoringPermissionCommand, requestMicrophonePermission as requestMicrophonePermissionCommand, resetDataDir as resetDataDirCommand, restartSystemAudioService as restartSystemAudioServiceCommand, retryHistoryRecord as retryHistoryRecordCommand, saveConfig, setDataDir as setDataDirCommand, startVadTest as startVadTestCommand, stopVadTest as stopVadTestCommand, toggleRecording as toggleRecordingCommand, updateVadTestSettings as updateVadTestSettingsCommand } from "./tauriApi";
 
 const appIconUrl = new URL("../assets/app-icon.png", import.meta.url).href;
 const recentHistoryLimit = 6;
@@ -31,12 +31,31 @@ type PendingConfigAction =
   | { kind: "close" };
 
 export default function MainApp() {
+  const vadSettingsRequestRef = useRef(0);
+  const vadTestStartingRef = useRef(false);
   const needsAccessibilityPermission = requiresAccessibilityPermission();
   const [page, setPage] = useState<Page>("home");
   const [correctionSection, setCorrectionSection] = useState<CorrectionSection>("requirements");
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [savedConfig, setSavedConfig] = useState<AppConfig | null>(null);
   const [status, setStatus] = useState<WorkflowStatus>(emptyStatus);
+  const [vadTestStatus, setVadTestStatus] = useState<VadTestStatus>({
+    mode: "idle",
+    raw_voice_active: false,
+    voice_active: false,
+    level: -96,
+    noise_calibrated: false,
+    noise_floor: -96,
+    trigger_threshold: -96,
+    trigger_progress: 0,
+    elapsed_ms: 0,
+    remaining_ms: 60_000,
+    noise_margin_db: 12,
+    confirmation_ms: 480,
+    noise_window_ms: 2000,
+    revision: 0,
+    error: null,
+  });
   const [history, setHistory] = useState<HistoryRecord[]>([]);
   const [stats, setStats] = useState<InputStats | null>(null);
   const [dataDir, setDataDirInfo] = useState<DataDirInfo | null>(null);
@@ -44,6 +63,7 @@ export default function MainApp() {
   const [audioOutputDevices, setAudioOutputDevices] = useState<AudioOutputDevice[]>([]);
   const [audioInputDevicesChecked, setAudioInputDevicesChecked] = useState(false);
   const [audioDevicesRefreshing, setAudioDevicesRefreshing] = useState(false);
+  const [audioServiceRestarting, setAudioServiceRestarting] = useState(false);
   const [historyPageRecords, setHistoryPageRecords] = useState<HistoryRecord[]>([]);
   const [historyPageIndex, setHistoryPageIndex] = useState(0);
   const [historyHasOlder, setHistoryHasOlder] = useState(false);
@@ -117,6 +137,74 @@ export default function MainApp() {
     }
   }
 
+  async function restartSystemAudioService() {
+    setAudioServiceRestarting(true);
+    setBusy(true);
+    try {
+      const restarted = await restartSystemAudioServiceCommand();
+      if (!restarted) {
+        setNotice(text.notices.audioServiceRestartCancelled);
+        return;
+      }
+      try {
+        await refreshAudioDevices();
+        setNotice(text.notices.audioServiceRestarted);
+      } catch (error) {
+        setNotice(text.notices.audioServiceRestartedRefreshFailed(String(error)));
+      }
+    } catch (error) {
+      setNotice(text.notices.audioServiceRestartFailed(String(error)));
+    } finally {
+      setAudioServiceRestarting(false);
+      setBusy(false);
+    }
+  }
+
+  async function startVadTest() {
+    if (!config || busy || status.mode !== "idle" || vadTestStartingRef.current) {
+      return;
+    }
+    vadTestStartingRef.current = true;
+    const request = ++vadSettingsRequestRef.current;
+    try {
+      const nextStatus = await startVadTestCommand(config.audio);
+      if (request === vadSettingsRequestRef.current) {
+        setVadTestStatus((current) => nextStatus.revision > current.revision ? nextStatus : current);
+      }
+    } catch (error) {
+      if (request === vadSettingsRequestRef.current) {
+        setVadTestStatus((current) => ({ ...current, mode: "error", error: String(error), revision: current.revision + 1 }));
+        setNotice(String(error));
+      }
+    } finally {
+      vadTestStartingRef.current = false;
+    }
+  }
+
+  async function updateVadTestSettings(noiseMarginDb: number, confirmationMs: number, noiseWindowMs: number) {
+    const request = ++vadSettingsRequestRef.current;
+    try {
+      const nextStatus = await updateVadTestSettingsCommand(noiseMarginDb, confirmationMs, noiseWindowMs);
+      if (request === vadSettingsRequestRef.current) {
+        setVadTestStatus((current) => nextStatus.revision > current.revision ? nextStatus : current);
+      }
+    } catch (error) {
+      if (request === vadSettingsRequestRef.current) {
+        setNotice(String(error));
+      }
+    }
+  }
+
+  async function stopVadTest() {
+    vadSettingsRequestRef.current += 1;
+    try {
+      const nextStatus = await stopVadTestCommand();
+      setVadTestStatus((current) => nextStatus.revision > current.revision ? nextStatus : current);
+    } catch (error) {
+      setNotice(String(error));
+    }
+  }
+
   async function loadHistoryPage(pageIndex: number) {
     const records = await loadHistory(historyPageSize + 1, pageIndex * historyPageSize);
     const pageRecords = records.slice(0, historyPageSize);
@@ -180,6 +268,12 @@ export default function MainApp() {
       onStatus: (nextStatus) => setStatus((current) => latestWorkflowStatus(current, nextStatus)),
       onError: (error) => setNotice(String(error)),
     });
+    const unlistenVad = listenVadTestStatus((nextStatus) => {
+      setVadTestStatus((current) => nextStatus.revision > current.revision ? nextStatus : current);
+    });
+    getVadTestStatus()
+      .then((nextStatus) => setVadTestStatus((current) => nextStatus.revision > current.revision ? nextStatus : current))
+      .catch(() => undefined);
     getAppVersion().then(setAppVersion).catch(() => setAppVersion(""));
     refreshAll().catch((error) => setNotice(String(error)));
     refreshAudioDevices().catch((error) => setNotice(String(error)));
@@ -203,6 +297,7 @@ export default function MainApp() {
       unlistenHistory.then((fn) => fn());
       unlistenConfig.then((fn) => fn());
       unlistenClose.then((fn) => fn());
+      unlistenVad.then((fn) => fn());
     };
   }, []);
 
@@ -407,6 +502,18 @@ export default function MainApp() {
     }
   }
 
+  async function cancelWorkflow() {
+    setBusy(true);
+    try {
+      const nextStatus = await cancelCurrentWorkflowCommand();
+      setStatus((current) => latestWorkflowStatus(current, nextStatus));
+    } catch (error) {
+      setNotice(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function refreshAccessibility() {
     const granted = await accessibilityPermissionGranted();
     setAccessibilityGranted(granted);
@@ -544,6 +651,22 @@ export default function MainApp() {
         ));
     } catch (error) {
       setNotice(String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryHistory(record: HistoryRecord) {
+    setBusy(true);
+    try {
+      const updatedRecord = await retryHistoryRecordCommand(record.id);
+      setHistory((records) => replaceHistoryRecord(records, updatedRecord));
+      setHistoryPageRecords((records) => replaceHistoryRecord(records, updatedRecord));
+      await refreshStats().catch(() => undefined);
+      setNotice(text.notices.historyRetrySucceeded);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setNotice(text.notices.historyRetryFailed(message));
     } finally {
       setBusy(false);
     }
@@ -796,6 +919,7 @@ export default function MainApp() {
               hasInputDevice={audioDevices.length > 0}
               audioDevicesRefreshing={audioDevicesRefreshing}
               onToggle={toggleRecording}
+              onCancel={cancelWorkflow}
               onOpenPermissionGuide={() => setShowPermissionGuide(true)}
               onRefreshAudioDevices={() => { void refreshAudioDevices().catch((error) => setNotice(String(error))); }}
               onRefreshHistory={refreshHistory}
@@ -803,7 +927,9 @@ export default function MainApp() {
               onOpenModels={() => requestPageChange("models")}
               onOpenCorrectionSection={requestCorrectionSection}
               onCopyHistory={copyHistoryText}
+              onRetryHistory={retryHistory}
               onDeleteHistory={deleteHistory}
+              canRetryHistory={canMutateHistory}
               canDeleteHistory={canMutateHistory}
               language={language}
               text={text}
@@ -819,7 +945,9 @@ export default function MainApp() {
               onPreviousPage={() => changeHistoryPage(Math.max(0, historyPageIndex - 1))}
               onNextPage={() => changeHistoryPage(historyPageIndex + 1)}
               onCopyHistory={copyHistoryText}
+              onRetryHistory={retryHistory}
               onDeleteHistory={deleteHistory}
+              canRetryHistory={canMutateHistory}
               canDeleteHistory={canMutateHistory}
               text={text}
             />
@@ -837,6 +965,7 @@ export default function MainApp() {
               audioOutputDevices={audioOutputDevices}
               dataDir={dataDir}
               audioDevicesRefreshing={audioDevicesRefreshing}
+              audioServiceRestarting={audioServiceRestarting}
               onChange={changeConfig}
               onExportConfig={() => { void exportCurrentConfig(); }}
               onImportConfig={(file) => { void importConfigFile(file); }}
@@ -846,6 +975,13 @@ export default function MainApp() {
               onCleanupRecordingFiles={cleanupOldRecordingFiles}
               onPreviewRecordingCleanup={previewRecordingCleanupCommand}
               onRefreshAudioDevices={() => { void refreshAudioDevices().catch((error) => setNotice(String(error))); }}
+              onRestartAudioService={() => { void restartSystemAudioService(); }}
+              vadTestStatus={vadTestStatus}
+              onStartVadTest={() => { void startVadTest(); }}
+              onUpdateVadTestSettings={(noiseMarginDb, confirmationMs, noiseWindowMs) => {
+                void updateVadTestSettings(noiseMarginDb, confirmationMs, noiseWindowMs);
+              }}
+              onStopVadTest={() => { void stopVadTest(); }}
               inputMonitoringGranted={inputMonitoringGranted}
               inputMonitoringPermission={inputMonitoringPermission}
               onRefreshInputMonitoring={() => { void refreshInputMonitoring().catch((error) => setNotice(String(error))); }}
@@ -855,6 +991,7 @@ export default function MainApp() {
               canSave={canSave}
               canChangeDataDir={canChangeDataDir}
               canCleanupRecordings={canChangeDataDir}
+              canRestartAudioService={canMutateHistory}
               text={text}
             />
           ) : null}
@@ -942,4 +1079,8 @@ function isConfigDirty(config: AppConfig | null, savedConfig: AppConfig | null) 
     return false;
   }
   return JSON.stringify(config) !== JSON.stringify(savedConfig);
+}
+
+function replaceHistoryRecord(records: HistoryRecord[], updatedRecord: HistoryRecord) {
+  return records.map((record) => record.id === updatedRecord.id ? updatedRecord : record);
 }

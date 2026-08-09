@@ -4,8 +4,10 @@ import type { WorkflowStatus } from "../src/types.ts";
 import { latestWorkflowStatus, subscribeToWorkflowStatus } from "../src/domain/workflow.ts";
 
 function status(mode: WorkflowStatus["mode"], revision: number): WorkflowStatus {
+  const stage = mode === "starting" ? "starting" : mode === "recording" ? "recording" : mode === "error" ? "error" : "idle";
   return {
     mode,
+    stage,
     message: mode,
     current_audio_path: null,
     last_record_id: null,

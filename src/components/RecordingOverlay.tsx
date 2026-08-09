@@ -1,13 +1,15 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import type { WorkflowStatus } from "../types";
 import type { TextBundle } from "../domain/i18n";
-import { appendAudioLevelSample, createAudioLevelHistory } from "../domain/audioLevel";
-import { maxRecordingOverlayScale, minRecordingOverlayScale, recordingOverlayLabel, recordingOverlayPhase } from "../domain/overlay";
+import { createAudioLevelHistoryState, updateAudioLevelHistory } from "../domain/audioLevel";
+import { maxRecordingOverlayScale, minRecordingOverlayScale, recordingOverlayLabel, recordingOverlayPhase, recordingOverlayTransition } from "../domain/overlay";
 import { clampNumber } from "../domain/numbers";
+import AudioWaveform from "./AudioWaveform";
 
 export default function RecordingOverlay({
   status,
   audioLevel,
+  audioLevelRevision,
   audioLevelSequence,
   baseWidth,
   scale,
@@ -16,21 +18,24 @@ export default function RecordingOverlay({
 }: {
   status: WorkflowStatus;
   audioLevel: number;
+  audioLevelRevision: number;
   audioLevelSequence: number;
   baseWidth: number;
   scale: number;
   onCancel?: () => void;
   text: TextBundle;
 }) {
-  const [audioLevelHistory, setAudioLevelHistory] = useState(createAudioLevelHistory);
+  const [audioLevelHistory, setAudioLevelHistory] = useState(() => createAudioLevelHistoryState(audioLevelSequence));
 
   useEffect(() => {
-    if (status.mode === "recording") {
-      setAudioLevelHistory((history) => appendAudioLevelSample(history, audioLevel));
-    } else {
-      setAudioLevelHistory(createAudioLevelHistory());
-    }
-  }, [audioLevel, audioLevelSequence, status.mode]);
+    setAudioLevelHistory((history) => updateAudioLevelHistory(history, {
+      recording: status.mode === "recording",
+      workflowRevision: status.revision,
+      sampleRevision: audioLevelRevision,
+      sequence: audioLevelSequence,
+      level: audioLevel,
+    }));
+  }, [audioLevel, audioLevelRevision, audioLevelSequence, status.mode, status.revision]);
 
   if (status.mode !== "starting" && status.mode !== "recording" && status.mode !== "processing" && status.mode !== "error") {
     return null;
@@ -38,11 +43,7 @@ export default function RecordingOverlay({
 
   const phase = recordingOverlayPhase(status);
   const label = recordingOverlayLabel(status, text);
-  const transitionState = status.mode === "starting"
-    ? "overlay-transition-starting"
-    : status.mode === "recording"
-      ? "overlay-transition-listening"
-      : "overlay-transition-status";
+  const transitionState = recordingOverlayTransition(status);
   const canCancel = Boolean(onCancel) && status.mode !== "starting";
   const style = {
     "--recording-overlay-width": `${baseWidth}px`,
@@ -54,21 +55,13 @@ export default function RecordingOverlay({
       className={`recording-overlay ${phase} ${transitionState}`}
       style={style}
     >
-      <span className="overlay-label" role="status" aria-live="polite" aria-atomic="true">{label}</span>
+      <span className="overlay-label" role="status" aria-live="polite" aria-atomic="true">
+        <span key={`${status.stage}-${label}`} className="overlay-label-text">{label}</span>
+      </span>
       <i aria-hidden="true" />
       <div className="voice-visual" aria-hidden="true">
         <div className="startup-spinner" />
-        <div className="voice-bars">
-          {audioLevelHistory.map((level, index) => (
-            <b
-              key={index}
-              style={{
-                height: `${4 + level * 38}px`,
-                opacity: 0.5 + level * 0.5,
-              } as CSSProperties}
-            />
-          ))}
-        </div>
+        <AudioWaveform samples={audioLevelHistory.samples} />
       </div>
       {onCancel ? (
         <button

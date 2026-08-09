@@ -21,7 +21,17 @@
   user-select: none;
   transform: translateX(-50%);
   transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
-  animation: overlay-enter 160ms ease-out both;
+  animation: overlay-enter 160ms ease-out;
+}
+
+.recording-overlay::after {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgba(153, 255, 190, 0.5), inset 0 0 22px rgba(92, 235, 148, 0.18);
+  content: "";
+  opacity: 0;
+  pointer-events: none;
 }
 
 .overlay-shell {
@@ -102,6 +112,7 @@
 }
 
 .overlay-label {
+  display: grid;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -111,6 +122,11 @@
   letter-spacing: 0;
   text-align: center;
   white-space: nowrap;
+}
+
+.overlay-label-text {
+  grid-area: 1 / 1;
+  animation: overlay-label-change 220ms cubic-bezier(0.2, 0.72, 0.2, 1);
 }
 
 .recording-overlay i {
@@ -123,6 +139,8 @@
   position: relative;
   width: 68px;
   height: 42px;
+  overflow: hidden;
+  contain: paint;
 }
 
 .startup-spinner {
@@ -148,9 +166,7 @@
 .voice-bars {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
-  gap: 2px;
+  display: block;
   width: 68px;
   height: 42px;
   opacity: 1;
@@ -168,39 +184,88 @@
   transform: scale(0.82);
 }
 
-.voice-bars b {
-  display: block;
-  width: 3px;
-  height: 4px;
-  opacity: 0.5;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.86);
-  transition: height 70ms linear, opacity 70ms linear, background 140ms ease;
+.overlay-transition-waiting .voice-bars {
+  opacity: 0.76;
+  transform: scale(0.93);
 }
 
-.recording-overlay.phase-processing .voice-bars b,
-.recording-overlay.phase-correcting .voice-bars b,
-.recording-overlay.phase-pasting .voice-bars b {
-  background: #ffd56e;
+.recording-overlay.overlay-transition-active::after {
+  animation: overlay-voice-activation 420ms ease-out;
 }
 
-.recording-overlay.phase-pasted .voice-bars b {
-  background: #a8ffc5;
+.overlay-transition-active .voice-bars {
+  animation: overlay-waveform-activation 320ms cubic-bezier(0.2, 0.72, 0.2, 1);
 }
 
-.recording-overlay.phase-error .voice-bars b {
-  background: #ffaaa3;
+.voice-bars rect {
+  fill: rgba(255, 255, 255, 0.86);
+  transition: fill 180ms ease;
+}
+
+.recording-overlay.phase-processing .voice-bars rect,
+.recording-overlay.phase-correcting .voice-bars rect,
+.recording-overlay.phase-pasting .voice-bars rect {
+  fill: #ffd56e;
+}
+
+.recording-overlay.phase-pasted .voice-bars rect {
+  fill: #a8ffc5;
+}
+
+.recording-overlay.phase-error .voice-bars rect {
+  fill: #ffaaa3;
 }
 
 @keyframes overlay-enter {
   from {
     opacity: 0;
-    filter: brightness(0.92);
   }
 
   to {
     opacity: 1;
-    filter: brightness(1);
+  }
+}
+
+@keyframes overlay-label-change {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes overlay-voice-activation {
+  0% {
+    opacity: 0;
+  }
+
+  34% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes overlay-waveform-activation {
+  0% {
+    opacity: 0.76;
+    transform: scale(0.93);
+  }
+
+  58% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 
@@ -250,8 +315,15 @@
 
   .startup-spinner,
   .voice-bars,
-  .overlay-cancel {
+  .overlay-cancel,
+  .overlay-label-text {
     transition: none;
+  }
+
+  .recording-overlay.overlay-transition-active::after,
+  .overlay-transition-active .voice-bars,
+  .overlay-label-text {
+    animation: none;
   }
 
   .startup-spinner::before {

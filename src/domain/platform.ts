@@ -29,6 +29,10 @@ export function supportsOutputVolumeDucking() {
   return platform === "macos" || platform === "windows";
 }
 
+export function supportsAudioServiceRestart() {
+  return runtimePlatform() === "macos";
+}
+
 export function supportsSoundSourceHotkeyFallback() {
   return runtimePlatform() === "macos";
 }

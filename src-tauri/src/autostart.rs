@@ -14,6 +14,7 @@ mod platform {
     use std::path::PathBuf;
 
     const LAUNCH_AGENT_LABEL: &str = "cn.local.boltscribe";
+    const APP_BUNDLE_IDENTIFIER: &str = "cn.local.boltscribe";
 
     pub(crate) fn apply_launch_at_login(enabled: bool) -> Result<()> {
         if enabled {
@@ -59,7 +60,9 @@ mod platform {
     fn is_managed_launch_agent(path: &PathBuf) -> Result<bool> {
         let raw = fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        Ok(raw.contains(LAUNCH_AGENT_LABEL) && raw.contains(APP_NAME))
+        Ok(raw.contains(LAUNCH_AGENT_LABEL)
+            && raw.contains("<string>/usr/bin/open</string>")
+            && (raw.contains(APP_BUNDLE_IDENTIFIER) || raw.contains(APP_NAME)))
     }
 
     fn launch_agent_path() -> Result<PathBuf> {
@@ -81,8 +84,8 @@ mod platform {
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/open</string>
-    <string>-a</string>
-    <string>{APP_NAME}</string>
+    <string>-b</string>
+    <string>{APP_BUNDLE_IDENTIFIER}</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -100,7 +103,8 @@ mod platform {
         fn launch_agent_plist_targets_boltscribe() {
             let plist = launch_agent_plist();
             assert!(plist.contains("<string>cn.local.boltscribe</string>"));
-            assert!(plist.contains("<string>BoltScribe</string>"));
+            assert!(plist.contains("<string>-b</string>"));
+            assert!(!plist.contains("<string>-a</string>"));
             assert!(plist.contains("<string>/usr/bin/open</string>"));
         }
     }

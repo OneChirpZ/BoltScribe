@@ -20,6 +20,7 @@
   --danger-soft: #321916;
   --radius: 8px;
   --app-min-width: 1120px;
+  --content-max-width: 1540px;
   --shadow-panel: 0 22px 70px rgba(0, 0, 0, 0.26);
   color: var(--text);
   background: var(--bg);

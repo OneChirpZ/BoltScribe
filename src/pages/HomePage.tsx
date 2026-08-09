@@ -16,6 +16,7 @@ export default function HomePage({
   hasInputDevice,
   audioDevicesRefreshing,
   onToggle,
+  onCancel,
   onOpenPermissionGuide,
   onRefreshAudioDevices,
   onRefreshHistory,
@@ -23,7 +24,9 @@ export default function HomePage({
   onOpenModels,
   onOpenCorrectionSection,
   onCopyHistory,
+  onRetryHistory,
   onDeleteHistory,
+  canRetryHistory,
   canDeleteHistory,
   language,
   text,
@@ -36,6 +39,7 @@ export default function HomePage({
   hasInputDevice: boolean;
   audioDevicesRefreshing: boolean;
   onToggle: () => void;
+  onCancel: () => void;
   onOpenPermissionGuide: () => void;
   onRefreshAudioDevices: () => void;
   onRefreshHistory: () => void;
@@ -43,7 +47,9 @@ export default function HomePage({
   onOpenModels: () => void;
   onOpenCorrectionSection: (section: CorrectionSection) => void;
   onCopyHistory: (text: string, label: string) => void;
+  onRetryHistory: (record: HistoryRecord) => Promise<void>;
   onDeleteHistory: (record: HistoryRecord) => Promise<void>;
+  canRetryHistory: boolean;
   canDeleteHistory: boolean;
   language: AppLanguage;
   text: TextBundle;
@@ -77,8 +83,12 @@ export default function HomePage({
           </div>
         </div>
         <div className="action-row">
-          <button className={status.mode === "recording" ? "primary danger" : "primary"} disabled={busy || status.mode === "starting" || status.mode === "processing"} onClick={onToggle}>
-            {status.mode === "recording" ? text.home.stopAndProcess : text.home.startRecording}
+          <button
+            className={status.mode === "recording" || status.mode === "processing" ? "primary danger" : "primary"}
+            disabled={busy || status.mode === "starting"}
+            onClick={status.mode === "processing" ? onCancel : onToggle}
+          >
+            {status.mode === "processing" ? text.overlay.cancel : status.mode === "recording" ? text.home.stopAndProcess : text.home.startRecording}
           </button>
           <button className="secondary" type="button" onClick={onOpenPermissionGuide}>{text.home.permissionGuide}</button>
           <div className="hotkey-list">
@@ -111,7 +121,7 @@ export default function HomePage({
           />
         </div>
       </section>
-      <HistoryPage title={text.home.latestHistory} history={history} onRefresh={onRefreshHistory} onOpenFullHistory={onOpenHistoryPage} onCopy={onCopyHistory} onDelete={onDeleteHistory} canDelete={canDeleteHistory} text={text} />
+      <HistoryPage title={text.home.latestHistory} history={history} onRefresh={onRefreshHistory} onOpenFullHistory={onOpenHistoryPage} onCopy={onCopyHistory} onRetry={onRetryHistory} onDelete={onDeleteHistory} canRetry={canRetryHistory} canDelete={canDeleteHistory} text={text} />
     </div>
   );
 }

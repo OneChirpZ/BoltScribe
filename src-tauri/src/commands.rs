@@ -1,6 +1,6 @@
 use crate::{
     audio_devices, autostart, config, data_dir, fn_trigger, history, injector, output_volume,
-    paths, recorder, shortcuts, tray, windows, workflow,
+    paths, recorder, shortcuts, system_audio, tray, vad_test, windows, workflow,
 };
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -8,7 +8,7 @@ use std::sync::{
     mpsc,
 };
 use std::time::Duration;
-use tauri::{Emitter, State, Wry};
+use tauri::{Emitter, Manager, State, Wry};
 use tauri_plugin_dialog::DialogExt;
 
 const AUDIO_DEVICE_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
@@ -69,6 +69,19 @@ pub(crate) fn load_audio_output_devices() -> Result<Vec<output_volume::AudioOutp
         AUDIO_DEVICE_REFRESH_TIMEOUT,
         output_volume::list_output_devices,
     )
+}
+
+#[tauri::command]
+pub(crate) async fn restart_system_audio_service(
+    app: tauri::AppHandle<Wry>,
+) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<workflow::AppState>();
+        state.run_while_inactive(system_audio::restart_service)
+    })
+    .await
+    .map_err(|err| format!("System audio service restart worker failed: {err}"))?
+    .map_err(|err| err.to_string())
 }
 
 fn run_audio_device_refresh_with_timeout<T, F>(
@@ -195,6 +208,23 @@ pub(crate) fn load_stats() -> Result<history::InputStats, String> {
 }
 
 #[tauri::command]
+pub(crate) async fn retry_history_record(
+    app: tauri::AppHandle<Wry>,
+    id: String,
+) -> Result<history::HistoryRecord, String> {
+    let worker_app = app.clone();
+    let updated = tauri::async_runtime::spawn_blocking(move || {
+        let state = worker_app.state::<workflow::AppState>();
+        workflow::retry_history_record(state.inner(), &id)
+    })
+    .await
+    .map_err(|err| format!("History retry worker failed: {err}"))?
+    .map_err(|err| err.to_string())?;
+    let _ = app.emit("history://updated", ());
+    Ok(updated)
+}
+
+#[tauri::command]
 pub(crate) fn delete_history_record(
     app: tauri::AppHandle<Wry>,
     state: State<'_, workflow::AppState>,
@@ -248,6 +278,46 @@ pub(crate) fn cancel_current_workflow(
     state: State<'_, workflow::AppState>,
 ) -> Result<workflow::WorkflowStatus, String> {
     workflow::cancel_current_workflow(app, state.inner()).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn start_vad_test(
+    app: tauri::AppHandle,
+    state: State<'_, workflow::AppState>,
+    audio_config: config::AudioConfig,
+) -> Result<vad_test::VadTestStatus, String> {
+    vad_test::start(app, state.inner(), audio_config).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn update_vad_test_settings(
+    app: tauri::AppHandle,
+    state: State<'_, workflow::AppState>,
+    noise_margin_db: u32,
+    confirmation_ms: u32,
+    noise_window_ms: u32,
+) -> Result<vad_test::VadTestStatus, String> {
+    vad_test::update_settings(
+        app,
+        state.inner(),
+        noise_margin_db,
+        confirmation_ms,
+        noise_window_ms,
+    )
+    .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn stop_vad_test(
+    app: tauri::AppHandle,
+    state: State<'_, workflow::AppState>,
+) -> Result<vad_test::VadTestStatus, String> {
+    vad_test::stop(app, state.inner()).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn get_vad_test_status(state: State<'_, workflow::AppState>) -> vad_test::VadTestStatus {
+    vad_test::get_status(state.inner())
 }
 
 #[tauri::command]

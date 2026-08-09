@@ -112,7 +112,7 @@ export default function CorrectionLineEditor({
         </div>
       ) : (
         <div
-          className="correction-items-panel"
+          className={kind === "dictionary" ? "correction-items-panel dictionary-items-panel" : "correction-items-panel"}
           id={`${modeTabsId}-items-panel`}
           role="tabpanel"
           aria-labelledby={`${modeTabsId}-items-tab`}

@@ -33,9 +33,12 @@ impl AudioLevelMeter {
     }
 
     fn publish(&self, level: f32) {
+        if !self.active.load(Ordering::Acquire) {
+            return;
+        }
         let level = level.clamp(-96.0, 0.0);
         let mut current = self.level_bits.load(Ordering::Relaxed);
-        while f32::from_bits(current) < level {
+        while self.active.load(Ordering::Acquire) && f32::from_bits(current) < level {
             match self.level_bits.compare_exchange_weak(
                 current,
                 level.to_bits(),
@@ -45,6 +48,10 @@ impl AudioLevelMeter {
                 Ok(_) => break,
                 Err(next) => current = next,
             }
+        }
+        if !self.active.load(Ordering::Acquire) {
+            self.level_bits
+                .store(EMPTY_AUDIO_LEVEL.to_bits(), Ordering::Relaxed);
         }
     }
 
@@ -57,11 +64,11 @@ impl AudioLevelMeter {
     }
 
     pub fn is_active(&self) -> bool {
-        self.active.load(Ordering::Relaxed)
+        self.active.load(Ordering::Acquire)
     }
 
     pub fn stop(&self) {
-        self.active.store(false, Ordering::Relaxed);
+        self.active.store(false, Ordering::Release);
         self.level_bits
             .store(EMPTY_AUDIO_LEVEL.to_bits(), Ordering::Relaxed);
     }
@@ -98,6 +105,7 @@ enum RecorderCommand {
     },
     Stop {
         recordings_dir: PathBuf,
+        trim: Option<AudioTrim>,
         reply: mpsc::Sender<Result<RecordedAudio>>,
     },
     Cancel {
@@ -178,6 +186,24 @@ pub struct RecordedAudio {
     pub sample_count: usize,
 }
 
+impl RecordedAudio {
+    pub(crate) fn discard(self) -> Result<()> {
+        match std::fs::remove_file(&self.path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => {
+                Err(err).with_context(|| format!("Failed to discard {}", self.path.display()))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AudioTrim {
+    pub first_voice_ms: u64,
+    pub last_activity_ms: u64,
+}
+
 impl RecorderController {
     pub fn spawn() -> Self {
         let (sender, receiver) = mpsc::channel::<RecorderCommand>();
@@ -245,10 +271,19 @@ impl RecorderController {
     }
 
     pub(crate) fn begin_stop(&self, recordings_dir: PathBuf) -> Result<PendingRecordingStop> {
+        self.begin_stop_with_trim(recordings_dir, None)
+    }
+
+    pub(crate) fn begin_stop_with_trim(
+        &self,
+        recordings_dir: PathBuf,
+        trim: Option<AudioTrim>,
+    ) -> Result<PendingRecordingStop> {
         let (reply_sender, reply_receiver) = mpsc::channel();
         self.sender
             .send(RecorderCommand::Stop {
                 recordings_dir,
+                trim,
                 reply: reply_sender,
             })
             .map_err(|_| anyhow!("Recorder worker is not running"))?;
@@ -328,12 +363,13 @@ fn recorder_worker(receiver: mpsc::Receiver<RecorderCommand>) {
             }
             RecorderCommand::Stop {
                 recordings_dir,
+                trim,
                 reply,
             } => {
                 let result = if active {
                     active = false;
                     match prepared.as_mut() {
-                        Some(stream) => stream.stop(&recordings_dir),
+                        Some(stream) => stream.stop(&recordings_dir, trim),
                         None => Err(anyhow!("Recorder stream is not prepared")),
                     }
                 } else {
@@ -512,7 +548,7 @@ impl PreparedInputStream {
         Ok(())
     }
 
-    fn stop(&mut self, recordings_dir: &Path) -> Result<RecordedAudio> {
+    fn stop(&mut self, recordings_dir: &Path, trim: Option<AudioTrim>) -> Result<RecordedAudio> {
         let (samples, started_at) = {
             let mut capture = self
                 .capture
@@ -533,6 +569,11 @@ impl PreparedInputStream {
                 self.spec.device_name
             ));
         }
+
+        let (samples, trim_start_ms) = match trim {
+            Some(trim) => trim_samples(samples, self.sample_rate, self.channels, trim),
+            None => (samples, 0),
+        };
 
         std::fs::create_dir_all(recordings_dir)
             .with_context(|| format!("Failed to create {}", recordings_dir.display()))?;
@@ -558,7 +599,7 @@ impl PreparedInputStream {
             path,
             sample_rate: self.sample_rate,
             channels: self.channels,
-            started_at,
+            started_at: started_at + chrono::Duration::milliseconds(trim_start_ms as i64),
             finished_at,
             sample_count: samples.len(),
         })
@@ -577,6 +618,33 @@ impl PreparedInputStream {
             capture.cancel(stop_meter);
         }
     }
+}
+
+fn trim_samples(
+    samples: Vec<i16>,
+    sample_rate: u32,
+    channels: u16,
+    trim: AudioTrim,
+) -> (Vec<i16>, u64) {
+    if sample_rate == 0 || channels == 0 || samples.is_empty() {
+        return (samples, 0);
+    }
+    let total_frames = samples.len() / channels as usize;
+    let total_ms = (total_frames as u64 * 1000) / sample_rate as u64;
+    let start_ms = trim.first_voice_ms.saturating_sub(600).min(total_ms);
+    let end_ms = trim
+        .last_activity_ms
+        .saturating_add(800)
+        .min(total_ms)
+        .max(start_ms);
+    let start_frame = ((start_ms as u128 * sample_rate as u128) / 1000) as usize;
+    let end_frame = ((end_ms as u128 * sample_rate as u128) / 1000) as usize;
+    let start = (start_frame * channels as usize).min(samples.len());
+    let mut end = (end_frame * channels as usize).clamp(start, samples.len());
+    if end == start && start < samples.len() {
+        end = (start + channels as usize).min(samples.len());
+    }
+    (samples[start..end].to_vec(), start_ms)
 }
 
 impl CaptureState {
@@ -691,10 +759,11 @@ fn audio_level_dbfs(samples: &[i16]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        audio_level_dbfs, has_audio_signal, AudioLevelMeter, InitialAudioReadiness,
-        RecorderCommand, RecorderController,
+        audio_level_dbfs, has_audio_signal, trim_samples, AudioLevelMeter, AudioTrim,
+        InitialAudioReadiness, RecordedAudio, RecorderCommand, RecorderController,
     };
     use crate::config::AudioConfig;
+    use chrono::Utc;
     use std::sync::{atomic::AtomicBool, mpsc};
     use std::time::Duration;
 
@@ -708,6 +777,22 @@ mod tests {
     fn any_nonzero_sample_counts_as_signal() {
         assert!(has_audio_signal(&[0, 1, 0]));
         assert!(has_audio_signal(&[0, -1, 0]));
+    }
+
+    #[test]
+    fn trim_samples_keeps_preroll_and_tail_without_crossing_capture_bounds() {
+        let samples: Vec<i16> = (0..64_000).map(|sample| sample as i16).collect();
+        let (trimmed, start_ms) = trim_samples(
+            samples,
+            16_000,
+            1,
+            AudioTrim {
+                first_voice_ms: 1_000,
+                last_activity_ms: 2_000,
+            },
+        );
+        assert_eq!(start_ms, 400);
+        assert_eq!(trimmed.len(), 2_400 * 16);
     }
 
     #[test]
@@ -738,6 +823,16 @@ mod tests {
         assert!(meter.is_active());
         meter.stop();
         assert!(!meter.is_active());
+    }
+
+    #[test]
+    fn stopped_audio_level_meter_rejects_late_capture_callbacks() {
+        let meter = AudioLevelMeter::new();
+        meter.stop();
+
+        meter.publish(-3.0);
+
+        assert_eq!(meter.take_level(), None);
     }
 
     #[test]
@@ -810,6 +905,7 @@ mod tests {
         let reply = match receiver.try_recv().unwrap() {
             RecorderCommand::Stop {
                 recordings_dir,
+                trim: _,
                 reply,
             } => {
                 assert_eq!(recordings_dir, std::path::PathBuf::from("recordings"));
@@ -820,5 +916,25 @@ mod tests {
         drop(reply);
 
         assert!(pending.wait().is_err());
+    }
+
+    #[test]
+    fn recorded_audio_discard_removes_a_new_file_and_tolerates_a_missing_file() {
+        let path =
+            std::env::temp_dir().join(format!("boltscribe-discard-{}.wav", uuid::Uuid::new_v4()));
+        std::fs::write(&path, b"test").unwrap();
+        let recorded = RecordedAudio {
+            id: "discard-test".to_string(),
+            path: path.clone(),
+            sample_rate: 16_000,
+            channels: 1,
+            started_at: Utc::now(),
+            finished_at: Utc::now(),
+            sample_count: 0,
+        };
+
+        recorded.clone().discard().unwrap();
+        assert!(!path.exists());
+        recorded.discard().unwrap();
     }
 }

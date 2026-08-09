@@ -441,6 +441,7 @@ mod tests {
             workflow_error: None,
             asr_duration_ms: None,
             service_audio_duration_ms: None,
+            live_asr_diagnostics: None,
             total_duration_ms: 1,
         }
     }

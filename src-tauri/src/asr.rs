@@ -2,11 +2,16 @@ use crate::config::AsrConfig;
 use crate::recorder::{AudioChunk, AudioSink};
 use anyhow::{anyhow, bail, Context, Result};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::sync::mpsc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tungstenite::stream::MaybeTlsStream;
@@ -18,7 +23,35 @@ const STREAM_CHUNK_BYTES: usize = 6_400;
 const STREAM_FRAME_SAMPLES: usize = (TARGET_SAMPLE_RATE as usize) / 5;
 const LIVE_DRAIN_TIMEOUT: Duration = Duration::from_millis(5);
 const FINAL_READ_TIMEOUT: Duration = Duration::from_millis(250);
-const FINAL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
+const LIVE_FINAL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+const FILE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(6);
+const CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(15);
+const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+const LIVE_AUDIO_BUFFER_LIMIT: usize = 128 * 1024 * 1024;
+const LIVE_RETRY_DELAYS: [Duration; 5] = [
+    Duration::from_millis(250),
+    Duration::from_millis(750),
+    Duration::from_millis(1_500),
+    Duration::from_secs(3),
+    Duration::from_secs(5),
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct LiveAsrDiagnostics {
+    pub connection_attempts: u32,
+    pub first_connected_after_ms: Option<u64>,
+    pub peak_buffered_bytes: u64,
+    pub last_error_category: Option<String>,
+    pub fallback_reason: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct LiveAsrResult {
+    pub output: Result<AsrOutput>,
+    pub diagnostics: LiveAsrDiagnostics,
+}
 
 type VolcengineSocket = tungstenite::WebSocket<MaybeTlsStream<TcpStream>>;
 
@@ -38,22 +71,67 @@ pub struct VolcengineFileAsr;
 
 pub struct VolcengineLiveAsrSession {
     sender: Option<AudioSink>,
-    handle: Option<JoinHandle<Result<AsrOutput>>>,
+    handle: Option<JoinHandle<LiveAsrResult>>,
+    activity: Option<LiveAsrActivity>,
+}
+
+/// Optional progress signal consumed by the local VAD gate.  Some service
+/// endpoints return only a final result, therefore local VAD remains the
+/// primary activity signal when this value is absent.
+#[derive(Clone)]
+pub struct LiveAsrActivity {
+    started_at: Instant,
+    last_progress_ms: Arc<AtomicU64>,
+}
+
+impl LiveAsrActivity {
+    pub fn new() -> Self {
+        Self {
+            started_at: Instant::now(),
+            last_progress_ms: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    pub fn last_progress_ms(&self) -> Option<u64> {
+        match self.last_progress_ms.load(Ordering::Acquire) {
+            0 => None,
+            value => Some(value),
+        }
+    }
+
+    fn note_progress(&self) {
+        let elapsed = self.started_at.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        self.last_progress_ms
+            .store(elapsed.max(1), Ordering::Release);
+    }
 }
 
 impl VolcengineLiveAsrSession {
     pub fn start(config: &AsrConfig) -> Result<Self> {
-        validate_config(config)?;
+        Self::start_with_activity(config, None)
+    }
 
-        let task_id = Uuid::new_v4().to_string();
+    pub fn start_with_activity(
+        config: &AsrConfig,
+        activity: Option<LiveAsrActivity>,
+    ) -> Result<Self> {
+        validate_config(config)?;
+        build_ws_request(config, "configuration-check")?;
+
         let config = config.clone();
         let (sender, receiver) = mpsc::channel::<AudioChunk>();
-        let handle = std::thread::spawn(move || live_asr_worker(config, task_id, receiver));
+        let worker_activity = activity.clone();
+        let handle = std::thread::spawn(move || live_asr_worker(config, receiver, worker_activity));
 
         Ok(Self {
             sender: Some(sender),
             handle: Some(handle),
+            activity,
         })
+    }
+
+    pub fn activity(&self) -> Option<LiveAsrActivity> {
+        self.activity.clone()
     }
 
     pub fn audio_sender(&self) -> Result<AudioSink> {
@@ -63,15 +141,24 @@ impl VolcengineLiveAsrSession {
             .ok_or_else(|| anyhow!("Live ASR session is already finishing"))
     }
 
-    pub fn finish(mut self) -> Result<AsrOutput> {
+    pub fn finish(mut self) -> LiveAsrResult {
         self.sender.take();
-        let handle = self
-            .handle
-            .take()
-            .ok_or_else(|| anyhow!("Live ASR worker is not running"))?;
-        handle
-            .join()
-            .map_err(|_| anyhow!("Live ASR worker panicked"))?
+        let Some(handle) = self.handle.take() else {
+            return LiveAsrResult {
+                output: Err(anyhow!("Live ASR worker is not running")),
+                diagnostics: LiveAsrDiagnostics {
+                    fallback_reason: Some("worker_missing".to_string()),
+                    ..Default::default()
+                },
+            };
+        };
+        handle.join().unwrap_or_else(|_| LiveAsrResult {
+            output: Err(anyhow!("Live ASR worker panicked")),
+            diagnostics: LiveAsrDiagnostics {
+                fallback_reason: Some("worker_panicked".to_string()),
+                ..Default::default()
+            },
+        })
     }
 }
 
@@ -82,10 +169,11 @@ impl AsrProvider for VolcengineFileAsr {
         let task_id = Uuid::new_v4().to_string();
         let audio = normalized_wav_bytes(audio_path)
             .with_context(|| format!("Failed to prepare {}", audio_path.display()))?;
-        let request = build_ws_request(config, &task_id)?;
-        let (mut socket, response) =
-            tungstenite::connect(request).context("Failed to connect Volcengine ASR websocket")?;
-        let log_id = header_value(response.headers(), "x-tt-logid");
+        let (mut socket, log_id) = connect_live_socket(config, &task_id).map_err(|failure| {
+            failure
+                .error
+                .context("Failed to connect Volcengine ASR websocket")
+        })?;
 
         let full_request = build_full_request(config, "wav");
 
@@ -100,17 +188,22 @@ impl AsrProvider for VolcengineFileAsr {
                 .send(Message::Binary(audio_request(chunk, is_final)?.into()))
                 .context("Failed to send Volcengine ASR audio chunk")?;
         }
+        set_socket_read_timeout(&mut socket, Some(FINAL_READ_TIMEOUT))?;
 
         let started_at = Instant::now();
         let mut response_state = AsrResponseState::default();
         loop {
-            if started_at.elapsed() > Duration::from_secs(120) {
+            if started_at.elapsed() >= FILE_RESPONSE_TIMEOUT {
                 bail!("Volcengine ASR websocket timed out");
             }
 
-            let message = socket
-                .read()
-                .context("Failed to read Volcengine ASR websocket response")?;
+            let message = match socket.read() {
+                Ok(message) => message,
+                Err(err) if is_timeout_error(&err) => continue,
+                Err(err) => {
+                    return Err(err).context("Failed to read Volcengine ASR websocket response")
+                }
+            };
             let Message::Binary(bytes) = message else {
                 continue;
             };
@@ -150,16 +243,355 @@ impl AsrProvider for VolcengineFileAsr {
 
 fn live_asr_worker(
     config: AsrConfig,
-    task_id: String,
     receiver: mpsc::Receiver<AudioChunk>,
-) -> Result<AsrOutput> {
-    let request = build_ws_request(&config, &task_id)?;
-    let (mut socket, response) =
-        tungstenite::connect(request).context("Failed to connect Volcengine live ASR websocket")?;
-    let log_id = header_value(response.headers(), "x-tt-logid");
-    set_socket_read_timeout(&mut socket, Some(LIVE_DRAIN_TIMEOUT))?;
+    activity: Option<LiveAsrActivity>,
+) -> LiveAsrResult {
+    let started_at = Instant::now();
+    let mut diagnostics = LiveAsrDiagnostics::default();
+    let mut buffered = Vec::new();
+    let mut buffered_bytes = 0usize;
+    let mut recording_finished = false;
+    let mut final_attempt_used = false;
 
-    let full_request = build_full_request(&config, "pcm");
+    loop {
+        if recording_finished {
+            final_attempt_used = true;
+        }
+        diagnostics.connection_attempts = diagnostics.connection_attempts.saturating_add(1);
+        let task_id = Uuid::new_v4().to_string();
+        let (attempt_sender, attempt_receiver) = mpsc::channel();
+        let attempt_started_at = Instant::now();
+        let attempt_config = config.clone();
+        let attempt_task_id = task_id.clone();
+        std::thread::spawn(move || {
+            let _ = attempt_sender.send(connect_live_socket(&attempt_config, &attempt_task_id));
+        });
+
+        let connection = loop {
+            match attempt_receiver.try_recv() {
+                Ok(result) => break result,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    break Err(ConnectFailure::retryable(
+                        "connection_worker",
+                        anyhow!("Live ASR connection worker exited unexpectedly"),
+                    ));
+                }
+                Err(mpsc::TryRecvError::Empty)
+                    if attempt_started_at.elapsed() >= CONNECT_ATTEMPT_TIMEOUT =>
+                {
+                    break Err(ConnectFailure::retryable(
+                        "timeout",
+                        anyhow!("Live ASR connection attempt timed out"),
+                    ));
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+
+            if !recording_finished {
+                match receiver.recv_timeout(Duration::from_millis(10)) {
+                    Ok(chunk) => {
+                        if let Err(error) = buffer_live_audio_chunk(
+                            chunk,
+                            &mut buffered,
+                            &mut buffered_bytes,
+                            &mut diagnostics,
+                        ) {
+                            diagnostics.fallback_reason = Some("buffer_limit_exceeded".to_string());
+                            return LiveAsrResult {
+                                output: Err(error),
+                                diagnostics,
+                            };
+                        }
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => recording_finished = true,
+                }
+            } else {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+
+        match connection {
+            Ok((socket, log_id)) => {
+                diagnostics.first_connected_after_ms =
+                    Some(started_at.elapsed().as_millis() as u64);
+                let output = stream_live_audio(
+                    &config,
+                    task_id,
+                    socket,
+                    log_id,
+                    buffered,
+                    receiver,
+                    activity.clone(),
+                );
+                if output.is_err() {
+                    diagnostics.last_error_category = Some("stream_interrupted".to_string());
+                    diagnostics.fallback_reason = Some("stream_interrupted".to_string());
+                }
+                return LiveAsrResult {
+                    output,
+                    diagnostics,
+                };
+            }
+            Err(failure) => {
+                eprintln!(
+                    "live ASR connection attempt {} failed ({}): {:#}",
+                    diagnostics.connection_attempts, failure.category, failure.error
+                );
+                diagnostics.last_error_category = Some(failure.category.to_string());
+                if !failure.retryable {
+                    diagnostics.fallback_reason =
+                        Some("non_retryable_connection_error".to_string());
+                    return LiveAsrResult {
+                        output: Err(failure.error),
+                        diagnostics,
+                    };
+                }
+
+                if recording_finished {
+                    if final_attempt_used {
+                        diagnostics.fallback_reason =
+                            Some("connection_attempts_exhausted".to_string());
+                        return LiveAsrResult {
+                            output: Err(failure.error),
+                            diagnostics,
+                        };
+                    }
+                    final_attempt_used = true;
+                    continue;
+                }
+
+                let delay = live_retry_delay(diagnostics.connection_attempts as usize);
+                if let Err(error) = buffer_live_audio_for_delay(
+                    &receiver,
+                    delay,
+                    &mut buffered,
+                    &mut buffered_bytes,
+                    &mut diagnostics,
+                    &mut recording_finished,
+                ) {
+                    diagnostics.fallback_reason = Some("buffer_limit_exceeded".to_string());
+                    return LiveAsrResult {
+                        output: Err(error),
+                        diagnostics,
+                    };
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ConnectFailure {
+    category: &'static str,
+    retryable: bool,
+    error: anyhow::Error,
+}
+
+impl ConnectFailure {
+    fn retryable(category: &'static str, error: anyhow::Error) -> Self {
+        Self {
+            category,
+            retryable: true,
+            error,
+        }
+    }
+
+    fn permanent(category: &'static str, error: anyhow::Error) -> Self {
+        Self {
+            category,
+            retryable: false,
+            error,
+        }
+    }
+}
+
+fn connect_live_socket(
+    config: &AsrConfig,
+    task_id: &str,
+) -> std::result::Result<(VolcengineSocket, Option<String>), ConnectFailure> {
+    let request = build_ws_request(config, task_id)
+        .map_err(|error| ConnectFailure::permanent("configuration", error))?;
+    let host = request
+        .uri()
+        .host()
+        .ok_or_else(|| ConnectFailure::permanent("invalid_url", anyhow!("ASR URL has no host")))?
+        .to_string();
+    let port = request.uri().port_u16().unwrap_or_else(|| {
+        if request.uri().scheme_str() == Some("ws") {
+            80
+        } else {
+            443
+        }
+    });
+    let addresses = (host.as_str(), port)
+        .to_socket_addrs()
+        .map_err(|error| ConnectFailure::retryable("dns", error.into()))?
+        .collect::<Vec<_>>();
+    if addresses.is_empty() {
+        return Err(ConnectFailure::retryable(
+            "dns",
+            anyhow!("ASR host resolved to no addresses"),
+        ));
+    }
+
+    let mut last_error = None;
+    let mut tcp = None;
+    for address in addresses {
+        match TcpStream::connect_timeout(&address, CONNECT_TIMEOUT) {
+            Ok(stream) => {
+                tcp = Some(stream);
+                break;
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    let tcp = tcp.ok_or_else(|| {
+        ConnectFailure::retryable(
+            "tcp",
+            last_error
+                .map(anyhow::Error::from)
+                .unwrap_or_else(|| anyhow!("Failed to connect ASR TCP socket")),
+        )
+    })?;
+    tcp.set_read_timeout(Some(HANDSHAKE_TIMEOUT))
+        .map_err(|error| ConnectFailure::retryable("timeout", error.into()))?;
+    tcp.set_write_timeout(Some(HANDSHAKE_TIMEOUT))
+        .map_err(|error| ConnectFailure::retryable("timeout", error.into()))?;
+
+    let (mut socket, response) =
+        tungstenite::client_tls(request, tcp).map_err(classify_handshake_error)?;
+    let log_id = header_value(response.headers(), "x-tt-logid");
+    set_socket_write_timeout(&mut socket, Some(STREAM_WRITE_TIMEOUT))
+        .map_err(|error| ConnectFailure::retryable("socket", error))?;
+    set_socket_read_timeout(&mut socket, Some(LIVE_DRAIN_TIMEOUT))
+        .map_err(|error| ConnectFailure::retryable("socket", error))?;
+    Ok((socket, log_id))
+}
+
+fn classify_handshake_error(
+    error: tungstenite::HandshakeError<
+        tungstenite::handshake::client::ClientHandshake<MaybeTlsStream<TcpStream>>,
+    >,
+) -> ConnectFailure {
+    match error {
+        tungstenite::HandshakeError::Failure(error) => match error {
+            tungstenite::Error::Http(response) => {
+                let status = response.status();
+                let retryable =
+                    status.is_server_error() || status.as_u16() == 408 || status.as_u16() == 429;
+                let error = anyhow!("Live ASR websocket handshake returned HTTP {status}");
+                if retryable {
+                    ConnectFailure::retryable("http_temporary", error)
+                } else {
+                    ConnectFailure::permanent("http_client", error)
+                }
+            }
+            tungstenite::Error::Tls(error) => {
+                ConnectFailure::permanent("tls_certificate", error.into())
+            }
+            tungstenite::Error::Url(error) => {
+                ConnectFailure::permanent("invalid_url", error.into())
+            }
+            tungstenite::Error::HttpFormat(error) => {
+                ConnectFailure::permanent("configuration", error.into())
+            }
+            tungstenite::Error::Io(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) =>
+            {
+                ConnectFailure::retryable("timeout", error.into())
+            }
+            tungstenite::Error::Io(error) => ConnectFailure::retryable("network", error.into()),
+            other => ConnectFailure::retryable("handshake", other.into()),
+        },
+        tungstenite::HandshakeError::Interrupted(_) => ConnectFailure::retryable(
+            "timeout",
+            anyhow!("Live ASR websocket handshake did not finish within the timeout"),
+        ),
+    }
+}
+
+fn live_retry_delay(completed_attempts: usize) -> Duration {
+    LIVE_RETRY_DELAYS[completed_attempts
+        .saturating_sub(1)
+        .min(LIVE_RETRY_DELAYS.len() - 1)]
+}
+
+fn audio_chunk_bytes(chunk: &AudioChunk) -> usize {
+    chunk
+        .samples
+        .len()
+        .saturating_mul(std::mem::size_of::<i16>())
+}
+
+fn buffer_live_audio_chunk(
+    chunk: AudioChunk,
+    buffered: &mut Vec<AudioChunk>,
+    buffered_bytes: &mut usize,
+    diagnostics: &mut LiveAsrDiagnostics,
+) -> Result<()> {
+    buffer_live_audio_chunk_with_limit(
+        chunk,
+        buffered,
+        buffered_bytes,
+        diagnostics,
+        LIVE_AUDIO_BUFFER_LIMIT,
+    )
+}
+
+fn buffer_live_audio_chunk_with_limit(
+    chunk: AudioChunk,
+    buffered: &mut Vec<AudioChunk>,
+    buffered_bytes: &mut usize,
+    diagnostics: &mut LiveAsrDiagnostics,
+    limit: usize,
+) -> Result<()> {
+    let next_bytes = buffered_bytes.saturating_add(audio_chunk_bytes(&chunk));
+    if next_bytes > limit {
+        bail!("Live ASR audio buffer exceeded 128 MiB");
+    }
+    *buffered_bytes = next_bytes;
+    diagnostics.peak_buffered_bytes = diagnostics.peak_buffered_bytes.max(next_bytes as u64);
+    buffered.push(chunk);
+    Ok(())
+}
+
+fn buffer_live_audio_for_delay(
+    receiver: &mpsc::Receiver<AudioChunk>,
+    delay: Duration,
+    buffered: &mut Vec<AudioChunk>,
+    buffered_bytes: &mut usize,
+    diagnostics: &mut LiveAsrDiagnostics,
+    recording_finished: &mut bool,
+) -> Result<()> {
+    let deadline = Instant::now() + delay;
+    while !*recording_finished {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match receiver.recv_timeout(remaining.min(Duration::from_millis(20))) {
+            Ok(chunk) => buffer_live_audio_chunk(chunk, buffered, buffered_bytes, diagnostics)?,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => *recording_finished = true,
+        }
+    }
+    Ok(())
+}
+
+fn stream_live_audio(
+    config: &AsrConfig,
+    task_id: String,
+    mut socket: VolcengineSocket,
+    log_id: Option<String>,
+    buffered: Vec<AudioChunk>,
+    receiver: mpsc::Receiver<AudioChunk>,
+    activity: Option<LiveAsrActivity>,
+) -> Result<AsrOutput> {
+    let full_request = build_full_request(config, "pcm");
     socket
         .send(Message::Binary(full_client_request(&full_request)?.into()))
         .context("Failed to send Volcengine live ASR request metadata")?;
@@ -167,9 +599,9 @@ fn live_asr_worker(
     let mut converter = StreamingPcmConverter::default();
     let mut framer = LiveAudioFramer::default();
     let mut delayed_frame: Option<Vec<u8>> = None;
-    let mut response_state = AsrResponseState::default();
+    let mut response_state = AsrResponseState::new(activity);
 
-    for chunk in receiver {
+    for chunk in buffered.into_iter().chain(receiver) {
         let pcm = converter.push_chunk(&chunk)?;
         for frame in framer.push_samples(&pcm) {
             if let Some(frame_to_send) = delayed_frame.replace(frame) {
@@ -262,17 +694,44 @@ fn request_uid(config: &AsrConfig) -> &str {
     "boltscribe"
 }
 
-#[derive(Default)]
 struct AsrResponseState {
     best_text: String,
     service_duration_ms: Option<u64>,
+    activity: Option<LiveAsrActivity>,
+    last_definite_end_ms: Option<u64>,
 }
 
 impl AsrResponseState {
+    fn new(activity: Option<LiveAsrActivity>) -> Self {
+        Self {
+            best_text: String::new(),
+            service_duration_ms: None,
+            activity,
+            last_definite_end_ms: None,
+        }
+    }
+
     fn apply_result(&mut self, value: &Value, final_frame: bool) -> bool {
         if let Ok(text) = extract_text(value) {
-            if !text.trim().is_empty() {
+            if !text.trim().is_empty() && text != self.best_text {
                 self.best_text = text;
+                if let Some(activity) = &self.activity {
+                    activity.note_progress();
+                }
+            }
+        }
+
+        if let Some(end_ms) = definite_utterance_end(value) {
+            let progressed = self
+                .last_definite_end_ms
+                .map_or(true, |previous| end_ms > previous);
+            if progressed {
+                self.last_definite_end_ms = Some(end_ms);
+            }
+            if progressed {
+                if let Some(activity) = &self.activity {
+                    activity.note_progress();
+                }
             }
         }
 
@@ -286,6 +745,33 @@ impl AsrResponseState {
 
         final_frame
     }
+}
+
+impl Default for AsrResponseState {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
+fn definite_utterance_end(value: &Value) -> Option<u64> {
+    value
+        .get("result")
+        .and_then(|result| result.get("utterances"))
+        .and_then(Value::as_array)
+        .and_then(|utterances| {
+            utterances
+                .iter()
+                .filter(|utterance| {
+                    utterance.get("definite").and_then(Value::as_bool) == Some(true)
+                })
+                .filter_map(|utterance| {
+                    utterance
+                        .get("end_time_ms")
+                        .and_then(Value::as_u64)
+                        .or_else(|| utterance.get("end_time").and_then(Value::as_u64))
+                })
+                .max()
+        })
 }
 
 #[derive(Default)]
@@ -471,6 +957,19 @@ fn set_socket_read_timeout(socket: &mut VolcengineSocket, timeout: Option<Durati
     Ok(())
 }
 
+fn set_socket_write_timeout(
+    socket: &mut VolcengineSocket,
+    timeout: Option<Duration>,
+) -> Result<()> {
+    match socket.get_mut() {
+        MaybeTlsStream::Plain(stream) => stream.set_write_timeout(timeout)?,
+        MaybeTlsStream::NativeTls(stream) => stream.get_ref().set_write_timeout(timeout)?,
+        #[allow(unreachable_patterns)]
+        _ => {}
+    }
+    Ok(())
+}
+
 fn full_client_request(value: &Value) -> Result<Vec<u8>> {
     let payload = gzip(serde_json::to_vec(value)?)?;
     Ok(binary_message([0x11, 0x10, 0x11, 0x00], &payload))
@@ -515,7 +1014,7 @@ fn wait_for_final_response(
 ) -> Result<()> {
     let started_at = Instant::now();
     loop {
-        if started_at.elapsed() > FINAL_RESPONSE_TIMEOUT {
+        if started_at.elapsed() >= LIVE_FINAL_RESPONSE_TIMEOUT {
             bail!(
                 "Volcengine live ASR websocket timed out, log_id={:?}",
                 log_id
@@ -905,6 +1404,94 @@ mod tests {
     }
 
     #[test]
+    fn retry_backoff_reaches_five_second_ceiling() {
+        assert_eq!(live_retry_delay(1), Duration::from_millis(250));
+        assert_eq!(live_retry_delay(2), Duration::from_millis(750));
+        assert_eq!(live_retry_delay(3), Duration::from_millis(1_500));
+        assert_eq!(live_retry_delay(4), Duration::from_secs(3));
+        assert_eq!(live_retry_delay(5), Duration::from_secs(5));
+        assert_eq!(live_retry_delay(50), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn live_audio_buffer_preserves_order_and_enforces_limit() {
+        let first = AudioChunk {
+            samples: vec![1, 2],
+            sample_rate: 16_000,
+            channels: 1,
+        };
+        let second = AudioChunk {
+            samples: vec![3, 4],
+            sample_rate: 16_000,
+            channels: 1,
+        };
+        let mut buffered = Vec::new();
+        let mut buffered_bytes = 0;
+        let mut diagnostics = LiveAsrDiagnostics::default();
+
+        buffer_live_audio_chunk_with_limit(
+            first,
+            &mut buffered,
+            &mut buffered_bytes,
+            &mut diagnostics,
+            8,
+        )
+        .unwrap();
+        buffer_live_audio_chunk_with_limit(
+            second,
+            &mut buffered,
+            &mut buffered_bytes,
+            &mut diagnostics,
+            8,
+        )
+        .unwrap();
+
+        assert_eq!(buffered[0].samples, vec![1, 2]);
+        assert_eq!(buffered[1].samples, vec![3, 4]);
+        assert_eq!(diagnostics.peak_buffered_bytes, 8);
+        assert!(buffer_live_audio_chunk_with_limit(
+            AudioChunk {
+                samples: vec![5],
+                sample_rate: 16_000,
+                channels: 1,
+            },
+            &mut buffered,
+            &mut buffered_bytes,
+            &mut diagnostics,
+            8,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn explicit_http_client_errors_are_not_retried() {
+        let response = tungstenite::http::Response::builder()
+            .status(401)
+            .body(None)
+            .unwrap();
+        let failure = classify_handshake_error(tungstenite::HandshakeError::Failure(
+            tungstenite::Error::Http(Box::new(response)),
+        ));
+
+        assert!(!failure.retryable);
+        assert_eq!(failure.category, "http_client");
+    }
+
+    #[test]
+    fn temporary_server_errors_are_retried() {
+        let response = tungstenite::http::Response::builder()
+            .status(503)
+            .body(None)
+            .unwrap();
+        let failure = classify_handshake_error(tungstenite::HandshakeError::Failure(
+            tungstenite::Error::Http(Box::new(response)),
+        ));
+
+        assert!(failure.retryable);
+        assert_eq!(failure.category, "http_temporary");
+    }
+
+    #[test]
     fn streaming_converter_downmixes_and_resamples() {
         let mut converter = StreamingPcmConverter::default();
         let chunk = AudioChunk {
@@ -1037,7 +1624,7 @@ mod tests {
         }
         drop(sender);
 
-        let output = session.finish().unwrap();
+        let output = session.finish().output.unwrap();
         eprintln!("LIVE_ASR_TEXT={}", output.text);
         assert_eq!(output.provider, "volcengine_ws_live");
         assert!(!output.text.trim().is_empty());

@@ -12,6 +12,13 @@
       "enabled": false,
       "reduction_percent": 70,
       "device_name_whitelist": []
+    },
+    "voice_activity_detection": {
+      "enabled": true,
+      "noise_margin_db": 12,
+      "confirmation_ms": 480,
+      "noise_window_ms": 2000,
+      "initial_silence_timeout_secs": 15
     }
   },
   "asr": {

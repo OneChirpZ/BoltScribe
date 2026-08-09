@@ -1,16 +1,37 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import type { AppConfig, AudioInputDevice, AudioInputDeviceRef, AudioOutputDevice, ConfigImportReport, DataDirInfo, OutputVolumeDuckingConfig, RecordingCleanupPreview, RecordingCleanupUnit } from "../types";
+import type { AppConfig, AudioInputDevice, AudioInputDeviceRef, AudioOutputDevice, ConfigImportReport, DataDirInfo, OutputVolumeDuckingConfig, RecordingCleanupPreview, RecordingCleanupUnit, VadTestStatus } from "../types";
+import AudioWaveform from "../components/AudioWaveform";
 import Field from "../components/Field";
 import HelpTip from "../components/HelpTip";
 import PanelHeader from "../components/PanelHeader";
 import ShortcutPicker from "../components/ShortcutPicker";
+import { appendAudioLevelSample, createAudioLevelHistory, dbfsToDisplayLevel } from "../domain/audioLevel";
 import { applyLanguageDefaultCorrectionTemplate } from "../domain/defaultCorrectionTemplates";
 import { hotkeyEnabledSlots, hotkeySlots, soundSourceShortcutKeyOptions, updateHotkey, updateHotkeyEnabled } from "../domain/hotkeys";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
 import { defaultRecordingOverlayScale, maxRecordingOverlayScale, minRecordingOverlayScale } from "../domain/overlay";
 import { cleanupCutoffTimestamp, formatByteCount } from "../domain/historyMaintenance";
 import type { PermissionRequestState } from "../domain/permissions";
-import { supportsDockVisibilityControl, supportsFnLongPressTrigger, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback, supportsTraySingleClickRecording } from "../domain/platform";
+import { supportsAudioServiceRestart, supportsDockVisibilityControl, supportsFnLongPressTrigger, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback, supportsTraySingleClickRecording } from "../domain/platform";
+import {
+  defaultVadConfirmationMs,
+  defaultVadInitialSilenceTimeoutSecs,
+  defaultVadNoiseMarginDb,
+  defaultVadNoiseWindowMs,
+  maxVadConfirmationMs,
+  maxVadInitialSilenceTimeoutSecs,
+  maxVadNoiseMarginDb,
+  maxVadNoiseWindowMs,
+  minVadConfirmationMs,
+  minVadInitialSilenceTimeoutSecs,
+  minVadNoiseMarginDb,
+  minVadNoiseWindowMs,
+  normalizeSteppedInt,
+  vadConfirmationStepMs,
+  vadInitialSilenceTimeoutStepSecs,
+  vadNoiseMarginStepDb,
+  vadNoiseWindowStepMs,
+} from "../domain/vadSettings";
 
 const maxHistoryRecords = 500;
 const bytesPerGb = 1024 * 1024 * 1024;
@@ -25,6 +46,7 @@ export default function SettingsPage({
   audioOutputDevices,
   dataDir,
   audioDevicesRefreshing,
+  audioServiceRestarting,
   onChange,
   onExportConfig,
   onImportConfig,
@@ -34,6 +56,11 @@ export default function SettingsPage({
   onCleanupRecordingFiles,
   onPreviewRecordingCleanup,
   onRefreshAudioDevices,
+  onRestartAudioService,
+  vadTestStatus,
+  onStartVadTest,
+  onUpdateVadTestSettings,
+  onStopVadTest,
   inputMonitoringGranted,
   inputMonitoringPermission,
   onRefreshInputMonitoring,
@@ -43,6 +70,7 @@ export default function SettingsPage({
   canSave,
   canChangeDataDir,
   canCleanupRecordings,
+  canRestartAudioService,
   text,
 }: {
   config: AppConfig;
@@ -50,6 +78,7 @@ export default function SettingsPage({
   audioOutputDevices: AudioOutputDevice[];
   dataDir: DataDirInfo | null;
   audioDevicesRefreshing: boolean;
+  audioServiceRestarting: boolean;
   onChange: (config: AppConfig) => void;
   onExportConfig: () => void;
   onImportConfig: (file: File) => void;
@@ -59,6 +88,11 @@ export default function SettingsPage({
   onCleanupRecordingFiles: (amount: number, unit: RecordingCleanupUnit) => Promise<void>;
   onPreviewRecordingCleanup: (amount: number, unit: RecordingCleanupUnit) => Promise<RecordingCleanupPreview>;
   onRefreshAudioDevices: () => void;
+  onRestartAudioService: () => void;
+  vadTestStatus: VadTestStatus;
+  onStartVadTest: () => void;
+  onUpdateVadTestSettings: (noiseMarginDb: number, confirmationMs: number, noiseWindowMs: number) => void;
+  onStopVadTest: () => void;
   inputMonitoringGranted: boolean | null;
   inputMonitoringPermission: PermissionRequestState;
   onRefreshInputMonitoring: () => void;
@@ -68,6 +102,7 @@ export default function SettingsPage({
   canSave: boolean;
   canChangeDataDir: boolean;
   canCleanupRecordings: boolean;
+  canRestartAudioService: boolean;
   text: TextBundle;
 }) {
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -78,12 +113,18 @@ export default function SettingsPage({
   const [cleanupPreviewLoading, setCleanupPreviewLoading] = useState(false);
   const [cleanupPreviewError, setCleanupPreviewError] = useState(false);
   const [cleanupPreviewRevision, setCleanupPreviewRevision] = useState(0);
+  const [vadTestLevelHistory, setVadTestLevelHistory] = useState(createAudioLevelHistory);
   const cleanupPreviewRequestRef = useRef(0);
+  const stopVadTestRef = useRef(onStopVadTest);
+  stopVadTestRef.current = onStopVadTest;
+  const vadTestStatusRef = useRef(vadTestStatus);
+  vadTestStatusRef.current = vadTestStatus;
   const storageGb = Number((config.retention.max_storage_bytes / bytesPerGb).toFixed(2));
   const canControlDockVisibility = supportsDockVisibilityControl();
   const canUseFnLongPressTrigger = supportsFnLongPressTrigger();
   const canUseTraySingleClickRecording = supportsTraySingleClickRecording();
   const canDuckOutputVolume = supportsOutputVolumeDucking();
+  const canRestartSystemAudio = supportsAudioServiceRestart();
   const canUseSoundSourceFallback = supportsSoundSourceHotkeyFallback();
   const shortcutSlots = hotkeySlots(config);
   const shortcutEnabledSlots = hotkeyEnabledSlots(config);
@@ -99,12 +140,65 @@ export default function SettingsPage({
   const missingOutputDuckingNames = outputDucking.device_name_whitelist.filter((name) => !outputDeviceNames.includes(name));
   const inputDevicePriority = config.audio.input_device_priority ?? [];
   const inputDeviceBlacklist = config.audio.input_device_blacklist ?? [];
+  const savedVoiceActivityDetection = config.audio.voice_activity_detection;
+  const voiceActivityDetection = {
+    enabled: savedVoiceActivityDetection?.enabled ?? true,
+    noise_margin_db: savedVoiceActivityDetection?.noise_margin_db ?? defaultVadNoiseMarginDb,
+    confirmation_ms: savedVoiceActivityDetection?.confirmation_ms ?? defaultVadConfirmationMs,
+    noise_window_ms: savedVoiceActivityDetection?.noise_window_ms ?? defaultVadNoiseWindowMs,
+    initial_silence_timeout_secs:
+      savedVoiceActivityDetection?.initial_silence_timeout_secs
+      ?? defaultVadInitialSilenceTimeoutSecs,
+  };
+  const vadTestRunning = vadTestStatus.mode !== "idle";
+  const vadTestLabel = vadTestStatus.mode === "voice"
+    ? text.settings.vadVoiceDetected
+    : vadTestStatus.mode === "listening"
+      ? !vadTestStatus.noise_calibrated
+        ? text.settings.vadCalibrating
+        : vadTestStatus.voice_active
+          ? text.settings.vadConfirmingVoice
+          : vadTestStatus.raw_voice_active
+            ? text.settings.vadFilteringNoise
+            : text.settings.vadWaiting
+      : vadTestStatus.mode === "timed_out"
+        ? text.settings.vadTestTimeout
+        : vadTestStatus.mode === "error"
+          ? text.settings.vadTestError
+          : text.settings.vadReady;
+  const vadTestVisualState = vadTestStatus.mode === "voice"
+    ? "voice"
+    : vadTestStatus.voice_active
+      ? "voice-pending"
+      : vadTestStatus.raw_voice_active
+        ? "filtering"
+    : vadTestStatus.mode === "listening"
+      ? "listening"
+      : vadTestStatus.mode === "timed_out"
+        ? "timed-out"
+        : vadTestStatus.mode === "error"
+          ? "error"
+          : "idle";
   const addablePriorityDevices = audioDevices.filter(
     (device) => !containsInputDeviceRef(inputDevicePriority, device) && !containsInputDeviceRef(inputDeviceBlacklist, device),
   );
   const missingBlacklistedDevices = inputDeviceBlacklist.filter((blocked) => !findInputDevice(blocked, audioDevices));
   const cleanupAmountNumber = Number(cleanupAmount);
   const cleanupAmountValid = cleanupCutoffTimestamp(Date.now(), cleanupAmountNumber, cleanupUnit) !== null;
+
+  useEffect(() => () => {
+    if (vadTestStatusRef.current.mode !== "idle") {
+      stopVadTestRef.current();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (vadTestStatus.mode !== "listening" && vadTestStatus.mode !== "voice") {
+      setVadTestLevelHistory(createAudioLevelHistory());
+      return;
+    }
+    setVadTestLevelHistory((history) => appendAudioLevelSample(history, dbfsToDisplayLevel(vadTestStatus.level)));
+  }, [vadTestStatus.level, vadTestStatus.mode, vadTestStatus.revision]);
 
   useEffect(() => {
     cleanupPreviewRequestRef.current += 1;
@@ -156,6 +250,13 @@ export default function SettingsPage({
     } finally {
       setCleaningRecordings(false);
     }
+  }
+
+  function confirmAudioServiceRestart() {
+    if (!window.confirm(text.settings.audioRestartServiceConfirm)) {
+      return;
+    }
+    onRestartAudioService();
   }
 
   function updateMaxRecords(value: string) {
@@ -278,6 +379,26 @@ export default function SettingsPage({
 
   function updateOutputVolumeReduction(value: string) {
     updateOutputVolumeDucking({ reduction_percent: clampInt(Number(value), 0, 100) });
+  }
+
+  function updateVoiceActivityDetection(patch: Partial<typeof voiceActivityDetection>) {
+    onChange({
+      ...config,
+      audio: {
+        ...config.audio,
+        voice_activity_detection: { ...voiceActivityDetection, ...patch },
+      },
+    });
+  }
+
+  function updateVadGateSettings(
+    patch: Partial<Pick<typeof voiceActivityDetection, "noise_margin_db" | "confirmation_ms" | "noise_window_ms">>,
+  ) {
+    const next = { ...voiceActivityDetection, ...patch };
+    updateVoiceActivityDetection(patch);
+    if (vadTestRunning) {
+      onUpdateVadTestSettings(next.noise_margin_db, next.confirmation_ms, next.noise_window_ms);
+    }
   }
 
   function toggleOutputDuckingDeviceName(name: string, checked: boolean) {
@@ -438,7 +559,18 @@ export default function SettingsPage({
         <div className="section-title">
           <h2>{text.settings.audio}</h2>
           <div className="section-actions">
-            <button className="secondary small" type="button" disabled={audioDevicesRefreshing} onClick={onRefreshAudioDevices}>
+            {canRestartSystemAudio ? (
+              <button
+                className="secondary small"
+                type="button"
+                disabled={!canRestartAudioService || audioServiceRestarting || audioDevicesRefreshing || vadTestStatus.mode !== "idle"}
+                title={text.settings.audioRestartServiceHelp}
+                onClick={confirmAudioServiceRestart}
+              >
+                {audioServiceRestarting ? text.settings.audioRestartingService : text.settings.audioRestartService}
+              </button>
+            ) : null}
+            <button className="secondary small" type="button" disabled={audioDevicesRefreshing || audioServiceRestarting || vadTestStatus.mode !== "idle"} onClick={onRefreshAudioDevices}>
               {audioDevicesRefreshing ? text.settings.audioRefreshingDevices : text.settings.audioRefreshDevices}
             </button>
           </div>
@@ -449,7 +581,7 @@ export default function SettingsPage({
               <h3>{text.settings.audioInput}</h3>
             </div>
             <div className="audio-input-policy">
-              <Field label={text.settings.audioInputPriority} group>
+              <Field label={text.settings.audioInputPriority} className="audio-policy-card" group>
                 <div className="input-device-priority-list">
                   {inputDevicePriority.map((preferred, index) => {
                     const available = findInputDevice(preferred, audioDevices);
@@ -461,29 +593,31 @@ export default function SettingsPage({
                           {available?.is_default ? text.settings.audioDefaultBadge : ""}
                           {!available ? text.settings.audioPolicyMissingBadge : ""}
                         </span>
-                        <button
-                          className="secondary small input-device-order-button"
-                          type="button"
-                          disabled={index === 0}
-                          title={text.settings.audioPriorityMoveUp}
-                          aria-label={text.settings.audioPriorityMoveUp}
-                          onClick={() => moveInputDevicePriority(index, -1)}
-                        >
-                          ↑
-                        </button>
-                        <button
-                          className="secondary small input-device-order-button"
-                          type="button"
-                          disabled={index === inputDevicePriority.length - 1}
-                          title={text.settings.audioPriorityMoveDown}
-                          aria-label={text.settings.audioPriorityMoveDown}
-                          onClick={() => moveInputDevicePriority(index, 1)}
-                        >
-                          ↓
-                        </button>
-                        <button className="secondary small" type="button" onClick={() => removeInputDevicePriority(index)}>
-                          {text.settings.audioPriorityRemove}
-                        </button>
+                        <div className="input-device-row-actions">
+                          <button
+                            className="secondary small input-device-order-button"
+                            type="button"
+                            disabled={index === 0}
+                            title={text.settings.audioPriorityMoveUp}
+                            aria-label={text.settings.audioPriorityMoveUp}
+                            onClick={() => moveInputDevicePriority(index, -1)}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            className="secondary small input-device-order-button"
+                            type="button"
+                            disabled={index === inputDevicePriority.length - 1}
+                            title={text.settings.audioPriorityMoveDown}
+                            aria-label={text.settings.audioPriorityMoveDown}
+                            onClick={() => moveInputDevicePriority(index, 1)}
+                          >
+                            ↓
+                          </button>
+                          <button className="secondary small" type="button" onClick={() => removeInputDevicePriority(index)}>
+                            {text.settings.audioPriorityRemove}
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
@@ -504,8 +638,8 @@ export default function SettingsPage({
                 </div>
               </Field>
 
-              <Field label={text.settings.audioInputBlacklist} group>
-                <div className="device-checklist">
+              <Field label={text.settings.audioInputBlacklist} className="audio-policy-card" group>
+                <div className="device-checklist audio-device-checklist">
                   {audioDevices.map((device) => (
                     <label key={device.id} className="device-checklist-row">
                       <input
@@ -531,6 +665,98 @@ export default function SettingsPage({
               </Field>
               <p className="settings-help-text">{text.settings.audioInputPolicyHelp}</p>
             </div>
+
+            <div className="vad-protection-card">
+              <div className="vad-card-header">
+                <div className="vad-card-copy settings-subsection-heading">
+                  <h3>{text.settings.vadTitle}</h3>
+                  <p className="settings-help-text">{text.settings.vadHelp}</p>
+                </div>
+                <label className="toggle-row vad-enabled-toggle">
+                  <input
+                    type="checkbox"
+                    checked={voiceActivityDetection.enabled}
+                    onChange={(event) => updateVoiceActivityDetection({ enabled: event.target.checked })}
+                    disabled={vadTestRunning}
+                  />
+                  <span>{text.settings.vadEnabled}</span>
+                </label>
+              </div>
+              {voiceActivityDetection.enabled ? (
+                <div className="vad-controls-grid">
+                  <Field label={text.settings.vadInitialSilenceTimeout} className="vad-range-field" group>
+                    <VadRangeNumberControl
+                      label={text.settings.vadInitialSilenceTimeout}
+                      value={voiceActivityDetection.initial_silence_timeout_secs}
+                      min={minVadInitialSilenceTimeoutSecs}
+                      max={maxVadInitialSilenceTimeoutSecs}
+                      step={vadInitialSilenceTimeoutStepSecs}
+                      unit={text.common.seconds}
+                      onChange={(value) => updateVoiceActivityDetection({ initial_silence_timeout_secs: value })}
+                    />
+                  </Field>
+                  <Field label={text.settings.vadNoiseMargin} className="vad-range-field" group>
+                    <VadRangeNumberControl
+                      label={text.settings.vadNoiseMargin}
+                      value={voiceActivityDetection.noise_margin_db}
+                      min={minVadNoiseMarginDb}
+                      max={maxVadNoiseMarginDb}
+                      step={vadNoiseMarginStepDb}
+                      unit="dB"
+                      onChange={(value) => updateVadGateSettings({ noise_margin_db: value })}
+                    />
+                  </Field>
+                  <Field label={text.settings.vadConfirmationDuration} className="vad-range-field" group>
+                    <VadRangeNumberControl
+                      label={text.settings.vadConfirmationDuration}
+                      value={voiceActivityDetection.confirmation_ms}
+                      min={minVadConfirmationMs}
+                      max={maxVadConfirmationMs}
+                      step={vadConfirmationStepMs}
+                      unit={text.common.milliseconds}
+                      onChange={(value) => updateVadGateSettings({ confirmation_ms: value })}
+                    />
+                  </Field>
+                  <Field label={text.settings.vadNoiseWindow} className="vad-range-field" group>
+                    <VadRangeNumberControl
+                      label={text.settings.vadNoiseWindow}
+                      value={voiceActivityDetection.noise_window_ms}
+                      min={minVadNoiseWindowMs}
+                      max={maxVadNoiseWindowMs}
+                      step={vadNoiseWindowStepMs}
+                      unit={text.common.milliseconds}
+                      onChange={(value) => updateVadGateSettings({ noise_window_ms: value })}
+                    />
+                  </Field>
+                </div>
+              ) : null}
+              {voiceActivityDetection.enabled ? (
+                <p className="settings-help-text vad-fixed-rule">{text.settings.vadContinuousRequirement}</p>
+              ) : null}
+              <div className="vad-test-footer">
+                <div className={`vad-test-capsule ${vadTestVisualState}`}>
+                  <span className="vad-test-label" role="status" aria-live="polite">{vadTestLabel}</span>
+                  <i aria-hidden="true" />
+                  <div className="voice-visual" aria-label={text.settings.vadTesting} role="img">
+                    <AudioWaveform samples={vadTestLevelHistory} />
+                  </div>
+                </div>
+                {!vadTestRunning ? (
+                  <button className="secondary small" type="button" onClick={onStartVadTest}>{text.settings.vadTest}</button>
+                ) : (
+                  <button className="secondary small" type="button" onClick={onStopVadTest}>{text.settings.vadStopTest}</button>
+                )}
+              </div>
+              {vadTestRunning ? (
+                <div className="vad-test-diagnostics" aria-label={text.settings.vadTesting}>
+                  <span>{text.settings.vadCurrentLevel(formatVadDbfs(vadTestStatus.level))}</span>
+                  <span>{text.settings.vadNoiseFloor(formatVadDbfs(vadTestStatus.noise_floor))}</span>
+                  <span>{text.settings.vadTriggerThreshold(formatVadDbfs(vadTestStatus.trigger_threshold))}</span>
+                  <span>{text.settings.vadTriggerProgress(Math.round(clampNumber(vadTestStatus.trigger_progress, 0, 1) * 100))}</span>
+                </div>
+              ) : null}
+              <p className="settings-help-text vad-test-help">{text.settings.vadTestHelp}</p>
+            </div>
           </div>
 
           <div className="settings-subsection output-ducking-block">
@@ -549,122 +775,126 @@ export default function SettingsPage({
               </label>
               {outputDucking.enabled && canDuckOutputVolume ? (
                 <div className="output-ducking-options">
-                  <div className="output-ducking-status">
-                    <span className="status-chip">
-                      {text.settings.outputVolumeDuckingCurrent(defaultOutputDevice?.name ?? text.settings.outputVolumeDuckingNoOutputDevice)}
-                    </span>
-                    {defaultOutputDeviceUnsupported && !defaultOutputDeviceUsesSoundSourceFallback ? (
-                      <span className="status-chip warning">
-                        {text.settings.outputVolumeDuckingUnsupportedShort}
-                        <HelpTip content={text.settings.outputVolumeDuckingDeviceUnsupported} />
-                      </span>
-                    ) : null}
-                    {defaultOutputDeviceUsesSoundSourceFallback ? (
-                      <span className="status-chip warning">
-                        {text.settings.outputVolumeDuckingSoundSourceFallbackShort}
-                        <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
-                      </span>
-                    ) : null}
-                    {defaultOutputDeviceUsesMuteFallback ? (
-                      <span className="status-chip warning">
-                        {text.settings.outputVolumeDuckingMuteFallbackShort}
-                        <HelpTip content={text.settings.outputVolumeDuckingDeviceMuteFallback} />
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="toggle-with-help">
-                    <label className="toggle-row">
-                      <input
-                        type="checkbox"
-                        checked={outputDucking.mute_instead_of_reduce}
-                        onChange={(event) =>
-                          updateOutputVolumeDucking({ mute_instead_of_reduce: event.target.checked })
-                        }
-                      />
-                      <span>{text.settings.outputVolumeDuckingMuteInstead}</span>
-                    </label>
-                    <HelpTip content={text.settings.outputVolumeDuckingMuteInsteadHelp} />
-                  </div>
-                  {!outputDucking.mute_instead_of_reduce ? (
-                    <Field label={text.settings.outputVolumeDuckingReduction} group>
-                      <div className="range-with-value">
-                        <input
-                          className="range-input"
-                          type="range"
-                          aria-label={text.settings.outputVolumeDuckingReduction}
-                          min="0"
-                          max="100"
-                          step="1"
-                          value={outputDucking.reduction_percent}
-                          onChange={(event) => updateOutputVolumeReduction(event.target.value)}
-                        />
-                        <input
-                          type="number"
-                          aria-label={text.settings.outputVolumeDuckingReduction}
-                          min="0"
-                          max="100"
-                          step="1"
-                          value={outputDucking.reduction_percent}
-                          onChange={(event) => updateOutputVolumeReduction(event.target.value)}
-                        />
-                        <span>%</span>
+                  <div className="output-ducking-layout">
+                    <div className="output-ducking-primary">
+                      <div className="output-ducking-status">
+                        <span className="status-chip">
+                          {text.settings.outputVolumeDuckingCurrent(defaultOutputDevice?.name ?? text.settings.outputVolumeDuckingNoOutputDevice)}
+                        </span>
+                        {defaultOutputDeviceUnsupported && !defaultOutputDeviceUsesSoundSourceFallback ? (
+                          <span className="status-chip warning">
+                            {text.settings.outputVolumeDuckingUnsupportedShort}
+                            <HelpTip content={text.settings.outputVolumeDuckingDeviceUnsupported} />
+                          </span>
+                        ) : null}
+                        {defaultOutputDeviceUsesSoundSourceFallback ? (
+                          <span className="status-chip warning">
+                            {text.settings.outputVolumeDuckingSoundSourceFallbackShort}
+                            <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
+                          </span>
+                        ) : null}
+                        {defaultOutputDeviceUsesMuteFallback ? (
+                          <span className="status-chip warning">
+                            {text.settings.outputVolumeDuckingMuteFallbackShort}
+                            <HelpTip content={text.settings.outputVolumeDuckingDeviceMuteFallback} />
+                          </span>
+                        ) : null}
                       </div>
-                    </Field>
-                  ) : null}
-                  {canUseSoundSourceFallback ? (
-                    <div className="sound-source-fallback">
                       <div className="toggle-with-help">
                         <label className="toggle-row">
                           <input
                             type="checkbox"
-                            checked={outputDucking.sound_source_hotkey_fallback_enabled}
-                            onChange={(event) => updateOutputVolumeDucking({ sound_source_hotkey_fallback_enabled: event.target.checked })}
+                            checked={outputDucking.mute_instead_of_reduce}
+                            onChange={(event) =>
+                              updateOutputVolumeDucking({ mute_instead_of_reduce: event.target.checked })
+                            }
                           />
-                          <span>{text.settings.outputVolumeDuckingSoundSourceFallback}</span>
+                          <span>{text.settings.outputVolumeDuckingMuteInstead}</span>
                         </label>
-                        <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
+                        <HelpTip content={text.settings.outputVolumeDuckingMuteInsteadHelp} />
                       </div>
-                      <ShortcutPicker
-                        label={text.settings.outputVolumeDuckingSoundSourceHotkey}
-                        enabled={outputDucking.sound_source_hotkey_fallback_enabled}
-                        value={outputDucking.sound_source_toggle_mute_hotkey}
-                        onChange={(value) => updateOutputVolumeDucking({ sound_source_toggle_mute_hotkey: value })}
-                        text={text}
-                        platform="macos"
-                        keyOptions={soundSourceShortcutKeyOptions}
-                        showEnabledToggle={false}
-                      />
-                    </div>
-                  ) : null}
-                  <Field label={text.settings.outputVolumeDuckingWhitelist} group>
-                    <div className="device-checklist">
-                      {audioOutputDevices.map((device) => (
-                        <label key={device.id} className="device-checklist-row">
-                          <input
-                            type="checkbox"
-                            checked={outputDucking.device_name_whitelist.includes(device.name)}
-                            onChange={(event) => toggleOutputDuckingDeviceName(device.name, event.target.checked)}
+                      {!outputDucking.mute_instead_of_reduce ? (
+                        <Field label={text.settings.outputVolumeDuckingReduction} group>
+                          <div className="range-with-value">
+                            <input
+                              className="range-input"
+                              type="range"
+                              aria-label={text.settings.outputVolumeDuckingReduction}
+                              min="0"
+                              max="100"
+                              step="1"
+                              value={outputDucking.reduction_percent}
+                              onChange={(event) => updateOutputVolumeReduction(event.target.value)}
+                            />
+                            <input
+                              type="number"
+                              aria-label={text.settings.outputVolumeDuckingReduction}
+                              min="0"
+                              max="100"
+                              step="1"
+                              value={outputDucking.reduction_percent}
+                              onChange={(event) => updateOutputVolumeReduction(event.target.value)}
+                            />
+                            <span>%</span>
+                          </div>
+                        </Field>
+                      ) : null}
+                      {canUseSoundSourceFallback ? (
+                        <div className="sound-source-fallback">
+                          <div className="toggle-with-help">
+                            <label className="toggle-row">
+                              <input
+                                type="checkbox"
+                                checked={outputDucking.sound_source_hotkey_fallback_enabled}
+                                onChange={(event) => updateOutputVolumeDucking({ sound_source_hotkey_fallback_enabled: event.target.checked })}
+                              />
+                              <span>{text.settings.outputVolumeDuckingSoundSourceFallback}</span>
+                            </label>
+                            <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
+                          </div>
+                          <ShortcutPicker
+                            label={text.settings.outputVolumeDuckingSoundSourceHotkey}
+                            enabled={outputDucking.sound_source_hotkey_fallback_enabled}
+                            value={outputDucking.sound_source_toggle_mute_hotkey}
+                            onChange={(value) => updateOutputVolumeDucking({ sound_source_toggle_mute_hotkey: value })}
+                            text={text}
+                            platform="macos"
+                            keyOptions={soundSourceShortcutKeyOptions}
+                            showEnabledToggle={false}
                           />
-                          <span>
-                            {device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}
-                            {outputDuckingDeviceBadge(device, text, canUseSoundSourceFallback && outputDucking.sound_source_hotkey_fallback_enabled)}
-                          </span>
-                        </label>
-                      ))}
-                      {missingOutputDuckingNames.map((name) => (
-                        <label key={name} className="device-checklist-row">
-                          <input
-                            type="checkbox"
-                            checked
-                            onChange={(event) => toggleOutputDuckingDeviceName(name, event.target.checked)}
-                          />
-                          <span>{text.settings.outputVolumeDuckingMissingDevice(name)}</span>
-                        </label>
-                      ))}
-                      {audioOutputDevices.length === 0 ? <span>{text.settings.audioNoOutputDevices}</span> : null}
-                      {outputDucking.device_name_whitelist.length === 0 ? <span>{text.settings.outputVolumeDuckingWhitelistAll}</span> : null}
+                        </div>
+                      ) : null}
                     </div>
-                  </Field>
+                    <Field label={text.settings.outputVolumeDuckingWhitelist} className="output-device-card" group>
+                      <div className="device-checklist output-device-checklist">
+                        {audioOutputDevices.map((device) => (
+                          <label key={device.id} className="device-checklist-row">
+                            <input
+                              type="checkbox"
+                              checked={outputDucking.device_name_whitelist.includes(device.name)}
+                              onChange={(event) => toggleOutputDuckingDeviceName(device.name, event.target.checked)}
+                            />
+                            <span>
+                              {device.name}{device.is_default ? text.settings.audioDefaultBadge : ""}
+                              {outputDuckingDeviceBadge(device, text, canUseSoundSourceFallback && outputDucking.sound_source_hotkey_fallback_enabled)}
+                            </span>
+                          </label>
+                        ))}
+                        {missingOutputDuckingNames.map((name) => (
+                          <label key={name} className="device-checklist-row">
+                            <input
+                              type="checkbox"
+                              checked
+                              onChange={(event) => toggleOutputDuckingDeviceName(name, event.target.checked)}
+                            />
+                            <span>{text.settings.outputVolumeDuckingMissingDevice(name)}</span>
+                          </label>
+                        ))}
+                        {audioOutputDevices.length === 0 ? <span>{text.settings.audioNoOutputDevices}</span> : null}
+                        {outputDucking.device_name_whitelist.length === 0 ? <span>{text.settings.outputVolumeDuckingWhitelistAll}</span> : null}
+                      </div>
+                    </Field>
+                  </div>
                 </div>
               ) : (
                 <p className="settings-help-text">
@@ -680,7 +910,7 @@ export default function SettingsPage({
         <div className="section-title">
           <h2>{text.settings.retention}</h2>
         </div>
-        <div className="form-grid">
+        <div className="form-grid retention-settings-grid">
           <Field label={text.settings.maxRecords} className="field-compact">
             <input type="number" min="1" max={maxHistoryRecords} value={config.retention.max_history_records} onChange={(event) => updateMaxRecords(event.target.value)} />
           </Field>
@@ -990,6 +1220,97 @@ function uniqueStrings(items: string[]) {
     values.push(value);
   }
   return values;
+}
+
+function VadRangeNumberControl({
+  label,
+  value,
+  min,
+  max,
+  step,
+  unit,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+  onChange: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const editingRef = useRef(false);
+
+  useEffect(() => {
+    if (!editingRef.current) {
+      setDraft(String(value));
+    }
+  }, [value]);
+
+  function commitDraft(raw: string) {
+    const parsed = Number(raw);
+    const next = raw.trim() && Number.isFinite(parsed)
+      ? normalizeSteppedInt(parsed, min, max, step)
+      : value;
+    editingRef.current = false;
+    setDraft(String(next));
+    if (next !== value) {
+      onChange(next);
+    }
+  }
+
+  return (
+    <div className="range-with-value vad-range-control">
+      <input
+        className="range-input"
+        type="range"
+        aria-label={`${label} slider`}
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => {
+          const next = normalizeSteppedInt(Number(event.target.value), min, max, step);
+          setDraft(String(next));
+          onChange(next);
+        }}
+      />
+      <input
+        type="number"
+        aria-label={`${label} value`}
+        inputMode="numeric"
+        min={min}
+        max={max}
+        step={step}
+        value={draft}
+        onFocus={() => {
+          editingRef.current = true;
+        }}
+        onChange={(event) => {
+          const raw = event.target.value;
+          setDraft(raw);
+          const parsed = Number(raw);
+          if (raw.trim() && Number.isFinite(parsed) && parsed >= min && parsed <= max) {
+            const next = normalizeSteppedInt(parsed, min, max, step);
+            setDraft(String(next));
+            onChange(next);
+          }
+        }}
+        onBlur={(event) => commitDraft(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      <span>{unit}</span>
+    </div>
+  );
+}
+
+function formatVadDbfs(value: number) {
+  return Number.isFinite(value) ? `${Math.round(value)} dB` : "—";
 }
 
 function clampInt(value: number, min: number, max: number) {

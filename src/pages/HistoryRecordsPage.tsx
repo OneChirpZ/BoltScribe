@@ -11,7 +11,9 @@ export default function HistoryRecordsPage({
   onPreviousPage,
   onNextPage,
   onCopyHistory,
+  onRetryHistory,
   onDeleteHistory,
+  canRetryHistory,
   canDeleteHistory,
   text,
 }: {
@@ -23,7 +25,9 @@ export default function HistoryRecordsPage({
   onPreviousPage: () => void;
   onNextPage: () => void;
   onCopyHistory: (text: string, label: string) => void;
+  onRetryHistory: (record: HistoryRecord) => Promise<void>;
   onDeleteHistory: (record: HistoryRecord) => Promise<void>;
+  canRetryHistory: boolean;
   canDeleteHistory: boolean;
   text: TextBundle;
 }) {
@@ -34,7 +38,9 @@ export default function HistoryRecordsPage({
         history={history}
         onRefresh={onRefresh}
         onCopy={onCopyHistory}
+        onRetry={onRetryHistory}
         onDelete={onDeleteHistory}
+        canRetry={canRetryHistory}
         canDelete={canDeleteHistory}
         text={text}
         footer={

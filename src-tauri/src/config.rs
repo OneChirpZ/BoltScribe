@@ -7,6 +7,15 @@ use std::path::PathBuf;
 
 const CONFIG_EXPORT_FORMAT: &str = "boltscribe.config";
 const CONFIG_EXPORT_VERSION: u32 = 1;
+pub const VAD_MIN_NOISE_MARGIN_DB: u32 = 1;
+pub const VAD_MAX_NOISE_MARGIN_DB: u32 = 40;
+pub const VAD_MIN_CONFIRMATION_MS: u32 = 240;
+pub const VAD_MAX_CONFIRMATION_MS: u32 = 2_000;
+pub const VAD_CONFIRMATION_STEP_MS: u32 = 20;
+pub const VAD_MIN_NOISE_WINDOW_MS: u32 = 400;
+pub const VAD_MAX_NOISE_WINDOW_MS: u32 = 3_000;
+pub const VAD_NOISE_WINDOW_STEP_MS: u32 = 100;
+pub const VAD_CONTINUOUS_SPEECH_MS: u32 = 240;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
@@ -43,6 +52,22 @@ pub struct AudioConfig {
     pub input_device_blacklist: Vec<AudioInputDeviceRef>,
     #[serde(default)]
     pub output_volume_ducking: OutputVolumeDuckingConfig,
+    #[serde(default)]
+    pub voice_activity_detection: VoiceActivityDetectionConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct VoiceActivityDetectionConfig {
+    #[serde(default = "default_vad_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_vad_noise_margin_db")]
+    pub noise_margin_db: u32,
+    #[serde(default = "default_vad_confirmation_ms")]
+    pub confirmation_ms: u32,
+    #[serde(default = "default_vad_noise_window_ms")]
+    pub noise_window_ms: u32,
+    #[serde(default = "default_vad_initial_silence_timeout_secs")]
+    pub initial_silence_timeout_secs: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -433,6 +458,7 @@ impl AudioConfig {
             self.input_device_name = None;
         }
         self.output_volume_ducking.normalize();
+        self.voice_activity_detection.normalize();
     }
 }
 
@@ -445,6 +471,40 @@ impl Default for AudioConfig {
             input_device_priority: Vec::new(),
             input_device_blacklist: Vec::new(),
             output_volume_ducking: OutputVolumeDuckingConfig::default(),
+            voice_activity_detection: VoiceActivityDetectionConfig::default(),
+        }
+    }
+}
+
+impl VoiceActivityDetectionConfig {
+    pub fn normalize(&mut self) {
+        self.noise_margin_db = self
+            .noise_margin_db
+            .clamp(VAD_MIN_NOISE_MARGIN_DB, VAD_MAX_NOISE_MARGIN_DB);
+        self.confirmation_ms = self
+            .confirmation_ms
+            .clamp(VAD_MIN_CONFIRMATION_MS, VAD_MAX_CONFIRMATION_MS);
+        self.confirmation_ms = ((self.confirmation_ms + VAD_CONFIRMATION_STEP_MS / 2)
+            / VAD_CONFIRMATION_STEP_MS)
+            * VAD_CONFIRMATION_STEP_MS;
+        self.noise_window_ms = self
+            .noise_window_ms
+            .clamp(VAD_MIN_NOISE_WINDOW_MS, VAD_MAX_NOISE_WINDOW_MS);
+        self.noise_window_ms = ((self.noise_window_ms + VAD_NOISE_WINDOW_STEP_MS / 2)
+            / VAD_NOISE_WINDOW_STEP_MS)
+            * VAD_NOISE_WINDOW_STEP_MS;
+        self.initial_silence_timeout_secs = self.initial_silence_timeout_secs.clamp(5, 60);
+    }
+}
+
+impl Default for VoiceActivityDetectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_vad_enabled(),
+            noise_margin_db: default_vad_noise_margin_db(),
+            confirmation_ms: default_vad_confirmation_ms(),
+            noise_window_ms: default_vad_noise_window_ms(),
+            initial_silence_timeout_secs: default_vad_initial_silence_timeout_secs(),
         }
     }
 }
@@ -510,6 +570,26 @@ impl SystemConfig {
 
 fn default_input_device_mode() -> String {
     "system_default".to_string()
+}
+
+fn default_vad_enabled() -> bool {
+    true
+}
+
+fn default_vad_noise_margin_db() -> u32 {
+    12
+}
+
+fn default_vad_confirmation_ms() -> u32 {
+    480
+}
+
+fn default_vad_noise_window_ms() -> u32 {
+    2_000
+}
+
+fn default_vad_initial_silence_timeout_secs() -> u32 {
+    15
 }
 
 fn default_output_volume_ducking_reduction_percent() -> u32 {
@@ -1795,6 +1875,57 @@ mod tests {
 
         assert!(config.audio.input_device_priority.is_empty());
         assert!(config.audio.input_device_blacklist.is_empty());
+    }
+
+    #[test]
+    fn voice_activity_detection_defaults_and_normalizes() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value["audio"]
+            .as_object_mut()
+            .unwrap()
+            .remove("voice_activity_detection");
+        let mut config: AppConfig = serde_json::from_value(value).unwrap();
+        assert!(config.audio.voice_activity_detection.enabled);
+        assert_eq!(config.audio.voice_activity_detection.noise_margin_db, 12);
+        assert_eq!(config.audio.voice_activity_detection.confirmation_ms, 480);
+        assert_eq!(config.audio.voice_activity_detection.noise_window_ms, 2_000);
+        assert_eq!(
+            config
+                .audio
+                .voice_activity_detection
+                .initial_silence_timeout_secs,
+            15
+        );
+
+        config.audio.voice_activity_detection.noise_margin_db = 99;
+        config.audio.voice_activity_detection.confirmation_ms = 251;
+        config.audio.voice_activity_detection.noise_window_ms = 3_999;
+        config
+            .audio
+            .voice_activity_detection
+            .initial_silence_timeout_secs = 1;
+        config.normalize();
+        assert_eq!(config.audio.voice_activity_detection.noise_margin_db, 40);
+        assert_eq!(config.audio.voice_activity_detection.confirmation_ms, 260);
+        assert_eq!(config.audio.voice_activity_detection.noise_window_ms, 3_000);
+        assert_eq!(
+            config
+                .audio
+                .voice_activity_detection
+                .initial_silence_timeout_secs,
+            5
+        );
+
+        let mut legacy_value = serde_json::to_value(AppConfig::default()).unwrap();
+        legacy_value["audio"]["voice_activity_detection"] = serde_json::json!({
+            "enabled": true,
+            "sensitivity": 4,
+            "initial_silence_timeout_secs": 15
+        });
+        let legacy: AppConfig = serde_json::from_value(legacy_value).unwrap();
+        assert_eq!(legacy.audio.voice_activity_detection.noise_margin_db, 12);
+        assert_eq!(legacy.audio.voice_activity_detection.confirmation_ms, 480);
+        assert_eq!(legacy.audio.voice_activity_detection.noise_window_ms, 2_000);
     }
 
     #[test]

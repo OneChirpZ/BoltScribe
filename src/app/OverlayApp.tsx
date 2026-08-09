@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { AppConfig, WorkflowStatus } from "../types";
+import { useEffect, useRef, useState } from "react";
+import type { AppConfig, AudioLevelSample, WorkflowStatus } from "../types";
 import RecordingOverlay from "../components/RecordingOverlay";
 import { appLanguage, translations } from "../domain/i18n";
 import { defaultRecordingOverlayScale, recordingOverlayBaseWidth } from "../domain/overlay";
@@ -9,7 +9,12 @@ import { cancelCurrentWorkflow, getStatus, listenAudioLevel, listenConfigUpdated
 export default function OverlayApp() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [status, setStatus] = useState<WorkflowStatus>(emptyStatus);
-  const [audioLevelSample, setAudioLevelSample] = useState({ level: 0, sequence: 0 });
+  const statusRef = useRef<WorkflowStatus>(emptyStatus);
+  const [audioLevelSample, setAudioLevelSample] = useState<AudioLevelSample & { sequence: number }>({
+    level: 0,
+    recording_revision: 0,
+    sequence: 0,
+  });
 
   useEffect(() => {
     document.documentElement.classList.add("overlay-window");
@@ -25,10 +30,18 @@ export default function OverlayApp() {
     const stopStatusSubscription = subscribeToWorkflowStatus({
       listen: listenWorkflowStatus,
       getSnapshot: getStatus,
-      onStatus: (nextStatus) => setStatus((current) => latestWorkflowStatus(current, nextStatus)),
+      onStatus: (nextStatus) => setStatus((current) => {
+        const latest = latestWorkflowStatus(current, nextStatus);
+        statusRef.current = latest;
+        return latest;
+      }),
     });
-    const unlistenAudioLevel = listenAudioLevel((level) => {
-      setAudioLevelSample((sample) => ({ level, sequence: sample.sequence + 1 }));
+    const unlistenAudioLevel = listenAudioLevel((sample) => {
+      const currentStatus = statusRef.current;
+      if (currentStatus.mode !== "recording" || sample.recording_revision !== currentStatus.revision) {
+        return;
+      }
+      setAudioLevelSample((current) => ({ ...sample, sequence: current.sequence + 1 }));
     });
     const unlistenConfig = listenConfigUpdated(setConfig);
 
@@ -59,6 +72,7 @@ export default function OverlayApp() {
       <RecordingOverlay
         status={status}
         audioLevel={audioLevelSample.level}
+        audioLevelRevision={audioLevelSample.recording_revision}
         audioLevelSequence={audioLevelSample.sequence}
         baseWidth={recordingOverlayBaseWidth(language)}
         scale={config?.ui.recording_overlay_scale ?? defaultRecordingOverlayScale}

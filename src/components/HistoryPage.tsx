@@ -9,7 +9,9 @@ export default function HistoryPage({
   history,
   onRefresh,
   onCopy,
+  onRetry,
   onDelete,
+  canRetry,
   canDelete,
   onOpenFullHistory,
   footer,
@@ -19,14 +21,26 @@ export default function HistoryPage({
   history: HistoryRecord[];
   onRefresh: () => void;
   onCopy: (text: string, label: string) => void;
+  onRetry: (record: HistoryRecord) => Promise<void>;
   onDelete: (record: HistoryRecord) => Promise<void>;
+  canRetry: boolean;
   canDelete: boolean;
   onOpenFullHistory?: () => void;
   footer?: ReactNode;
   text: TextBundle;
 }) {
   const [logRecord, setLogRecord] = useState<HistoryRecord | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  async function requestRetry(record: HistoryRecord) {
+    setRetryingId(record.id);
+    try {
+      await onRetry(record);
+    } finally {
+      setRetryingId(null);
+    }
+  }
 
   async function requestDelete(record: HistoryRecord) {
     const createdAt = new Date(record.created_at).toLocaleString();
@@ -56,7 +70,16 @@ export default function HistoryPage({
         {history.map((record) => {
           const correctedText = record.corrected_text || record.pasted_text;
           const displayText = correctedText || record.raw_text || record.workflow_error || text.history.noText;
+          const retryable = Boolean(
+            record.workflow_error
+            && record.audio_path
+            && record.raw_text.trim() === ""
+            && record.corrected_text.trim() === ""
+            && record.pasted_text.trim() === "",
+          );
+          const retrying = retryingId === record.id;
           const deleting = deletingId === record.id;
+          const mutating = retryingId !== null || deletingId !== null;
           return (
             <article className="history-item" key={record.id}>
               <div className="history-item-header">
@@ -70,9 +93,14 @@ export default function HistoryPage({
                 </div>
                 <div className="history-actions">
                   <button className="secondary small history-action-log" type="button" onClick={() => setLogRecord(record)}>{text.history.viewLog}</button>
+                  {retryable ? (
+                    <button className="secondary small history-action-retry" type="button" disabled={!canRetry || mutating} onClick={() => { void requestRetry(record); }}>
+                      {retrying ? text.history.retrying : text.history.retry}
+                    </button>
+                  ) : null}
                   <button className="secondary small history-action-corrected" type="button" disabled={!correctedText.trim()} onClick={() => onCopy(correctedText, text.history.correctedLabel)}>{text.history.copyCorrected}</button>
                   <button className="secondary small history-action-raw" type="button" disabled={!record.raw_text.trim()} onClick={() => onCopy(record.raw_text, text.history.rawLabel)}>{text.history.copyRaw}</button>
-                  <button className="secondary small history-action-delete" type="button" disabled={!canDelete || deletingId !== null} onClick={() => { void requestDelete(record); }}>
+                  <button className="secondary small history-action-delete" type="button" disabled={!canDelete || mutating} onClick={() => { void requestDelete(record); }}>
                     {deleting ? text.history.deleting : text.history.delete}
                   </button>
                 </div>
@@ -116,6 +144,7 @@ function formatHistoryLog(record: HistoryRecord) {
       task_id: record.asr_task_id,
       duration_ms: record.asr_duration_ms,
       service_audio_duration_ms: record.service_audio_duration_ms,
+      live_diagnostics: record.live_asr_diagnostics ?? null,
     },
     audio: {
       started_at: record.audio_started_at,

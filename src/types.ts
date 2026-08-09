@@ -18,6 +18,15 @@ export interface AudioConfig {
   input_device_priority: AudioInputDeviceRef[];
   input_device_blacklist: AudioInputDeviceRef[];
   output_volume_ducking: OutputVolumeDuckingConfig;
+  voice_activity_detection: VoiceActivityDetectionConfig;
+}
+
+export interface VoiceActivityDetectionConfig {
+  enabled: boolean;
+  noise_margin_db: number;
+  confirmation_ms: number;
+  noise_window_ms: number;
+  initial_silence_timeout_secs: number;
 }
 
 export interface AudioInputDeviceRef {
@@ -168,12 +177,56 @@ export interface DataDirInfo {
   cleanup_warning: string | null;
 }
 
+export type WorkflowStage =
+  | "idle"
+  | "starting"
+  | "waiting_for_speech"
+  | "recording"
+  | "recognizing"
+  | "file_asr_fallback"
+  | "correcting"
+  | "pasting"
+  | "complete"
+  | "error";
+
+export interface VadTestStatus {
+  mode: "idle" | "listening" | "voice" | "timed_out" | "error" | string;
+  raw_voice_active: boolean;
+  voice_active: boolean;
+  level: number;
+  noise_calibrated: boolean;
+  noise_floor: number;
+  trigger_threshold: number;
+  trigger_progress: number;
+  elapsed_ms: number;
+  remaining_ms: number;
+  noise_margin_db: number;
+  confirmation_ms: number;
+  noise_window_ms: number;
+  revision: number;
+  error: string | null;
+}
+
 export interface WorkflowStatus {
   mode: "idle" | "starting" | "recording" | "processing" | "error";
+  stage: WorkflowStage;
   message: string;
   current_audio_path: string | null;
   last_record_id: string | null;
   revision: number;
+}
+
+export interface AudioLevelSample {
+  level: number;
+  recording_revision: number;
+}
+
+export interface LiveAsrDiagnostics {
+  connection_attempts: number;
+  first_connected_after_ms: number | null;
+  peak_buffered_bytes: number;
+  last_error_category: string | null;
+  fallback_reason: string | null;
 }
 
 export interface HistoryRecord {
@@ -197,6 +250,7 @@ export interface HistoryRecord {
   workflow_error: string | null;
   asr_duration_ms: number | null;
   service_audio_duration_ms: number | null;
+  live_asr_diagnostics?: LiveAsrDiagnostics | null;
   total_duration_ms: number;
 }
 

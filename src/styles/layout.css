@@ -372,6 +372,14 @@
   scrollbar-gutter: stable;
 }
 
+.content-scroll > .home-stack,
+.content-scroll > .page-stack,
+.content-scroll > .panel,
+.content-scroll > .permission-banner {
+  width: min(100%, var(--content-max-width));
+  margin-inline: auto;
+}
+
 .content-scroll.correction-content {
   display: flex;
   flex-direction: column;
@@ -395,7 +403,8 @@
   gap: 18px;
   min-height: 64px;
   flex: 0 0 auto;
-  padding: 10px 30px;
+  padding-block: 10px;
+  padding-inline: max(30px, calc((100% - var(--content-max-width)) / 2));
   border-top: 1px solid var(--line);
   background:
     linear-gradient(90deg, rgba(67, 194, 122, 0.045), transparent 44%),
