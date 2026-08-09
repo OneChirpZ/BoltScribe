@@ -22,6 +22,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
+    "release:macos": "node scripts/build-macos-release.mjs",
     "test:frontend": "node --test tests/*.test.ts",
     "tauri": "tauri",
     "version:check": "node scripts/check-version.mjs"
