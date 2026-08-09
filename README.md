@@ -11,7 +11,7 @@
 <p align="center">
   <a href="README.zh-CN.md">中文 README</a>
   ·
-  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.4.0">Latest Release</a>
+  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.4.1">Latest Release</a>
   ·
   <a href="#features">Features</a>
   ·
@@ -55,12 +55,12 @@ It stays quietly in the menu bar or system tray, provides clear recording feedba
 
 ### Download
 
-The latest public release is [BoltScribe v1.4.0](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.4.0).
+The latest public release is [BoltScribe v1.4.1](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.4.1).
 
 Available downloads:
 
-- macOS Apple Silicon: `BoltScribe_1.4.0_aarch64.dmg`
-- Windows x64: `BoltScribe_1.4.0_x64-setup.exe`
+- macOS Apple Silicon: `BoltScribe_1.4.1_aarch64.dmg`
+- Windows x64: `BoltScribe_1.4.1_x64-setup.exe`
 
 ### Requirements
 
