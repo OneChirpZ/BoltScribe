@@ -969,12 +969,13 @@ fn stop_and_process_recording(
         &mut live_asr_diagnostics,
     );
     if task.cancelled() {
-        return Ok(());
+        return recorded.discard();
     }
 
     match process_result {
         Ok(()) => Ok(()),
         Err(err) if history::is_empty_asr_text_error(&err.to_string()) => {
+            recorded.discard()?;
             set_status_for_task(
                 &app,
                 &task.id,
@@ -982,7 +983,7 @@ fn stop_and_process_recording(
                     mode: WorkflowMode::Idle,
                     stage: WorkflowStage::Idle,
                     message: "未检测到语音，已忽略本次转写".to_string(),
-                    current_audio_path: Some(recorded.path.display().to_string()),
+                    current_audio_path: None,
                     last_record_id: None,
                     revision: 0,
                 },
@@ -1027,7 +1028,7 @@ fn process_recording(
 ) -> Result<()> {
     let audio_path = recorded.path.clone();
     if task.cancelled() {
-        return Ok(());
+        return recorded.discard();
     }
     if !set_status_for_task(
         &app,
@@ -1041,7 +1042,7 @@ fn process_recording(
             revision: 0,
         },
     ) {
-        return Ok(());
+        return recorded.discard();
     }
 
     let config = match config {
@@ -1064,7 +1065,7 @@ fn process_recording(
         asr_output.provider, asr_output.duration_ms
     );
     if task.cancelled() {
-        return Ok(());
+        return recorded.discard();
     }
     let asr_elapsed_ms = Some(asr_started_at.elapsed().as_millis() as u64);
     let raw_text = asr_output.text.trim().to_string();
@@ -1084,7 +1085,7 @@ fn process_recording(
             revision: 0,
         },
     ) {
-        return Ok(());
+        return recorded.discard();
     }
 
     let correction_started_at = Instant::now();
@@ -1093,7 +1094,7 @@ fn process_recording(
     log_timing("AI correction", correction_started_at, total_started_at);
     let pasted_text = corrected_text.clone();
     if task.cancelled() {
-        return Ok(());
+        return recorded.discard();
     }
 
     if !set_status_for_task(
@@ -1108,7 +1109,7 @@ fn process_recording(
             revision: 0,
         },
     ) {
-        return Ok(());
+        return recorded.discard();
     }
 
     let injection_started_at = Instant::now();
@@ -1117,7 +1118,7 @@ fn process_recording(
         .map(|err| err.to_string());
     log_timing("text injection", injection_started_at, total_started_at);
     if task.cancelled() {
-        return Ok(());
+        return recorded.discard();
     }
     if injection_error.is_none() {
         if !set_status_for_task(
@@ -1132,7 +1133,7 @@ fn process_recording(
                 revision: 0,
             },
         ) {
-            return Ok(());
+            return recorded.discard();
         }
         std::thread::sleep(std::time::Duration::from_millis(700));
     }

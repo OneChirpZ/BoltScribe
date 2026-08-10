@@ -72,6 +72,9 @@ fn main() {
                 .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
             tray::setup(app.handle()).map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
             let config = config::ConfigStore::load().unwrap_or_default();
+            if let Err(err) = history::HistoryStore::prune(&config.retention) {
+                eprintln!("failed to apply startup history retention: {err:#}");
+            }
             if config.system.launch_at_login {
                 if let Err(err) = autostart::apply_launch_at_login(true) {
                     eprintln!("failed to refresh launch-at-login registration: {err:?}");
