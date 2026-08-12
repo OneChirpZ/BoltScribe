@@ -60,8 +60,7 @@ The latest public release is [BoltScribe v1.5.0](https://github.com/OneChirpZ/Bo
 Available downloads:
 
 - macOS Apple Silicon: `BoltScribe_1.5.0_aarch64.dmg`
-
-The v1.5.0 release does not include a new Windows installer yet.
+- Windows x64: `BoltScribe_1.5.0_x64-setup.exe`
 
 ### Requirements
 

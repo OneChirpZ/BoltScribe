@@ -60,8 +60,7 @@ BoltScribe 可以在桌面任意位置把语音变成可直接使用的文本。
 当前可下载版本：
 
 - macOS Apple Silicon：`BoltScribe_1.5.0_aarch64.dmg`
-
-v1.5.0 暂不提供新的 Windows 安装包。
+- Windows x64：`BoltScribe_1.5.0_x64-setup.exe`
 
 ### 环境要求
 
