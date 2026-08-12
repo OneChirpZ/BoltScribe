@@ -18,6 +18,8 @@ config.json
 
 # Local Codex workspace actions and machine-specific paths.
 .codex/
+.agents/
+openspec/
 .idea/
 
 # Local recording/build artifacts.

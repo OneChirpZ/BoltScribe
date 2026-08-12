@@ -601,6 +601,7 @@ let previewConfig: AppConfig = {
   },
   ui: {
     app_language: previewLanguage,
+    theme: "system",
     recording_overlay_scale: 0.5,
     recording_overlay_offset_x: 0,
     recording_overlay_offset_y: 0,

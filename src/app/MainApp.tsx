@@ -6,6 +6,7 @@ import { appLanguage, translations } from "../domain/i18n";
 import { requiresAccessibilityPermission, supportsFnLongPressTrigger } from "../domain/platform";
 import { emptyStatus, latestWorkflowStatus, subscribeToWorkflowStatus } from "../domain/workflow";
 import { formatByteCount } from "../domain/historyMaintenance";
+import { applyThemePreference } from "../domain/theme";
 import NavButton from "../components/NavButton";
 import InputStatsCard from "../components/InputStatsCard";
 import PermissionGuide from "../components/PermissionGuide";
@@ -88,6 +89,23 @@ export default function MainApp() {
   const historyPageIndexRef = useRef(historyPageIndex);
   const nextNoticeIdRef = useRef(0);
   const currentNotice = noticeQueue[0] ?? null;
+
+  useEffect(() => {
+    const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => applyThemePreference(config?.ui.theme, systemTheme.matches);
+    applyTheme();
+    if (config?.ui.theme !== "light" && config?.ui.theme !== "dark") {
+      systemTheme.addEventListener("change", applyTheme);
+      window.addEventListener("focus", applyTheme);
+      document.addEventListener("visibilitychange", applyTheme);
+      return () => {
+        systemTheme.removeEventListener("change", applyTheme);
+        window.removeEventListener("focus", applyTheme);
+        document.removeEventListener("visibilitychange", applyTheme);
+      };
+    }
+    return undefined;
+  }, [config?.ui.theme]);
 
   const setNotice = useCallback((message: string) => {
     const normalized = message.trim();

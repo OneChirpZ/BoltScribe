@@ -66,12 +66,13 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(workflow::AppState::default())
         .setup(|app| {
+            let config = config::ConfigStore::load().unwrap_or_default();
+            windows::sync_app_theme(app.handle(), &config.ui.theme);
             windows::ensure_main_window(app.handle())
                 .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
             windows::ensure_overlay_window(app.handle())
                 .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
             tray::setup(app.handle()).map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
-            let config = config::ConfigStore::load().unwrap_or_default();
             if let Err(err) = history::HistoryStore::prune(&config.retention) {
                 eprintln!("failed to apply startup history retention: {err:#}");
             }

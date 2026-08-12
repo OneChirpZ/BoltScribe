@@ -19,9 +19,14 @@ const encodedRustFlags = (process.env.CARGO_ENCODED_RUSTFLAGS ?? "")
   .filter(Boolean);
 encodedRustFlags.push(`--remap-path-prefix=${homedir()}=/build-home`);
 
+const releaseEnvironment = { ...process.env };
+delete releaseEnvironment.APPLE_CERTIFICATE;
+delete releaseEnvironment.APPLE_CERTIFICATE_PASSWORD;
+releaseEnvironment.APPLE_SIGNING_IDENTITY = "-";
+
 const result = spawnSync("npm", ["run", "tauri", "--", "build"], {
   env: {
-    ...process.env,
+    ...releaseEnvironment,
     CARGO_ENCODED_RUSTFLAGS: encodedRustFlags.join(separator),
   },
   stdio: "inherit",

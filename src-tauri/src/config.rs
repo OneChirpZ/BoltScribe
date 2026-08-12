@@ -160,6 +160,8 @@ pub struct RaceModelTarget {
 pub struct UiConfig {
     #[serde(default = "default_app_language")]
     pub app_language: String,
+    #[serde(default = "default_ui_theme")]
+    pub theme: String,
     #[serde(default = "default_recording_overlay_scale")]
     pub recording_overlay_scale: f32,
     #[serde(default)]
@@ -334,6 +336,7 @@ impl AppConfig {
         self.ui.recording_overlay_scale = self.ui.recording_overlay_scale.clamp(0.25, 1.0);
         self.ui.recording_overlay_offset_x = self.ui.recording_overlay_offset_x.clamp(-4000, 4000);
         self.ui.recording_overlay_offset_y = self.ui.recording_overlay_offset_y.clamp(-4000, 4000);
+        self.ui.theme = normalize_ui_theme(&self.ui.theme);
         self.retention.normalize();
         self.system.normalize();
         self.ui.app_language = normalize_app_language(&self.ui.app_language);
@@ -648,6 +651,10 @@ fn default_app_language() -> String {
     "zh-CN".to_string()
 }
 
+fn default_ui_theme() -> String {
+    "system".to_string()
+}
+
 fn default_max_history_records() -> usize {
     500
 }
@@ -742,6 +749,14 @@ fn normalize_app_language(language: &str) -> String {
     match language.trim() {
         "en" | "en-US" => "en-US".to_string(),
         _ => default_app_language(),
+    }
+}
+
+fn normalize_ui_theme(theme: &str) -> String {
+    match theme.trim() {
+        "light" => "light".to_string(),
+        "dark" => "dark".to_string(),
+        _ => default_ui_theme(),
     }
 }
 
@@ -984,6 +999,7 @@ impl Default for UiConfig {
     fn default() -> Self {
         Self {
             app_language: default_app_language(),
+            theme: default_ui_theme(),
             recording_overlay_scale: default_recording_overlay_scale(),
             recording_overlay_offset_x: 0,
             recording_overlay_offset_y: 0,
@@ -1768,6 +1784,7 @@ mod tests {
             default_recording_overlay_scale()
         );
         assert_eq!(config.ui.app_language, "zh-CN");
+        assert_eq!(config.ui.theme, "system");
         assert_eq!(config.ui.recording_overlay_offset_x, 0);
         assert_eq!(config.ui.recording_overlay_offset_y, 0);
         assert_eq!(
@@ -1783,6 +1800,22 @@ mod tests {
         assert!(config.system.tray_left_click_recording_enabled);
         assert_eq!(config.audio.input_device_mode, "system_default");
         assert!(config.audio.input_device_priority.is_empty());
+    }
+
+    #[test]
+    fn ui_theme_defaults_and_preserves_supported_values() {
+        let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+        value["ui"].as_object_mut().unwrap().remove("theme");
+
+        let mut config: AppConfig = serde_json::from_value(value).unwrap();
+        config.normalize();
+        assert_eq!(config.ui.theme, "system");
+
+        for theme in ["light", "dark"] {
+            config.ui.theme = theme.to_string();
+            config.normalize();
+            assert_eq!(config.ui.theme, theme);
+        }
     }
 
     #[test]
@@ -2097,6 +2130,7 @@ mod tests {
         config.ui.recording_overlay_offset_x = 9000;
         config.ui.recording_overlay_offset_y = -9000;
         config.ui.app_language = "en".to_string();
+        config.ui.theme = "sepia".to_string();
 
         config.normalize();
 
@@ -2104,6 +2138,7 @@ mod tests {
         assert_eq!(config.ui.recording_overlay_offset_x, 4000);
         assert_eq!(config.ui.recording_overlay_offset_y, -4000);
         assert_eq!(config.ui.app_language, "en-US");
+        assert_eq!(config.ui.theme, "system");
 
         config.ui.recording_overlay_scale = 0.1;
 

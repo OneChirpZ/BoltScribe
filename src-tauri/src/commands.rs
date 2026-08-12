@@ -177,6 +177,7 @@ fn apply_and_save_config(
         }
         err.to_string()
     })?;
+    windows::sync_app_theme(app, &saved.ui.theme);
     history::HistoryStore::prune(&saved.retention).map_err(|err| err.to_string())?;
     windows::sync_dock_visibility(app).map_err(|err| err.to_string())?;
     if let Err(err) = fn_trigger::apply(

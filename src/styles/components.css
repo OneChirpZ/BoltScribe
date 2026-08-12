@@ -16,28 +16,30 @@
 }
 
 .primary {
-  color: #171306;
+  color: var(--on-accent);
   border-color: rgba(245, 184, 75, 0.88);
   background: linear-gradient(180deg, #ffd56d, var(--amber));
+  background: linear-gradient(180deg, var(--accent-top), var(--amber));
   font-weight: 700;
   box-shadow: 0 10px 28px rgba(245, 184, 75, 0.18);
 }
 
 .primary:hover:not(:disabled) {
-  color: #171306;
+  color: var(--on-accent);
   background: linear-gradient(180deg, #ffe092, #ffc34d);
+  background: linear-gradient(180deg, var(--accent-hover-top), var(--accent-hover-bottom));
   transform: translateY(-1px);
 }
 
 .primary.danger {
-  color: #fff9f7;
+  color: var(--on-danger);
   border-color: rgba(225, 94, 86, 0.8);
   background: linear-gradient(180deg, #eb786f, var(--danger));
   box-shadow: 0 10px 28px rgba(225, 94, 86, 0.18);
 }
 
 .primary.danger:hover:not(:disabled) {
-  color: #fff9f7;
+  color: var(--on-danger);
   border-color: rgba(242, 124, 116, 0.92);
   background: linear-gradient(180deg, #f07f76, #df554d);
   box-shadow: 0 12px 32px rgba(225, 94, 86, 0.26);
@@ -60,7 +62,7 @@
 .icon-button:hover {
   color: var(--text);
   border-color: var(--line-strong);
-  background: #262b24;
+  background: var(--fill-hover);
   transform: translateY(-1px);
 }
 
@@ -76,17 +78,17 @@
 }
 
 .hotkey-pill {
-  border: 1px solid rgba(36, 152, 255, 0.34);
+  border: 1px solid rgba(var(--blue-rgb), 0.34);
   border-radius: var(--radius);
   padding: 11px 14px;
-  color: #cfe8ff;
-  background: rgba(36, 152, 255, 0.08);
+  color: var(--text-soft);
+  background: var(--blue-soft);
 }
 
 .hotkey-pill.muted {
   color: var(--muted);
   border-color: var(--line);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--fill-subtle);
 }
 
 .summary-grid {
@@ -104,7 +106,7 @@
   border-radius: var(--radius);
   padding: 16px;
   color: inherit;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--fill-subtle);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -112,8 +114,8 @@
 }
 
 .summary-item:hover {
-  border-color: rgba(36, 152, 255, 0.28);
-  background: rgba(36, 152, 255, 0.045);
+  border-color: rgba(var(--blue-rgb), 0.28);
+  background: rgba(var(--blue-rgb), 0.045);
   transform: translateY(-1px);
 }
 
@@ -133,6 +135,6 @@
 }
 
 .summary-item:focus-visible {
-  outline: 3px solid rgba(36, 152, 255, 0.24);
+  outline: 3px solid rgba(var(--blue-rgb), 0.24);
   outline-offset: 2px;
 }

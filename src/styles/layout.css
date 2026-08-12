@@ -6,7 +6,7 @@
   min-height: 0;
   overflow: hidden;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0) 180px),
+    linear-gradient(180deg, var(--fill-soft), transparent 180px),
     var(--bg);
   animation: app-enter 220ms ease-out;
 }
@@ -74,7 +74,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--fill-subtle);
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
 }
@@ -87,7 +87,7 @@
 .brand-github-button:hover {
   color: var(--text);
   border-color: var(--line-strong);
-  background: rgba(255, 255, 255, 0.055);
+  background: var(--fill-hover);
   transform: translateY(-1px);
 }
 
@@ -200,7 +200,7 @@
 
 .correction-subnav-button:hover {
   color: var(--text-soft);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--fill-soft);
 }
 
 .correction-subnav-button.active {
@@ -238,12 +238,12 @@
 .nav-button:hover {
   color: var(--text);
   border-color: var(--line);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--fill-soft);
   transform: translateX(2px);
 }
 
 .nav-button.active {
-  color: #ffffff;
+  color: var(--text);
   border-color: rgba(36, 152, 255, 0.42);
   background: linear-gradient(90deg, rgba(36, 152, 255, 0.18), rgba(36, 152, 255, 0.06));
   box-shadow: inset 3px 0 0 var(--blue);
@@ -253,13 +253,13 @@
   margin-top: auto;
   border-color: var(--line);
   color: var(--muted);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--fill-subtle);
 }
 
 .ghost-button:hover {
   color: var(--text);
   border-color: var(--line-strong);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--fill-hover);
 }
 
 .input-stats-card {
@@ -270,7 +270,7 @@
   border-radius: var(--radius);
   padding: 12px;
   color: var(--text-soft);
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--fill-subtle);
 }
 
 .input-stats-header {
@@ -335,23 +335,23 @@
   width: var(--input-heatmap-cell);
   height: var(--input-heatmap-cell);
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--fill-soft);
 }
 
 .input-heatmap-cell[data-level="1"] {
-  background: rgba(74, 152, 93, 0.42);
+  background: rgba(var(--heatmap-rgb), 0.25);
 }
 
 .input-heatmap-cell[data-level="2"] {
-  background: rgba(74, 178, 102, 0.62);
+  background: rgba(var(--heatmap-rgb), 0.44);
 }
 
 .input-heatmap-cell[data-level="3"] {
-  background: rgba(82, 212, 125, 0.78);
+  background: rgba(var(--heatmap-rgb), 0.67);
 }
 
 .input-heatmap-cell[data-level="4"] {
-  background: rgba(143, 245, 176, 0.95);
+  background: rgba(var(--heatmap-rgb), 0.92);
 }
 
 .content {
@@ -363,6 +363,8 @@
 }
 
 .content-scroll {
+  container-name: content;
+  container-type: inline-size;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -408,14 +410,14 @@
   border-top: 1px solid var(--line);
   background:
     linear-gradient(90deg, rgba(67, 194, 122, 0.045), transparent 44%),
-    rgba(21, 23, 18, 0.97);
+    var(--save-bar);
   box-shadow: 0 -14px 36px rgba(0, 0, 0, 0.18);
 }
 
 .config-save-bar.dirty {
   background:
     linear-gradient(90deg, rgba(245, 184, 75, 0.1), transparent 48%),
-    rgba(25, 26, 20, 0.98);
+    var(--save-bar-dirty);
 }
 
 .config-save-status {
@@ -581,7 +583,7 @@
   display: grid;
   place-items: center;
   padding: 28px;
-  background: rgba(9, 10, 8, 0.72);
+  background: var(--scrim);
   backdrop-filter: blur(14px);
 }
 
@@ -649,7 +651,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 16px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--fill-subtle);
 }
 
 .permission-card-header {
@@ -712,7 +714,7 @@
   border-radius: var(--radius);
   padding: 28px 30px 30px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 150px),
+    linear-gradient(180deg, var(--fill-soft), transparent 150px),
     var(--surface);
   box-shadow: var(--shadow-panel);
   animation: panel-enter 240ms ease-out both;

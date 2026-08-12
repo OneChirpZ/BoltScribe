@@ -4,6 +4,7 @@
 - Version numbers must stay in sync across `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`.
 - Versions must be valid semver. Before packaging or publishing, run `npm run version:check`.
 - Build public macOS packages with `npm run release:macos`; it removes local home paths from Rust artifacts.
+- Build local `/Applications` replacements with `APPLE_SIGNING_IDENTITY=... npm run build:macos-local`, always reusing the same stable Apple Development identity from Keychain. Never install an ad-hoc build because changing signing lineage can invalidate macOS privacy grants. Keep certificate metadata and keys out of the repository, and verify the built and installed TeamIdentifier, Apple-anchored designated requirement, strict signature, and executable hash before launch.
 
 ## Development Workflow
 

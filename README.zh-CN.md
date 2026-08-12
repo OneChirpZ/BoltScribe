@@ -11,7 +11,7 @@
 <p align="center">
   <a href="README.md">English README</a>
   ·
-  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.4.1">最新发布</a>
+  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.5.0">最新发布</a>
   ·
   <a href="#功能亮点">功能亮点</a>
   ·
@@ -55,12 +55,13 @@ BoltScribe 可以在桌面任意位置把语音变成可直接使用的文本。
 
 ### 下载
 
-最新公开版本是 [BoltScribe v1.4.1](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.4.1)。
+最新公开版本是 [BoltScribe v1.5.0](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.5.0)。
 
 当前可下载版本：
 
-- macOS Apple Silicon：`BoltScribe_1.4.1_aarch64.dmg`
-- Windows x64：`BoltScribe_1.4.1_x64-setup.exe`
+- macOS Apple Silicon：`BoltScribe_1.5.0_aarch64.dmg`
+
+v1.5.0 暂不提供新的 Windows 安装包。
 
 ### 环境要求
 

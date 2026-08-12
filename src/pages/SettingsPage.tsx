@@ -13,6 +13,7 @@ import { defaultRecordingOverlayScale, maxRecordingOverlayScale, minRecordingOve
 import { cleanupCutoffTimestamp, formatByteCount } from "../domain/historyMaintenance";
 import type { PermissionRequestState } from "../domain/permissions";
 import { supportsAudioServiceRestart, supportsDockVisibilityControl, supportsFnLongPressTrigger, supportsOutputVolumeDucking, supportsSoundSourceHotkeyFallback, supportsTraySingleClickRecording } from "../domain/platform";
+import { normalizeThemePreference, type ThemePreference } from "../domain/theme";
 import {
   defaultVadConfirmationMs,
   defaultVadEnabled,
@@ -304,6 +305,10 @@ export default function SettingsPage({
     onChange(applyLanguageDefaultCorrectionTemplate(config, language));
   }
 
+  function updateTheme(theme: ThemePreference) {
+    onChange({ ...config, ui: { ...config.ui, theme } });
+  }
+
   function updateFnLongPressDuration(value: string) {
     const fn_long_press_duration_ms = clampInt(Number(value), minFnLongPressDurationMs, maxFnLongPressDurationMs);
     onChange({ ...config, system: { ...config.system, fn_long_press_duration_ms } });
@@ -424,18 +429,46 @@ export default function SettingsPage({
       <div className="settings-overview-grid">
         <div className="settings-section">
           <div className="section-title">
-            <h2>{text.settings.languageSection}</h2>
+            <h2>{text.settings.appearance}</h2>
           </div>
-          <label className="field field-medium settings-language-field">
-            <select
-              aria-label={text.settings.language}
-              value={config.ui.app_language ?? "zh-CN"}
-              onChange={(event) => updateLanguage(event.target.value)}
-            >
-              <option value="zh-CN">{text.settings.chinese}</option>
-              <option value="en-US">{text.settings.english}</option>
-            </select>
-          </label>
+          <div className="settings-appearance-stack">
+            <label className="field settings-language-field">
+              <span>{text.settings.languageSection}</span>
+              <select
+                aria-label={text.settings.language}
+                value={config.ui.app_language ?? "zh-CN"}
+                onChange={(event) => updateLanguage(event.target.value)}
+              >
+                <option value="zh-CN">{text.settings.chinese}</option>
+                <option value="en-US">{text.settings.english}</option>
+              </select>
+            </label>
+            <fieldset className="theme-field">
+              <legend>{text.settings.theme}</legend>
+              <div className="theme-options">
+                {([
+                  ["system", text.settings.themeSystem],
+                  ["light", text.settings.themeLight],
+                  ["dark", text.settings.themeDark],
+                ] as const).map(([value, label]) => (
+                  <label className="theme-option" key={value}>
+                    <input
+                      type="radio"
+                      name="ui-theme"
+                      value={value}
+                      checked={normalizeThemePreference(config.ui.theme) === value}
+                      onChange={() => updateTheme(value)}
+                    />
+                    <span className="theme-option-content">
+                      <span aria-hidden="true" className={`theme-swatch ${value}`} />
+                      <span>{label}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <small>{text.settings.themeHelp}</small>
+            </fieldset>
+          </div>
         </div>
 
         <div className="settings-section">

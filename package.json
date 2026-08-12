@@ -1,6 +1,6 @@
 {
   "name": "boltscribe",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "Local-first macOS and Windows voice input with ASR transcription, LLM correction, global hotkeys, and a Tauri tray workflow.",
   "private": true,
   "type": "module",
@@ -22,6 +22,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
+    "build:macos-local": "node scripts/build-macos-local.mjs",
     "release:macos": "node scripts/build-macos-release.mjs",
     "test:frontend": "node --test tests/*.test.ts",
     "tauri": "tauri",

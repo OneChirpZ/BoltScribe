@@ -109,6 +109,7 @@ export interface RaceModelTarget {
 
 export interface UiConfig {
   app_language: "zh-CN" | "en-US" | string;
+  theme: "system" | "light" | "dark" | string;
   recording_overlay_scale: number;
   recording_overlay_offset_x: number;
   recording_overlay_offset_y: number;

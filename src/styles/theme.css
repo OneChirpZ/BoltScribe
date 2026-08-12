@@ -1,0 +1,140 @@
+:root[data-theme="light"] .primary {
+  color: #ffffff;
+  border-color: #2f6fa8;
+  background: linear-gradient(180deg, #4a8ac7, #3979b8);
+  box-shadow: 0 8px 20px rgba(39, 91, 141, 0.16);
+}
+
+:root[data-theme="light"] .primary:hover:not(:disabled) {
+  color: #ffffff;
+  background: linear-gradient(180deg, #5895cf, #4383bf);
+}
+
+:root[data-theme="light"] .status-visual,
+:root[data-theme="light"] .hotkey-pill,
+:root[data-theme="light"] .dictionary-chip {
+  border-color: rgba(var(--blue-rgb), 0.34);
+}
+
+:root[data-theme="light"] .summary-item:hover,
+:root[data-theme="light"] .structured-item-row:focus-within {
+  border-color: rgba(var(--blue-rgb), 0.3);
+  background: rgba(var(--blue-rgb), 0.065);
+}
+
+:root[data-theme="light"] .nav-button.active {
+  border-color: rgba(var(--blue-rgb), 0.54);
+  background: linear-gradient(90deg, rgba(var(--blue-rgb), 0.2), rgba(var(--blue-rgb), 0.06));
+  box-shadow: inset 3px 0 0 var(--blue);
+}
+
+:root[data-theme="light"] .correction-subnav-button.active {
+  color: #2b659c;
+  background: rgba(var(--blue-rgb), 0.12);
+}
+
+:root[data-theme="light"] .nav-toggle input {
+  background: var(--fill-strong);
+}
+
+:root[data-theme="light"] .nav-toggle input:checked::after {
+  background: #ffffff;
+}
+
+:root[data-theme="light"] .config-save-bar.dirty .config-save-status,
+:root[data-theme="light"] .toast,
+:root[data-theme="light"] .toast-close,
+:root[data-theme="light"] .notice-close,
+:root[data-theme="light"] .beta-badge,
+:root[data-theme="light"] .help-tip,
+:root[data-theme="light"] .section-help,
+:root[data-theme="light"] .dictionary-chip-toggle,
+:root[data-theme="light"] .status-chip.warning,
+:root[data-theme="light"] .warning,
+:root[data-theme="light"] code,
+:root[data-theme="light"] .token-button {
+  color: #2f6fa8;
+}
+
+:root[data-theme="light"] .token-button:hover {
+  color: #245781;
+}
+
+:root[data-theme="light"] .help-tip::after,
+:root[data-theme="light"] .section-help::after {
+  color: var(--text-soft);
+  background: var(--surface-raised);
+  box-shadow: 0 12px 30px rgba(78, 67, 55, 0.16);
+}
+
+:root[data-theme="light"] .segmented-control,
+:root[data-theme="light"] code,
+:root[data-theme="light"] .token-button,
+:root[data-theme="light"] .data-dir-path,
+:root[data-theme="light"] .recording-cleanup-storage-item,
+:root[data-theme="light"] .settings-subsection,
+:root[data-theme="light"] .disabled-dictionary-section {
+  background: var(--fill-soft);
+}
+
+:root[data-theme="light"] .segmented-control button:hover:not(.active),
+:root[data-theme="light"] .dictionary-chip-remove:hover {
+  background: var(--fill-hover);
+}
+
+:root[data-theme="light"] .toggle-row > input[type="checkbox"] {
+  background: var(--fill-strong);
+}
+
+:root[data-theme="light"] .permission-banner,
+:root[data-theme="light"] .permission-banner span,
+:root[data-theme="light"] .permission-status.danger,
+:root[data-theme="light"] .unparsed-lines-warning,
+:root[data-theme="light"] .field-error,
+:root[data-theme="light"] .structured-row-error {
+  color: #9b4039;
+}
+
+:root[data-theme="light"] .device-warning-banner,
+:root[data-theme="light"] .device-warning-banner span,
+:root[data-theme="light"] .structured-row-warning {
+  color: #7f5b1d;
+}
+
+:root[data-theme="light"] .device-warning-banner {
+  background: #f4ead3;
+}
+
+:root[data-theme="light"] .permission-complete,
+:root[data-theme="light"] .permission-status.ok,
+:root[data-theme="light"] .recording-cleanup-storage-item.reclaimable > strong,
+:root[data-theme="light"] .dictionary-chip.disabled .dictionary-chip-toggle {
+  color: #2f714d;
+}
+
+:root[data-theme="light"] .history-action-log.secondary,
+:root[data-theme="light"] .history-action-log.secondary:hover:not(:disabled) {
+  color: #27638f;
+}
+
+:root[data-theme="light"] .history-action-retry.secondary,
+:root[data-theme="light"] .history-action-retry.secondary:hover:not(:disabled) {
+  color: #614b9d;
+}
+
+:root[data-theme="light"] .history-action-corrected.secondary,
+:root[data-theme="light"] .history-action-corrected.secondary:hover:not(:disabled) {
+  color: #2f714d;
+}
+
+:root[data-theme="light"] .history-action-raw.secondary,
+:root[data-theme="light"] .history-action-raw.secondary:hover:not(:disabled) {
+  color: #80591a;
+}
+
+:root[data-theme="light"] .history-action-delete.secondary,
+:root[data-theme="light"] .history-action-delete.secondary:hover:not(:disabled),
+:root[data-theme="light"] .recording-cleanup-button.secondary,
+:root[data-theme="light"] .recording-cleanup-button.secondary:hover:not(:disabled) {
+  color: #9b4039;
+}

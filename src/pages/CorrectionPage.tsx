@@ -148,7 +148,7 @@ export default function CorrectionPage({
   }
 
   return (
-    <section className="panel correction-page">
+    <section className={`panel correction-page correction-page-${section}`}>
       <header className="correction-subpage-header">
         <div>
           <div className="eyebrow">{text.correction.title}</div>
@@ -157,7 +157,7 @@ export default function CorrectionPage({
         <p>{sectionDetails.description}</p>
       </header>
 
-      <div className="correction-subpage-body">
+      <div className={`correction-subpage-body correction-subpage-body-${section}`}>
         {section === "requirements" ? (
           <label className="correction-fill-field correction-requirements-editor">
             <span className="field-label">{text.correction.requirementText}</span>
