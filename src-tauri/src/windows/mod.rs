@@ -8,7 +8,7 @@ pub(crate) use main_window::ensure_main_window;
 pub(crate) use main_window::{hide_main_window, show_main_window, sync_dock_visibility};
 pub(crate) use overlay::{
     ensure_overlay_snap_guide_window, ensure_overlay_window, record_overlay_moved,
-    start_overlay_drag, sync_overlay_window,
+    start_overlay_drag, sync_overlay_layout_cache, sync_overlay_window,
 };
 
 pub(crate) fn sync_app_theme(app: &AppHandle<Wry>, preference: &str) {

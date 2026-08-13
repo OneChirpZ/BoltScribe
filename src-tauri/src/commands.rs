@@ -239,6 +239,7 @@ fn apply_and_save_config(
         err.to_string()
     })?;
     windows::sync_app_theme(app, &saved.ui.theme);
+    windows::sync_overlay_layout_cache(&saved.ui);
     let mut warnings = Vec::new();
     if let Err(err) = history::HistoryStore::prune(&saved.retention) {
         warnings.push(ConfigApplyWarning {

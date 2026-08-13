@@ -325,7 +325,8 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .overlay-scale-control {
+  .overlay-scale-control,
+  .overlay-snap-range-control {
     grid-column: 1 / -1;
   }
 }
@@ -342,7 +343,8 @@
     grid-template-columns: 1fr;
   }
 
-  .overlay-scale-control {
+  .overlay-scale-control,
+  .overlay-snap-range-control {
     grid-column: auto;
   }
 }

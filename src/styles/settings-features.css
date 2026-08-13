@@ -310,12 +310,13 @@
 
 .overlay-control-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(100px, 140px));
+  grid-template-columns: repeat(2, minmax(180px, 1fr)) repeat(2, minmax(100px, 140px));
   align-items: end;
   gap: 12px;
 }
 
 .overlay-scale-control,
+.overlay-snap-range-control,
 .overlay-control-row .field-compact {
   min-width: 0;
 }

@@ -48,6 +48,9 @@ const OVERLAY_BOTTOM_MARGIN: f64 = 28.0;
 const OVERLAY_SNAP_GUIDE_LABEL: &str = "overlay-snap-guide";
 const OVERLAY_SNAP_ENTER_RADIUS: f64 = 32.0;
 const OVERLAY_SNAP_EXIT_RADIUS: f64 = 44.0;
+const OVERLAY_SNAP_RANGE_PERCENT_DEFAULT: u16 = 200;
+const OVERLAY_SNAP_RANGE_PERCENT_MIN: u16 = 50;
+const OVERLAY_SNAP_RANGE_PERCENT_MAX: u16 = 500;
 const OVERLAY_SNAP_PREVIEW_INTERVAL: Duration = Duration::from_millis(16);
 const OVERLAY_DRAG_RELEASE_POLL_INTERVAL: Duration = Duration::from_millis(12);
 const OVERLAY_SNAP_ANIMATION_FRAMES: u32 = 10;
@@ -78,10 +81,11 @@ struct OverlayDragSession {
     layout: OverlayLayout,
     moved: bool,
     snap_active: bool,
+    guide_target: Option<OverlaySnapTarget>,
     last_preview_at: Option<Instant>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct OverlaySnapTarget {
     #[cfg(target_os = "macos")]
     logical_origin: (f64, f64),
@@ -636,6 +640,7 @@ pub(crate) fn start_overlay_drag(app: &tauri::AppHandle<Wry>) -> anyhow::Result<
             layout,
             moved: false,
             snap_active: false,
+            guide_target: None,
             last_preview_at: None,
         });
         id
@@ -645,8 +650,34 @@ pub(crate) fn start_overlay_drag(app: &tauri::AppHandle<Wry>) -> anyhow::Result<
         cancel_overlay_drag(app);
         return Err(err.into());
     }
-    if let Err(err) = hide_overlay_snap_guide(app, Some(id)) {
-        eprintln!("failed to clear overlay snap guide for a new drag: {err:?}");
+
+    match evaluate_overlay_snap(app, layout) {
+        Ok(evaluation) => {
+            let snap_active = snap_target_is_active(
+                false,
+                evaluation.distance_squared,
+                layout.snap_range_percent,
+            );
+            let accepted = OVERLAY_DRAG_SESSION
+                .lock()
+                .ok()
+                .and_then(|mut current| {
+                    let session = current.as_mut()?;
+                    if session.id != id {
+                        return None;
+                    }
+                    session.snap_active = snap_active;
+                    session.guide_target = Some(evaluation.target);
+                    Some(())
+                })
+                .is_some();
+            if accepted {
+                if let Err(err) = show_overlay_snap_guide(app, id, evaluation.target, layout) {
+                    eprintln!("failed to show overlay snap guide for a new drag: {err:?}");
+                }
+            }
+        }
+        Err(err) => eprintln!("failed to evaluate initial overlay snap guide: {err:?}"),
     }
 
     let watcher_app = app.clone();
@@ -686,9 +717,13 @@ pub(crate) fn record_overlay_moved(app: &tauri::AppHandle<Wry>) {
             return;
         }
     };
-    let snap_active = snap_target_is_active(was_active, evaluation.distance_squared);
+    let snap_active = snap_target_is_active(
+        was_active,
+        evaluation.distance_squared,
+        layout.snap_range_percent,
+    );
 
-    let changed = OVERLAY_DRAG_SESSION
+    let target_changed = OVERLAY_DRAG_SESSION
         .lock()
         .ok()
         .and_then(|mut current| {
@@ -696,22 +731,18 @@ pub(crate) fn record_overlay_moved(app: &tauri::AppHandle<Wry>) {
             if session.id != id {
                 return None;
             }
-            let changed = session.snap_active != snap_active;
+            let target_changed = session.guide_target != Some(evaluation.target);
             session.snap_active = snap_active;
-            Some(changed)
+            session.guide_target = Some(evaluation.target);
+            Some(target_changed)
         })
         .unwrap_or(false);
 
-    if !changed {
+    if !target_changed {
         return;
     }
-    let result = if snap_active {
-        show_overlay_snap_guide(app, id, evaluation.target, layout)
-    } else {
-        hide_overlay_snap_guide(app, Some(id))
-    };
-    if let Err(err) = result {
-        eprintln!("failed to update overlay snap guide: {err:?}");
+    if let Err(err) = show_overlay_snap_guide(app, id, evaluation.target, layout) {
+        eprintln!("failed to move overlay snap guide: {err:?}");
     }
 }
 
@@ -788,9 +819,13 @@ fn finish_moved_overlay_drag(
     session: OverlayDragSession,
 ) -> anyhow::Result<()> {
     let evaluation = evaluate_overlay_snap(app, session.layout)?;
-    let should_snap = snap_target_is_active(session.snap_active, evaluation.distance_squared);
+    let should_snap = snap_target_is_active(
+        session.snap_active,
+        evaluation.distance_squared,
+        session.layout.snap_range_percent,
+    );
     let update = if should_snap {
-        if !session.snap_active {
+        if session.guide_target != Some(evaluation.target) {
             if let Err(err) = show_overlay_snap_guide(app, id, evaluation.target, session.layout) {
                 eprintln!("failed to show final overlay snap guide: {err:?}");
             }
@@ -810,9 +845,6 @@ fn finish_moved_overlay_drag(
             }
         }
     } else {
-        if let Err(err) = hide_overlay_snap_guide(app, Some(id)) {
-            eprintln!("failed to hide inactive overlay snap guide: {err:?}");
-        }
         commit_overlay_position(app, id, Some(evaluation.current_physical_origin))?
     };
 
@@ -856,12 +888,17 @@ fn overlay_drag_is_current(id: u64) -> bool {
     OVERLAY_DRAG_GENERATION.load(Ordering::Acquire) == id
 }
 
-fn snap_target_is_active(was_active: bool, distance_squared: f64) -> bool {
-    let radius = if was_active {
+fn snap_target_is_active(was_active: bool, distance_squared: f64, snap_range_percent: u16) -> bool {
+    let base_radius = if was_active {
         OVERLAY_SNAP_EXIT_RADIUS
     } else {
         OVERLAY_SNAP_ENTER_RADIUS
     };
+    let percent = snap_range_percent.clamp(
+        OVERLAY_SNAP_RANGE_PERCENT_MIN,
+        OVERLAY_SNAP_RANGE_PERCENT_MAX,
+    ) as f64;
+    let radius = base_radius * percent / 100.0;
     distance_squared <= radius * radius
 }
 
@@ -918,6 +955,7 @@ mod cross_platform_tests {
         OverlayLayout {
             width: 170.0,
             height: 39.0,
+            snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x,
             offset_y,
         }
@@ -1091,6 +1129,7 @@ mod cross_platform_tests {
         let layout = OverlayLayout {
             width: 300.0,
             height: 80.0,
+            snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x: 4_000,
             offset_y: -4_000,
         };
@@ -1104,10 +1143,18 @@ mod cross_platform_tests {
 
     #[test]
     fn snap_activation_uses_logical_distance_hysteresis() {
-        assert!(snap_target_is_active(false, 32.0_f64.powi(2)));
-        assert!(!snap_target_is_active(false, 32.1_f64.powi(2)));
-        assert!(snap_target_is_active(true, 43.9_f64.powi(2)));
-        assert!(!snap_target_is_active(true, 44.1_f64.powi(2)));
+        assert!(snap_target_is_active(false, 32.0_f64.powi(2), 100));
+        assert!(!snap_target_is_active(false, 32.1_f64.powi(2), 100));
+        assert!(snap_target_is_active(true, 43.9_f64.powi(2), 100));
+        assert!(!snap_target_is_active(true, 44.1_f64.powi(2), 100));
+    }
+
+    #[test]
+    fn snap_range_percentage_scales_both_hysteresis_radii() {
+        assert!(snap_target_is_active(false, 64.0_f64.powi(2), 200));
+        assert!(!snap_target_is_active(false, 64.1_f64.powi(2), 200));
+        assert!(snap_target_is_active(true, 87.9_f64.powi(2), 200));
+        assert!(!snap_target_is_active(true, 88.1_f64.powi(2), 200));
     }
 
     #[test]
@@ -1121,6 +1168,7 @@ mod cross_platform_tests {
         let default_layout = OverlayLayout {
             width: 170.0,
             height: 80.0,
+            snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x: 0,
             offset_y: 0,
         };
@@ -1303,6 +1351,7 @@ fn destination_overlay_monitor(
 struct OverlayLayout {
     width: f64,
     height: f64,
+    snap_range_percent: u16,
     offset_x: i32,
     offset_y: i32,
 }
@@ -1320,6 +1369,10 @@ fn cache_overlay_layout(layout: OverlayLayout) {
     }
 }
 
+pub(crate) fn sync_overlay_layout_cache(ui: &crate::config::UiConfig) {
+    cache_overlay_layout(overlay_layout_from_ui(ui));
+}
+
 fn current_overlay_layout() -> OverlayLayout {
     OVERLAY_CURRENT_LAYOUT
         .lock()
@@ -1328,6 +1381,7 @@ fn current_overlay_layout() -> OverlayLayout {
         .unwrap_or(OverlayLayout {
             width: (OVERLAY_BASE_WIDTH_ZH * 0.5).ceil(),
             height: (OVERLAY_BASE_HEIGHT * 0.5).ceil(),
+            snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x: 0,
             offset_y: 0,
         })
@@ -1344,6 +1398,10 @@ fn overlay_layout_from_ui(ui: &crate::config::UiConfig) -> OverlayLayout {
     OverlayLayout {
         width: (base_width * scale).ceil(),
         height: (OVERLAY_BASE_HEIGHT * scale).ceil(),
+        snap_range_percent: ui.recording_overlay_snap_range_percent.clamp(
+            OVERLAY_SNAP_RANGE_PERCENT_MIN,
+            OVERLAY_SNAP_RANGE_PERCENT_MAX,
+        ),
         offset_x: ui.recording_overlay_offset_x,
         offset_y: ui.recording_overlay_offset_y,
     }
@@ -1796,6 +1854,7 @@ mod tests {
         let layout = OverlayLayout {
             width: 157.0,
             height: 39.0,
+            snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x: 0,
             offset_y: 0,
         };
@@ -1817,6 +1876,7 @@ mod tests {
         let layout = OverlayLayout {
             width: 300.0,
             height: 80.0,
+            snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x: 4000,
             offset_y: -4000,
         };

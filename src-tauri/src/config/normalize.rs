@@ -20,6 +20,8 @@ impl AppConfig {
         self.asr.normalize();
         self.audio.normalize();
         self.ui.recording_overlay_scale = self.ui.recording_overlay_scale.clamp(0.25, 1.0);
+        self.ui.recording_overlay_snap_range_percent =
+            self.ui.recording_overlay_snap_range_percent.clamp(50, 500);
         self.ui.recording_overlay_offset_x = self.ui.recording_overlay_offset_x.clamp(-4000, 4000);
         self.ui.recording_overlay_offset_y = self.ui.recording_overlay_offset_y.clamp(-4000, 4000);
         self.ui.theme = normalize_ui_theme(&self.ui.theme);

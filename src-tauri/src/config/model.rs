@@ -158,6 +158,8 @@ pub struct UiConfig {
     pub theme: String,
     #[serde(default = "defaults::default_recording_overlay_scale")]
     pub recording_overlay_scale: f32,
+    #[serde(default = "defaults::default_recording_overlay_snap_range_percent")]
+    pub recording_overlay_snap_range_percent: u16,
     #[serde(default)]
     pub recording_overlay_offset_x: i32,
     #[serde(default)]
@@ -360,6 +362,8 @@ impl Default for UiConfig {
             app_language: defaults::default_app_language(),
             theme: defaults::default_ui_theme(),
             recording_overlay_scale: defaults::default_recording_overlay_scale(),
+            recording_overlay_snap_range_percent:
+                defaults::default_recording_overlay_snap_range_percent(),
             recording_overlay_offset_x: 0,
             recording_overlay_offset_y: 0,
         }

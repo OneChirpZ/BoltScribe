@@ -75,6 +75,7 @@ test("drag position updates preserve unrelated dirty settings", () => {
     ui: {
       app_language: "zh-CN",
       recording_overlay_scale: 0.5,
+      recording_overlay_snap_range_percent: 200,
       recording_overlay_offset_x: 0,
       recording_overlay_offset_y: 0,
     },

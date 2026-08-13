@@ -74,6 +74,10 @@ pub(super) fn default_recording_overlay_scale() -> f32 {
     0.5
 }
 
+pub(super) fn default_recording_overlay_snap_range_percent() -> u16 {
+    200
+}
+
 pub(super) fn default_app_language() -> String {
     "zh-CN".to_string()
 }
