@@ -268,14 +268,15 @@ fn apply_and_save_config(
             detail: err.to_string(),
         });
     }
-    if let Err(err) = app.emit("config://updated", &saved) {
+    let latest_saved = config::ConfigStore::load().map_err(|err| err.to_string())?;
+    if let Err(err) = app.emit("config://updated", &latest_saved) {
         warnings.push(ConfigApplyWarning {
             code: ConfigApplyWarningCode::ConfigEvent,
             detail: err.to_string(),
         });
     }
     Ok(SaveConfigResult {
-        config: saved,
+        config: latest_saved,
         warnings,
     })
 }
