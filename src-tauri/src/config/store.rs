@@ -7,11 +7,19 @@ use crate::paths;
 use anyhow::{Context, Result};
 use std::fs::{self, File};
 use std::io::Write;
+use std::sync::Mutex;
+
+static CONFIG_ACCESS_LOCK: Mutex<()> = Mutex::new(());
 
 pub struct ConfigStore;
 
 impl ConfigStore {
     pub fn load() -> Result<AppConfig> {
+        let _guard = config_access_guard()?;
+        Self::load_unlocked()
+    }
+
+    fn load_unlocked() -> Result<AppConfig> {
         let path = paths::config_path()?;
         #[cfg(target_os = "windows")]
         restore_interrupted_windows_replace(&path)?;
@@ -20,7 +28,7 @@ impl ConfigStore {
                 return Ok(config);
             }
             let config = AppConfig::default();
-            Self::save(&config)?;
+            Self::save_unlocked(&config)?;
             return Ok(config);
         }
 
@@ -72,7 +80,14 @@ impl ConfigStore {
         Ok(Some(config))
     }
 
-    pub fn save(config: &AppConfig) -> Result<AppConfig> {
+    pub fn update(mutator: impl FnOnce(&mut AppConfig)) -> Result<AppConfig> {
+        let _guard = config_access_guard()?;
+        let mut config = Self::load_unlocked()?;
+        mutator(&mut config);
+        Self::save_unlocked(&config)
+    }
+
+    fn save_unlocked(config: &AppConfig) -> Result<AppConfig> {
         let path = paths::config_path()?;
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -85,6 +100,12 @@ impl ConfigStore {
         write_config_atomically(&path, raw.as_bytes())?;
         Ok(config)
     }
+}
+
+fn config_access_guard() -> Result<std::sync::MutexGuard<'static, ()>> {
+    CONFIG_ACCESS_LOCK
+        .lock()
+        .map_err(|_| anyhow::anyhow!("Config access lock is unavailable"))
 }
 
 fn write_config_atomically(path: &std::path::Path, contents: &[u8]) -> Result<()> {

@@ -14,6 +14,7 @@ import type {
   RecordingCleanupPreview,
   RecordingCleanupResult,
   RecordingCleanupUnit,
+  RecordingOverlayPositionUpdate,
   SaveConfigResult,
   VadTestStatus,
   WorkflowStatus,
@@ -23,12 +24,23 @@ import type { AppApi } from "./contracts";
 export const nativeAppApi = {
   config: {
     loadConfig: () => invoke<AppConfig>("load_config"),
-    saveConfig: (config: AppConfig) => invoke<SaveConfigResult>("save_config", { config }),
+    saveConfig: (
+      config: AppConfig,
+      expectedOverlayPosition?: RecordingOverlayPositionUpdate | null,
+    ) => invoke<SaveConfigResult>("save_config", {
+      config,
+      expectedOverlayPosition: expectedOverlayPosition ?? null,
+    }),
     exportConfig: (config: AppConfig) => invoke<string>("export_config", { config }),
     importConfig: (raw: string) => invoke<ConfigImportResult>("import_config", { raw }),
     listenConfigUpdated: (handler: (config: AppConfig) => void) =>
       listen<AppConfig>("config://updated", (event) => handler(event.payload)),
     listenConfigCloseRequested: (handler: () => void) => listen("config://close-requested", handler),
+  },
+  overlay: {
+    startRecordingOverlayDrag: () => invoke<void>("start_recording_overlay_drag"),
+    listenRecordingOverlayPositionUpdated: (handler: (update: RecordingOverlayPositionUpdate) => void) =>
+      listen<RecordingOverlayPositionUpdate>("overlay://position-updated", (event) => handler(event.payload)),
   },
   workflow: {
     getStatus: () => invoke<WorkflowStatus>("get_status"),

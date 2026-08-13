@@ -52,8 +52,25 @@ pub(crate) fn load_config() -> Result<config::AppConfig, String> {
 pub(crate) fn save_config(
     app: tauri::AppHandle<Wry>,
     config: config::AppConfig,
+    expected_overlay_position: Option<RecordingOverlayPositionExpectation>,
 ) -> Result<SaveConfigResult, String> {
-    apply_and_save_config(&app, config)
+    apply_and_save_config(&app, config, expected_overlay_position)
+}
+
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+pub(crate) struct RecordingOverlayPositionExpectation {
+    recording_overlay_offset_x: i32,
+    recording_overlay_offset_y: i32,
+}
+
+#[tauri::command]
+pub(crate) fn start_recording_overlay_drag(
+    window: tauri::WebviewWindow<Wry>,
+) -> Result<(), String> {
+    if window.label() != "overlay" {
+        return Err("native recording-overlay dragging is restricted to the overlay window".into());
+    }
+    windows::start_overlay_drag(window.app_handle()).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -69,7 +86,7 @@ pub(crate) fn import_config(
     raw: String,
 ) -> Result<ImportConfigResult, String> {
     let imported = config::ConfigStore::import_json(&raw).map_err(|err| err.to_string())?;
-    let applied = apply_and_save_config(&app, imported.config)?;
+    let applied = apply_and_save_config(&app, imported.config, None)?;
     Ok(ImportConfigResult {
         config: applied.config,
         report: imported.report,
@@ -182,6 +199,7 @@ fn format_duration(duration: Duration) -> String {
 fn apply_and_save_config(
     app: &tauri::AppHandle<Wry>,
     config: config::AppConfig,
+    expected_overlay_position: Option<RecordingOverlayPositionExpectation>,
 ) -> Result<SaveConfigResult, String> {
     let previous = config::ConfigStore::load().map_err(|err| err.to_string())?;
     let mut next = config;
@@ -204,7 +222,11 @@ fn apply_and_save_config(
         err.to_string()
     })?;
 
-    let saved = config::ConfigStore::save(&next).map_err(|err| {
+    let saved = config::ConfigStore::update(|current| {
+        preserve_concurrent_overlay_position(&mut next, current, expected_overlay_position);
+        *current = next.clone();
+    })
+    .map_err(|err| {
         if let Err(restore_err) = shortcuts::apply_global_shortcuts(app, &previous) {
             eprintln!("failed to restore previous shortcuts after save error: {restore_err}");
         }
@@ -256,6 +278,20 @@ fn apply_and_save_config(
         config: saved,
         warnings,
     })
+}
+
+fn preserve_concurrent_overlay_position(
+    next: &mut config::AppConfig,
+    current: &config::AppConfig,
+    expected: Option<RecordingOverlayPositionExpectation>,
+) {
+    if expected.is_some_and(|expected| {
+        current.ui.recording_overlay_offset_x != expected.recording_overlay_offset_x
+            || current.ui.recording_overlay_offset_y != expected.recording_overlay_offset_y
+    }) {
+        next.ui.recording_overlay_offset_x = current.ui.recording_overlay_offset_x;
+        next.ui.recording_overlay_offset_y = current.ui.recording_overlay_offset_y;
+    }
 }
 
 #[tauri::command]
@@ -567,6 +603,25 @@ mod tests {
                 serde_json::json!("config_event_failed"),
             ]
         );
+    }
+
+    #[test]
+    fn full_config_save_preserves_a_concurrent_overlay_drag() {
+        let mut current = config::AppConfig::default();
+        current.ui.recording_overlay_offset_x = 240;
+        current.ui.recording_overlay_offset_y = -80;
+        let mut next = current.clone();
+        next.ui.recording_overlay_offset_x = 0;
+        next.ui.recording_overlay_offset_y = 0;
+        let expected = RecordingOverlayPositionExpectation {
+            recording_overlay_offset_x: 0,
+            recording_overlay_offset_y: 0,
+        };
+
+        preserve_concurrent_overlay_position(&mut next, &current, Some(expected));
+
+        assert_eq!(next.ui.recording_overlay_offset_x, 240);
+        assert_eq!(next.ui.recording_overlay_offset_y, -80);
     }
 
     #[test]

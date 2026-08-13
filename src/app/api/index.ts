@@ -15,6 +15,7 @@ export type {
   AudioApi,
   ConfigApi,
   HistoryApi,
+  OverlayApi,
   PermissionsApi,
   SystemApi,
   Unlisten,

@@ -43,6 +43,32 @@
   pointer-events: none;
 }
 
+.overlay-snap-guide-window,
+.overlay-snap-guide-window body,
+.overlay-snap-guide-shell {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: none;
+}
+
+.overlay-snap-guide-shell {
+  position: relative;
+}
+
+.overlay-snap-guide {
+  position: absolute;
+  inset: 1px;
+  border: 1.5px dashed rgba(190, 255, 211, 0.78);
+  border-radius: 999px;
+  background: rgba(127, 255, 172, 0.035);
+  box-shadow: 0 0 0 1px rgba(127, 255, 172, 0.08), inset 0 0 14px rgba(127, 255, 172, 0.08);
+  opacity: 1;
+  pointer-events: none;
+  animation: overlay-snap-guide-pulse 720ms ease-in-out infinite alternate;
+}
+
 .overlay-shell .recording-overlay {
   position: absolute;
   top: 0;
@@ -226,6 +252,18 @@
   }
 }
 
+@keyframes overlay-snap-guide-pulse {
+  from {
+    opacity: 0.68;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @keyframes overlay-label-change {
   from {
     opacity: 0;
@@ -310,6 +348,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   .recording-overlay {
+    animation: none;
+  }
+
+  .overlay-snap-guide {
     animation: none;
   }
 

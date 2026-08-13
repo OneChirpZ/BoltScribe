@@ -11,6 +11,7 @@ import type {
   RecordingCleanupPreview,
   RecordingCleanupResult,
   RecordingCleanupUnit,
+  RecordingOverlayPositionUpdate,
   SaveConfigResult,
   VadTestStatus,
   WorkflowStatus,
@@ -20,7 +21,10 @@ export type Unlisten = () => void;
 
 export interface ConfigApi {
   loadConfig(): Promise<AppConfig>;
-  saveConfig(config: AppConfig): Promise<SaveConfigResult>;
+  saveConfig(
+    config: AppConfig,
+    expectedOverlayPosition?: RecordingOverlayPositionUpdate | null,
+  ): Promise<SaveConfigResult>;
   exportConfig(config: AppConfig): Promise<string>;
   importConfig(raw: string): Promise<ConfigImportResult>;
   listenConfigUpdated(handler: (config: AppConfig) => void): Promise<Unlisten>;
@@ -32,6 +36,13 @@ export interface WorkflowApi {
   toggleRecording(): Promise<WorkflowStatus>;
   cancelCurrentWorkflow(): Promise<WorkflowStatus>;
   listenWorkflowStatus(handler: (status: WorkflowStatus) => void): Promise<Unlisten>;
+}
+
+export interface OverlayApi {
+  startRecordingOverlayDrag(): Promise<void>;
+  listenRecordingOverlayPositionUpdated(
+    handler: (update: RecordingOverlayPositionUpdate) => void,
+  ): Promise<Unlisten>;
 }
 
 export interface HistoryApi {
@@ -81,6 +92,7 @@ export interface SystemApi {
 
 export interface AppApi {
   config: ConfigApi;
+  overlay: OverlayApi;
   workflow: WorkflowApi;
   history: HistoryApi;
   audio: AudioApi;

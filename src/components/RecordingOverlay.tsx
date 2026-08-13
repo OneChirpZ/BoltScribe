@@ -1,8 +1,8 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { WorkflowStatus } from "../types";
 import type { TextBundle } from "../domain/i18n";
 import { createAudioLevelHistoryState, updateAudioLevelHistory } from "../domain/audioLevel";
-import { maxRecordingOverlayScale, minRecordingOverlayScale, recordingOverlayLabel, recordingOverlayPhase, recordingOverlayTransition } from "../domain/overlay";
+import { maxRecordingOverlayScale, minRecordingOverlayScale, recordingOverlayLabel, recordingOverlayPhase, recordingOverlayTransition, shouldStartRecordingOverlayDrag } from "../domain/overlay";
 import { clampNumber } from "../domain/numbers";
 import AudioWaveform from "./AudioWaveform";
 
@@ -14,6 +14,7 @@ export default function RecordingOverlay({
   baseWidth,
   scale,
   onCancel,
+  onDragStart,
   text,
 }: {
   status: WorkflowStatus;
@@ -23,6 +24,7 @@ export default function RecordingOverlay({
   baseWidth: number;
   scale: number;
   onCancel?: () => void;
+  onDragStart?: () => void;
   text: TextBundle;
 }) {
   const [audioLevelHistory, setAudioLevelHistory] = useState(() => createAudioLevelHistoryState(audioLevelSequence));
@@ -50,10 +52,21 @@ export default function RecordingOverlay({
     "--recording-overlay-scale": String(clampNumber(scale, minRecordingOverlayScale, maxRecordingOverlayScale)),
   } as CSSProperties;
 
+  function startDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const target = event.target;
+    const insideCancelControl = target instanceof Element && target.closest(".overlay-cancel") !== null;
+    if (!shouldStartRecordingOverlayDrag(event.button, insideCancelControl)) {
+      return;
+    }
+    event.preventDefault();
+    onDragStart?.();
+  }
+
   return (
     <div
       className={`recording-overlay ${phase} ${transitionState}`}
       style={style}
+      onPointerDown={startDrag}
     >
       <span className="overlay-label" role="status" aria-live="polite" aria-atomic="true">
         <span key={`${status.stage}-${label}`} className="overlay-label-text">{label}</span>

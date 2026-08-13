@@ -45,6 +45,10 @@ export function createBrowserPreviewAppApi({ appVersion, locationHref }: Browser
       listenConfigUpdated: () => Promise.resolve(() => undefined),
       listenConfigCloseRequested: () => Promise.resolve(() => undefined),
     },
+    overlay: {
+      startRecordingOverlayDrag: () => Promise.resolve(),
+      listenRecordingOverlayPositionUpdated: () => Promise.resolve(() => undefined),
+    },
     workflow: {
       getStatus: () => Promise.resolve(clonePreview(state.status)),
       toggleRecording: () => {

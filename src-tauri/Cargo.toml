@@ -38,6 +38,7 @@ core-graphics = "0.25"
 coreaudio-sys = { version = "0.2", default-features = false, features = ["core_audio"] }
 fs2 = "0.4.3"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["libc", "std", "NSApplication", "NSPanel", "NSRunningApplication", "NSWindow", "NSWorkspace"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["CGEventSource", "CGEventTypes"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
 tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel.git", rev = "a3122e894383aa068ec5365a42994e3ac94ba1b6" }
 

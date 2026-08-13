@@ -1,4 +1,4 @@
-import type { WorkflowStatus } from "../types";
+import type { AppConfig, RecordingOverlayPositionUpdate, WorkflowStatus } from "../types";
 import type { AppLanguage, TextBundle } from "./i18n";
 
 export const recordingOverlayBaseWidth = (language: AppLanguage) => language === "en-US" ? 400 : 340;
@@ -6,6 +6,30 @@ export const recordingOverlayBaseWidth = (language: AppLanguage) => language ===
 export const defaultRecordingOverlayScale = 0.5;
 export const minRecordingOverlayScale = 0.25;
 export const maxRecordingOverlayScale = 1.0;
+
+export function shouldStartRecordingOverlayDrag(button: number, insideCancelControl: boolean) {
+  return button === 0 && !insideCancelControl;
+}
+
+export function mergeRecordingOverlayPosition(
+  config: AppConfig,
+  update: RecordingOverlayPositionUpdate,
+): AppConfig {
+  if (
+    config.ui.recording_overlay_offset_x === update.recording_overlay_offset_x
+    && config.ui.recording_overlay_offset_y === update.recording_overlay_offset_y
+  ) {
+    return config;
+  }
+  return {
+    ...config,
+    ui: {
+      ...config.ui,
+      recording_overlay_offset_x: update.recording_overlay_offset_x,
+      recording_overlay_offset_y: update.recording_overlay_offset_y,
+    },
+  };
+}
 
 export function recordingOverlayLabel(status: WorkflowStatus, text: TextBundle) {
   switch (status.stage) {

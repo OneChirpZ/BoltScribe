@@ -10,6 +10,7 @@ describe("browser preview AppApi", () => {
 
     expect(domains).toEqual([
       "config",
+      "overlay",
       "workflow",
       "history",
       "audio",

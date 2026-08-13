@@ -14,6 +14,11 @@ export const {
 } = appApi.config;
 
 export const {
+  startRecordingOverlayDrag,
+  listenRecordingOverlayPositionUpdated,
+} = appApi.overlay;
+
+export const {
   getStatus,
   toggleRecording,
   cancelCurrentWorkflow,

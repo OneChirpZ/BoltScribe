@@ -159,9 +159,10 @@ fn build_menu(
 }
 
 fn toggle_llm_correction(app: &tauri::AppHandle<Wry>) -> Result<(), String> {
-    let mut next = config::ConfigStore::load().map_err(|err| err.to_string())?;
-    next.correction.enabled = !next.correction.enabled;
-    let saved = config::ConfigStore::save(&next).map_err(|err| err.to_string())?;
+    let saved = config::ConfigStore::update(|config| {
+        config.correction.enabled = !config.correction.enabled;
+    })
+    .map_err(|err| err.to_string())?;
     sync_llm_correction_label(app, saved.correction.enabled).map_err(|err| err.to_string())?;
     let _ = app.emit("config://updated", &saved);
     Ok(())

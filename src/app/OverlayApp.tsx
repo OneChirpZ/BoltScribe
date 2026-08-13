@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import type { AppConfig, AudioLevelSample, WorkflowStatus } from "../types";
 import RecordingOverlay from "../components/RecordingOverlay";
 import { appLanguage, translations } from "../domain/i18n";
-import { defaultRecordingOverlayScale, recordingOverlayBaseWidth } from "../domain/overlay";
+import { defaultRecordingOverlayScale, mergeRecordingOverlayPosition, recordingOverlayBaseWidth } from "../domain/overlay";
 import { emptyStatus, latestWorkflowStatus, subscribeToWorkflowStatus } from "../domain/workflow";
 import { appApi } from "./api";
 
 const {
   config: { listenConfigUpdated, loadConfig },
+  overlay: { listenRecordingOverlayPositionUpdated, startRecordingOverlayDrag },
   workflow: { cancelCurrentWorkflow, getStatus, listenWorkflowStatus },
   audio: { listenAudioLevel },
 } = appApi;
@@ -50,6 +51,9 @@ export default function OverlayApp() {
       setAudioLevelSample((current) => ({ ...sample, sequence: current.sequence + 1 }));
     });
     const unlistenConfig = listenConfigUpdated(setConfig);
+    const unlistenPosition = listenRecordingOverlayPositionUpdated((update) => {
+      setConfig((current) => current ? mergeRecordingOverlayPosition(current, update) : current);
+    });
 
     return () => {
       disposed = true;
@@ -58,8 +62,17 @@ export default function OverlayApp() {
       stopStatusSubscription();
       unlistenAudioLevel.then((fn) => fn());
       unlistenConfig.then((fn) => fn());
+      unlistenPosition.then((fn) => fn());
     };
   }, []);
+
+  function beginDragSession() {
+    try {
+      void startRecordingOverlayDrag().catch(() => undefined);
+    } catch {
+      // Keep the non-activating overlay quiet if native dragging is unavailable.
+    }
+  }
 
   async function cancelWorkflow() {
     try {
@@ -83,6 +96,7 @@ export default function OverlayApp() {
         baseWidth={recordingOverlayBaseWidth(language)}
         scale={config?.ui.recording_overlay_scale ?? defaultRecordingOverlayScale}
         onCancel={cancelWorkflow}
+        onDragStart={beginDragSession}
         text={text}
       />
     </div>

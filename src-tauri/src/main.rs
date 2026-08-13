@@ -39,10 +39,10 @@ use commands::{
     open_github_repository, open_input_monitoring_settings, preview_recording_cleanup,
     request_accessibility_permission, request_input_monitoring_permission,
     request_microphone_permission, reset_data_dir, restart_system_audio_service,
-    retry_history_record, save_config, set_data_dir, start_vad_test, stop_vad_test,
-    toggle_recording, update_vad_test_settings,
+    retry_history_record, save_config, set_data_dir, start_recording_overlay_drag, start_vad_test,
+    stop_vad_test, toggle_recording, update_vad_test_settings,
 };
-use tauri::{Emitter, RunEvent};
+use tauri::{Emitter, Manager, RunEvent};
 
 fn main() {
     #[cfg(target_os = "macos")]
@@ -75,6 +75,8 @@ fn main() {
                 .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
             windows::ensure_overlay_window(app.handle())
                 .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
+            windows::ensure_overlay_snap_guide_window(app.handle())
+                .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
             tray::setup(app.handle(), |app| {
                 if let Err(err) = workflow::toggle_recording_from_app(app) {
                     eprintln!("failed to toggle voice input from tray: {err:?}");
@@ -102,20 +104,26 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if window.label() != "main" {
+            if window.label() == "overlay" {
+                if matches!(event, tauri::WindowEvent::Moved(_)) {
+                    windows::record_overlay_moved(window.app_handle());
+                }
                 return;
             }
 
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                if let Err(err) = window.emit("config://close-requested", ()) {
-                    eprintln!("failed to request save before close: {err:?}");
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    if let Err(err) = window.emit("config://close-requested", ()) {
+                        eprintln!("failed to request save before close: {err:?}");
+                    }
                 }
             }
         })
         .invoke_handler(tauri::generate_handler![
             load_config,
             save_config,
+            start_recording_overlay_drag,
             export_config,
             import_config,
             load_audio_input_devices,
@@ -161,6 +169,9 @@ fn main() {
             }
             if let Err(err) = windows::ensure_overlay_window(app) {
                 eprintln!("failed to prepare overlay window: {err:?}");
+            }
+            if let Err(err) = windows::ensure_overlay_snap_guide_window(app) {
+                eprintln!("failed to prepare overlay snap guide window: {err:?}");
             }
         }
         #[cfg(target_os = "macos")]

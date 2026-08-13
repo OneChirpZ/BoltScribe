@@ -361,6 +361,7 @@ dependencies = [
  "fs2",
  "hound",
  "objc2-app-kit",
+ "objc2-core-graphics",
  "objc2-foundation",
  "reqwest 0.11.27",
  "serde",

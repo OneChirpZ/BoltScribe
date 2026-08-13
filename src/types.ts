@@ -115,6 +115,11 @@ export interface UiConfig {
   recording_overlay_offset_y: number;
 }
 
+export interface RecordingOverlayPositionUpdate {
+  recording_overlay_offset_x: number;
+  recording_overlay_offset_y: number;
+}
+
 export interface RetentionConfig {
   max_history_records: number;
   max_storage_bytes: number;

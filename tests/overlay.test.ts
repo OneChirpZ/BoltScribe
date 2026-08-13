@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { translations } from "../src/domain/i18n.ts";
-import { recordingOverlayLabel, recordingOverlayPhase, recordingOverlayTransition } from "../src/domain/overlay.ts";
-import type { WorkflowStatus } from "../src/types.ts";
+import { mergeRecordingOverlayPosition, recordingOverlayLabel, recordingOverlayPhase, recordingOverlayTransition, shouldStartRecordingOverlayDrag } from "../src/domain/overlay.ts";
+import type { AppConfig, WorkflowStatus } from "../src/types.ts";
 
 function status(mode: WorkflowStatus["mode"], revision: number): WorkflowStatus {
   const stage = mode === "starting" ? "starting" : mode === "recording" ? "recording" : mode === "error" ? "error" : "idle";
@@ -61,4 +61,46 @@ test("only semantic error stage uses the red failure capsule", () => {
 
   assert.equal(recordingOverlayPhase(error), "phase-error");
   assert.equal(recordingOverlayLabel(error, translations["zh-CN"]), "处理失败");
+});
+
+test("only a primary press outside the cancel control starts capsule dragging", () => {
+  assert.equal(shouldStartRecordingOverlayDrag(0, false), true);
+  assert.equal(shouldStartRecordingOverlayDrag(0, true), false);
+  assert.equal(shouldStartRecordingOverlayDrag(1, false), false);
+  assert.equal(shouldStartRecordingOverlayDrag(2, false), false);
+});
+
+test("drag position updates preserve unrelated dirty settings", () => {
+  const savedConfig = {
+    ui: {
+      app_language: "zh-CN",
+      recording_overlay_scale: 0.5,
+      recording_overlay_offset_x: 0,
+      recording_overlay_offset_y: 0,
+    },
+    system: {
+      hide_dock_icon: false,
+    },
+  } as unknown as AppConfig;
+  const currentConfig = {
+    ...savedConfig,
+    system: {
+      ...savedConfig.system,
+      hide_dock_icon: true,
+    },
+  };
+  const update = {
+    recording_overlay_offset_x: 275,
+    recording_overlay_offset_y: 130,
+  };
+
+  const nextSavedConfig = mergeRecordingOverlayPosition(savedConfig, update);
+  const nextCurrentConfig = mergeRecordingOverlayPosition(currentConfig, update);
+
+  assert.equal(nextSavedConfig.system.hide_dock_icon, false);
+  assert.equal(nextCurrentConfig.system.hide_dock_icon, true);
+  assert.equal(nextCurrentConfig.ui.recording_overlay_offset_x, 275);
+  assert.equal(nextCurrentConfig.ui.recording_overlay_offset_y, 130);
+  assert.equal(nextSavedConfig.ui.recording_overlay_offset_x, 275);
+  assert.equal(nextSavedConfig.ui.recording_overlay_offset_y, 130);
 });

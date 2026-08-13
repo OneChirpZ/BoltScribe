@@ -9,6 +9,7 @@ import {
 import type { AppConfig, ConfigImportReport } from "../../types";
 import { appLanguage, translations } from "../../domain/i18n";
 import type { CorrectionSection, Page } from "../../domain/navigation";
+import { mergeRecordingOverlayPosition } from "../../domain/overlay";
 import { supportsFnLongPressTrigger } from "../../domain/platform";
 import { applyThemePreference } from "../../domain/theme";
 import type { AppApi } from "../api";
@@ -35,6 +36,7 @@ type ConfigAction =
   | { type: "loaded"; config: AppConfig }
   | { type: "changed"; config: AppConfig }
   | { type: "saved-only"; config: AppConfig }
+  | { type: "overlay-position-updated"; draft: AppConfig | null; saved: AppConfig | null }
   | { type: "saving"; value: boolean }
   | { type: "save-succeeded"; config: AppConfig; updateDraft: boolean }
   | { type: "pending"; action: PendingConfigAction | null }
@@ -56,6 +58,8 @@ function reducer(state: ConfigState, action: ConfigAction): ConfigState {
       return { ...state, draft: action.config };
     case "saved-only":
       return { ...state, saved: action.config };
+    case "overlay-position-updated":
+      return { ...state, draft: action.draft, saved: action.saved };
     case "saving":
       return { ...state, saving: action.value };
     case "save-succeeded":
@@ -126,7 +130,13 @@ export function useConfigController({
     setBusy(true);
     dispatch({ type: "saving", value: true });
     try {
-      const result = await api.config.saveConfig(nextConfig);
+      const expectedOverlayPosition = savedRef.current
+        ? {
+            recording_overlay_offset_x: savedRef.current.ui.recording_overlay_offset_x,
+            recording_overlay_offset_y: savedRef.current.ui.recording_overlay_offset_y,
+          }
+        : null;
+      const result = await api.config.saveConfig(nextConfig, expectedOverlayPosition);
       const updateDraft = !isConfigDirty(draftRef.current, nextConfig);
       savedRef.current = result.config;
       if (updateDraft) {
@@ -369,9 +379,21 @@ export function useConfigController({
       applyLoaded(updatedConfig);
     });
     const unlistenClose = api.config.listenConfigCloseRequested(requestWindowClose);
+    const unlistenOverlayPosition = api.overlay.listenRecordingOverlayPositionUpdated((update) => {
+      const nextDraft = draftRef.current
+        ? mergeRecordingOverlayPosition(draftRef.current, update)
+        : null;
+      const nextSaved = savedRef.current
+        ? mergeRecordingOverlayPosition(savedRef.current, update)
+        : null;
+      draftRef.current = nextDraft;
+      savedRef.current = nextSaved;
+      dispatch({ type: "overlay-position-updated", draft: nextDraft, saved: nextSaved });
+    });
     return () => {
       unlistenConfig.then((stop) => stop());
       unlistenClose.then((stop) => stop());
+      unlistenOverlayPosition.then((stop) => stop());
     };
   }, [api, applyLoaded, requestWindowClose]);
 

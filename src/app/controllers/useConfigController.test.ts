@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SaveConfigResult } from "../../types";
+import type { RecordingOverlayPositionUpdate, SaveConfigResult } from "../../types";
 import { createBrowserPreviewAppApi } from "../api/browserPreviewAppApi";
 import { useConfigController } from "./useConfigController";
 
@@ -198,6 +198,46 @@ describe("useConfigController", () => {
 
     expect(result.current.state.config).toEqual(newer);
     expect(result.current.state.savedConfig).toEqual(saving);
+    expect(result.current.state.dirty).toBe(true);
+  });
+
+  it("merges direct overlay positions into both saved and dirty draft state", async () => {
+    const api = createBrowserPreviewAppApi({ appVersion: "test-version" });
+    let positionHandler: ((update: RecordingOverlayPositionUpdate) => void) | undefined;
+    vi.spyOn(api.overlay, "listenRecordingOverlayPositionUpdated").mockImplementation((handler) => {
+      positionHandler = handler;
+      return Promise.resolve(() => undefined);
+    });
+    const { result } = renderHook(() => useConfigController({
+      api,
+      busy: false,
+      setBusy: vi.fn(),
+      setNotice: vi.fn(),
+    }));
+
+    await act(async () => {
+      await result.current.actions.loadInitial();
+    });
+    const original = result.current.state.config!;
+    act(() => {
+      result.current.actions.change({
+        ...original,
+        system: { ...original.system, hide_dock_icon: !original.system.hide_dock_icon },
+      });
+    });
+    act(() => {
+      positionHandler?.({
+        recording_overlay_offset_x: 240,
+        recording_overlay_offset_y: -80,
+      });
+    });
+
+    expect(result.current.state.config?.system.hide_dock_icon).toBe(!original.system.hide_dock_icon);
+    expect(result.current.state.savedConfig?.system.hide_dock_icon).toBe(original.system.hide_dock_icon);
+    expect(result.current.state.config?.ui.recording_overlay_offset_x).toBe(240);
+    expect(result.current.state.savedConfig?.ui.recording_overlay_offset_x).toBe(240);
+    expect(result.current.state.config?.ui.recording_overlay_offset_y).toBe(-80);
+    expect(result.current.state.savedConfig?.ui.recording_overlay_offset_y).toBe(-80);
     expect(result.current.state.dirty).toBe(true);
   });
 });
