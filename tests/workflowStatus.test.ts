@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkflowStatus } from "../src/types.ts";
+import { translateWorkflowMessage } from "../src/domain/i18n.ts";
 import { latestWorkflowStatus, subscribeToWorkflowStatus } from "../src/domain/workflow.ts";
 
 function status(mode: WorkflowStatus["mode"], revision: number): WorkflowStatus {
@@ -8,6 +9,8 @@ function status(mode: WorkflowStatus["mode"], revision: number): WorkflowStatus 
   return {
     mode,
     stage,
+    code: mode === "starting" ? "starting_microphone" : mode === "recording" ? "recording" : mode === "error" ? "failed" : "ready",
+    detail: null,
     message: mode,
     current_audio_path: null,
     last_record_id: null,
@@ -122,4 +125,22 @@ test("latest workflow status keeps the highest revision", () => {
 
   assert.equal(latestWorkflowStatus(recording, status("idle", 3)), recording);
   assert.equal(latestWorkflowStatus(recording, status("processing", 5)).mode, "processing");
+});
+
+test("workflow status translation uses stable codes and preserves dynamic details", () => {
+  const failed = {
+    ...status("error", 5),
+    message: "后端兼容文案不参与翻译",
+    detail: "microphone unavailable",
+  };
+
+  assert.equal(translateWorkflowMessage(failed, "zh-CN"), "处理失败：microphone unavailable");
+  assert.equal(translateWorkflowMessage(failed, "en-US"), "Processing failed: microphone unavailable");
+
+  const startFailed = { ...failed, code: "recording_start_failed" as const };
+  assert.equal(translateWorkflowMessage(startFailed, "zh-CN"), "录音启动失败：microphone unavailable");
+  assert.equal(translateWorkflowMessage(startFailed, "en-US"), "Failed to start recording: microphone unavailable");
+
+  const unknown = { ...failed, code: "future_status" as WorkflowStatus["code"], message: "Future status" };
+  assert.equal(translateWorkflowMessage(unknown, "en-US"), "Future status");
 });

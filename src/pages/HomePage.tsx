@@ -72,7 +72,7 @@ export default function HomePage({
           <div>
             <p className="eyebrow">{text.home.currentStatus}</p>
             <h1>{workflowModeLabel(status.mode, language)}</h1>
-            <p className="status-message">{translateWorkflowMessage(status.message || text.common.ready, language)}</p>
+            <p className="status-message">{translateWorkflowMessage(status, language)}</p>
           </div>
           <div className="status-visual" aria-hidden="true">
             <span />

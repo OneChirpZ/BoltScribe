@@ -4,7 +4,13 @@ import RecordingOverlay from "../components/RecordingOverlay";
 import { appLanguage, translations } from "../domain/i18n";
 import { defaultRecordingOverlayScale, recordingOverlayBaseWidth } from "../domain/overlay";
 import { emptyStatus, latestWorkflowStatus, subscribeToWorkflowStatus } from "../domain/workflow";
-import { cancelCurrentWorkflow, getStatus, listenAudioLevel, listenConfigUpdated, listenWorkflowStatus, loadConfig } from "./tauriApi";
+import { appApi } from "./api";
+
+const {
+  config: { listenConfigUpdated, loadConfig },
+  workflow: { cancelCurrentWorkflow, getStatus, listenWorkflowStatus },
+  audio: { listenAudioLevel },
+} = appApi;
 
 export default function OverlayApp() {
   const [config, setConfig] = useState<AppConfig | null>(null);

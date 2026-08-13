@@ -24,7 +24,9 @@
     "build": "tsc && vite build",
     "build:macos-local": "node scripts/build-macos-local.mjs",
     "release:macos": "node scripts/build-macos-release.mjs",
-    "test:frontend": "node --test tests/*.test.ts",
+    "test:frontend": "npm run test:frontend:domain && npm run test:frontend:ui",
+    "test:frontend:domain": "node --test tests/*.test.ts",
+    "test:frontend:ui": "vitest run",
     "tauri": "tauri",
     "version:check": "node scripts/check-version.mjs"
   },
@@ -35,10 +37,13 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.1",
+    "@testing-library/react": "15.0.7",
     "@types/react": "18.2.66",
     "@types/react-dom": "18.2.22",
     "@vitejs/plugin-react": "4.2.1",
+    "jsdom": "24.1.0",
     "typescript": "5.4.5",
-    "vite": "5.2.14"
+    "vite": "5.2.14",
+    "vitest": "1.6.1"
   }
 }

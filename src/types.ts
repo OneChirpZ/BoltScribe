@@ -169,6 +169,24 @@ export interface ConfigImportReport {
 export interface ConfigImportResult {
   config: AppConfig;
   report: ConfigImportReport;
+  warnings: ConfigApplyWarning[];
+}
+
+export type ConfigApplyWarningCode =
+  | "history_retention_failed"
+  | "dock_visibility_failed"
+  | "fn_trigger_failed"
+  | "tray_sync_failed"
+  | "config_event_failed";
+
+export interface ConfigApplyWarning {
+  code: ConfigApplyWarningCode;
+  detail: string;
+}
+
+export interface SaveConfigResult {
+  config: AppConfig;
+  warnings: ConfigApplyWarning[];
 }
 
 export interface DataDirInfo {
@@ -189,6 +207,28 @@ export type WorkflowStage =
   | "pasting"
   | "complete"
   | "error";
+
+export type WorkflowStatusCode =
+  | "ready"
+  | "starting_microphone"
+  | "stopping"
+  | "waiting_for_speech"
+  | "recording"
+  | "cancelled"
+  | "no_speech"
+  | "recognizing"
+  | "file_asr_fallback"
+  | "correcting"
+  | "pasting"
+  | "paste_complete"
+  | "complete_corrected"
+  | "complete_correction_fallback"
+  | "paste_failed_accessibility"
+  | "paste_failed_clipboard"
+  | "recording_start_failed"
+  | "recording_stop_failed"
+  | "recording_cancel_failed"
+  | "failed";
 
 export interface VadTestStatus {
   mode: "idle" | "listening" | "voice" | "timed_out" | "error" | string;
@@ -211,6 +251,8 @@ export interface VadTestStatus {
 export interface WorkflowStatus {
   mode: "idle" | "starting" | "recording" | "processing" | "error";
   stage: WorkflowStage;
+  code: WorkflowStatusCode;
+  detail: string | null;
   message: string;
   current_audio_path: string | null;
   last_record_id: string | null;

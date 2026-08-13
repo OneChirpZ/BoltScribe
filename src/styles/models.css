@@ -1,0 +1,40 @@
+.models-page .field-medium,
+.models-page .field-long {
+  max-width: none;
+}
+.race-settings-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.race-model-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.race-model-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  color: var(--text-soft);
+  background: var(--surface-input);
+}
+
+.race-model-option:has(input:checked) {
+  border-color: rgba(245, 184, 75, 0.42);
+  background: rgba(245, 184, 75, 0.07);
+}
+
+.race-model-option input {
+  width: auto;
+}
+
+.race-model-option:has(input:disabled) {
+  opacity: 0.58;
+}

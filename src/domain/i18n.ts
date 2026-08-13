@@ -6,34 +6,67 @@ export function appLanguage(config: AppConfig | null | undefined): AppLanguage {
   return config?.ui.app_language === "en-US" ? "en-US" : "zh-CN";
 }
 
-export function translateWorkflowMessage(message: string, language: AppLanguage) {
-  if (language === "zh-CN") {
-    return message;
+export function translateWorkflowMessage(status: WorkflowStatus, language: AppLanguage) {
+  const translated = workflowStatusMessages[language][status.code];
+  if (!translated) {
+    return status.message;
   }
-  return workflowMessagesEn[message] ?? message;
+  const detail = status.detail?.trim();
+  if (!detail) {
+    return translated;
+  }
+  return language === "zh-CN" ? `${translated}：${detail}` : `${translated}: ${detail}`;
 }
 
 export function workflowModeLabel(mode: WorkflowStatus["mode"], language: AppLanguage) {
   return translations[language].workflowModes[mode];
 }
 
-const workflowMessagesEn: Record<string, string> = {
-  "就绪": "Ready",
-  "正在启动麦克风，请稍候": "Starting the microphone, please wait",
-  "上一段内容仍在处理中，请稍候": "The previous recording is still processing, please wait",
-  "正在停止录音并处理转写": "Stopping recording and processing",
-  "正在录音，再次按快捷键停止": "Recording, press the shortcut again to stop",
-  "已取消本次转写": "Current transcription cancelled",
-  "未检测到语音，已忽略本次转写": "No speech detected, ignored",
-  "录音已保存，正在调用语音识别": "Recording saved, running speech recognition",
-  "语音识别完成，正在纠错": "Speech recognition complete, correcting text",
-  "正在粘贴文本": "Pasting text",
-  "粘贴完成": "Paste complete",
-  "处理完成，但粘贴失败，请检查辅助功能权限": "Complete, but paste failed. Check Accessibility permission",
-  "处理完成，但粘贴失败，请检查剪贴板或当前输入位置": "Complete, but paste failed. Check clipboard access or the active input field",
-  "处理完成，纠错失败，已粘贴原始转写": "Complete, correction failed, pasted the raw transcript",
-  "处理完成，已粘贴纠错文本": "Complete, pasted corrected text",
-  "正在回退到录音文件识别": "Falling back to recognition from the recorded file",
+const workflowStatusMessages: Record<AppLanguage, Partial<Record<WorkflowStatus["code"], string>>> = {
+  "zh-CN": {
+    ready: "就绪",
+    starting_microphone: "正在启动麦克风，请稍候",
+    stopping: "正在停止录音并处理转写",
+    waiting_for_speech: "等待说话",
+    recording: "正在录音，再次按快捷键停止",
+    cancelled: "已取消本次转写",
+    no_speech: "未检测到语音，已忽略本次转写",
+    recognizing: "录音已保存，正在调用语音识别",
+    file_asr_fallback: "正在回退到录音文件识别",
+    correcting: "语音识别完成，正在纠错",
+    pasting: "正在粘贴文本",
+    paste_complete: "粘贴完成",
+    complete_corrected: "处理完成，已粘贴纠错文本",
+    complete_correction_fallback: "处理完成，纠错失败，已粘贴原始转写",
+    paste_failed_accessibility: "处理完成，但粘贴失败，请检查辅助功能权限",
+    paste_failed_clipboard: "处理完成，但粘贴失败，请检查剪贴板或当前输入位置",
+    recording_start_failed: "录音启动失败",
+    recording_stop_failed: "停止录音失败",
+    recording_cancel_failed: "取消录音失败",
+    failed: "处理失败",
+  },
+  "en-US": {
+    ready: "Ready",
+    starting_microphone: "Starting the microphone, please wait",
+    stopping: "Stopping recording and processing",
+    waiting_for_speech: "Waiting for speech",
+    recording: "Recording, press the shortcut again to stop",
+    cancelled: "Current transcription cancelled",
+    no_speech: "No speech detected, ignored",
+    recognizing: "Recording saved, running speech recognition",
+    file_asr_fallback: "Falling back to recognition from the recorded file",
+    correcting: "Speech recognition complete, correcting text",
+    pasting: "Pasting text",
+    paste_complete: "Paste complete",
+    complete_corrected: "Complete, pasted corrected text",
+    complete_correction_fallback: "Complete, correction failed, pasted the raw transcript",
+    paste_failed_accessibility: "Complete, but paste failed. Check Accessibility permission",
+    paste_failed_clipboard: "Complete, but paste failed. Check clipboard access or the active input field",
+    recording_start_failed: "Failed to start recording",
+    recording_stop_failed: "Failed to stop recording",
+    recording_cancel_failed: "Failed to cancel recording",
+    failed: "Processing failed",
+  },
 };
 
 export const translations = {

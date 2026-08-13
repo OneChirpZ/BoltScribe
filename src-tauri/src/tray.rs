@@ -1,14 +1,15 @@
-use crate::{config, windows, workflow};
+use crate::{
+    config, windows,
+    workflow_status::{WorkflowMode, WorkflowStatus},
+};
+use std::sync::{Arc, Mutex};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Emitter, Manager, Wry};
+use tauri::{AppHandle, Emitter, Manager, Wry};
 #[cfg(target_os = "windows")]
 use {
-    std::sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        Arc,
-    },
+    std::sync::atomic::{AtomicBool, AtomicU64, Ordering},
     std::time::Duration,
     tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent},
 };
@@ -19,27 +20,37 @@ const MENU_TOGGLE_LLM_CORRECTION: &str = "toggle_llm_correction";
 const MENU_QUIT: &str = "quit_app";
 const TRAY_ID: &str = "main";
 
-pub(crate) fn setup(app: &tauri::AppHandle<Wry>) -> tauri::Result<()> {
+type ToggleVoiceInput = Arc<dyn Fn(AppHandle<Wry>) + Send + Sync>;
+
+#[derive(Default)]
+pub(crate) struct TrayState {
+    voice_input_mode: Mutex<WorkflowMode>,
+}
+
+pub(crate) fn setup(
+    app: &AppHandle<Wry>,
+    toggle_voice_input: impl Fn(AppHandle<Wry>) + Send + Sync + 'static,
+) -> tauri::Result<()> {
+    let toggle_voice_input: ToggleVoiceInput = Arc::new(toggle_voice_input);
     let menu = build_menu(
         app,
         current_llm_correction_enabled(),
         current_voice_input_menu_state(app),
     )?;
 
+    let menu_toggle = toggle_voice_input.clone();
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .tooltip("BoltScribe")
         .show_menu_on_left_click(show_menu_on_left_click())
-        .on_menu_event(|app, event| match event.id().as_ref() {
+        .on_menu_event(move |app, event| match event.id().as_ref() {
             MENU_SHOW_MAIN => {
                 if let Err(err) = windows::show_main_window(app) {
                     eprintln!("failed to show main window from tray: {err:?}");
                 }
             }
             MENU_TOGGLE_VOICE_INPUT => {
-                if let Err(err) = workflow::toggle_recording_from_app(app.clone()) {
-                    eprintln!("failed to toggle voice input from tray: {err:?}");
-                }
+                menu_toggle(app.clone());
             }
             MENU_TOGGLE_LLM_CORRECTION => {
                 if let Err(err) = toggle_llm_correction(app) {
@@ -53,10 +64,12 @@ pub(crate) fn setup(app: &tauri::AppHandle<Wry>) -> tauri::Result<()> {
     #[cfg(target_os = "windows")]
     {
         let click_controller = Arc::new(WindowsTrayClickController::default());
+        let click_toggle = toggle_voice_input.clone();
         builder = builder.on_tray_icon_event(move |tray, event| {
             handle_windows_tray_icon_event(
                 click_controller.clone(),
                 tray.app_handle().clone(),
+                click_toggle.clone(),
                 event,
             );
         });
@@ -93,9 +106,14 @@ pub(crate) fn sync_llm_correction_label(
 }
 
 pub(crate) fn sync_voice_input_label(
-    app: &tauri::AppHandle<Wry>,
-    status: &workflow::WorkflowStatus,
+    app: &AppHandle<Wry>,
+    status: &WorkflowStatus,
 ) -> tauri::Result<()> {
+    if let Some(state) = app.try_state::<TrayState>() {
+        if let Ok(mut mode) = state.voice_input_mode.lock() {
+            *mode = status.mode.clone();
+        }
+    }
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         tray.set_menu(Some(build_menu(
             app,
@@ -155,10 +173,11 @@ fn current_llm_correction_enabled() -> bool {
         .unwrap_or_default()
 }
 
-fn current_voice_input_menu_state(app: &tauri::AppHandle<Wry>) -> VoiceInputMenuState {
-    app.try_state::<workflow::AppState>()
-        .map(|state| voice_input_menu_state(&state.status().mode))
-        .unwrap_or_else(|| voice_input_menu_state(&workflow::WorkflowMode::Idle))
+fn current_voice_input_menu_state(app: &AppHandle<Wry>) -> VoiceInputMenuState {
+    app.try_state::<TrayState>()
+        .and_then(|state| state.voice_input_mode.lock().ok().map(|mode| mode.clone()))
+        .map(|mode| voice_input_menu_state(&mode))
+        .unwrap_or_else(|| voice_input_menu_state(&WorkflowMode::Idle))
 }
 
 fn llm_correction_label(enabled: bool) -> &'static str {
@@ -175,21 +194,21 @@ struct VoiceInputMenuState {
     enabled: bool,
 }
 
-fn voice_input_menu_state(mode: &workflow::WorkflowMode) -> VoiceInputMenuState {
+fn voice_input_menu_state(mode: &WorkflowMode) -> VoiceInputMenuState {
     match mode {
-        workflow::WorkflowMode::Starting => VoiceInputMenuState {
+        WorkflowMode::Starting => VoiceInputMenuState {
             label: "正在启动语音输入",
             enabled: false,
         },
-        workflow::WorkflowMode::Recording => VoiceInputMenuState {
+        WorkflowMode::Recording => VoiceInputMenuState {
             label: "停止语音输入",
             enabled: true,
         },
-        workflow::WorkflowMode::Processing => VoiceInputMenuState {
+        WorkflowMode::Processing => VoiceInputMenuState {
             label: "开始语音输入",
             enabled: false,
         },
-        workflow::WorkflowMode::Idle | workflow::WorkflowMode::Error => VoiceInputMenuState {
+        WorkflowMode::Idle | WorkflowMode::Error => VoiceInputMenuState {
             label: "开始语音输入",
             enabled: true,
         },
@@ -231,6 +250,7 @@ impl WindowsTrayClickController {
 fn handle_windows_tray_icon_event(
     click_controller: Arc<WindowsTrayClickController>,
     app: tauri::AppHandle<Wry>,
+    toggle_voice_input: ToggleVoiceInput,
     event: TrayIconEvent,
 ) {
     match event {
@@ -238,7 +258,7 @@ fn handle_windows_tray_icon_event(
             button: MouseButton::Left,
             button_state: MouseButtonState::Up,
             ..
-        } => queue_windows_left_click_toggle(click_controller, app),
+        } => queue_windows_left_click_toggle(click_controller, app, toggle_voice_input),
         TrayIconEvent::DoubleClick {
             button: MouseButton::Left,
             ..
@@ -256,6 +276,7 @@ fn handle_windows_tray_icon_event(
 fn queue_windows_left_click_toggle(
     click_controller: Arc<WindowsTrayClickController>,
     app: tauri::AppHandle<Wry>,
+    toggle_voice_input: ToggleVoiceInput,
 ) {
     let Some(click_id) = queue_windows_left_click_if_enabled(
         &click_controller,
@@ -272,9 +293,7 @@ fn queue_windows_left_click_toggle(
         ) {
             return;
         }
-        if let Err(err) = workflow::toggle_recording_from_app(app) {
-            eprintln!("failed to toggle voice input from tray left click: {err:?}");
-        }
+        toggle_voice_input(app);
     });
 }
 
@@ -375,20 +394,14 @@ mod tests {
             enabled: true,
         };
 
-        assert_eq!(
-            voice_input_menu_state(&workflow::WorkflowMode::Idle),
-            expected
-        );
-        assert_eq!(
-            voice_input_menu_state(&workflow::WorkflowMode::Error),
-            expected
-        );
+        assert_eq!(voice_input_menu_state(&WorkflowMode::Idle), expected);
+        assert_eq!(voice_input_menu_state(&WorkflowMode::Error), expected);
     }
 
     #[test]
     fn voice_input_menu_item_stops_while_recording() {
         assert_eq!(
-            voice_input_menu_state(&workflow::WorkflowMode::Recording),
+            voice_input_menu_state(&WorkflowMode::Recording),
             VoiceInputMenuState {
                 label: "停止语音输入",
                 enabled: true,
@@ -399,7 +412,7 @@ mod tests {
     #[test]
     fn voice_input_menu_item_is_disabled_while_processing() {
         assert_eq!(
-            voice_input_menu_state(&workflow::WorkflowMode::Processing),
+            voice_input_menu_state(&WorkflowMode::Processing),
             VoiceInputMenuState {
                 label: "开始语音输入",
                 enabled: false,
@@ -410,7 +423,7 @@ mod tests {
     #[test]
     fn voice_input_menu_item_is_disabled_while_starting() {
         assert_eq!(
-            voice_input_menu_state(&workflow::WorkflowMode::Starting),
+            voice_input_menu_state(&WorkflowMode::Starting),
             VoiceInputMenuState {
                 label: "正在启动语音输入",
                 enabled: false,

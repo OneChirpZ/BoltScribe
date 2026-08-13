@@ -453,8 +453,10 @@ mod tests {
             device("device-b", "Saved Name", false),
             device("device-a", "Renamed Device", true),
         ];
-        let mut config = AudioConfig::default();
-        config.input_device_priority = vec![reference("device-a", "Saved Name")];
+        let config = AudioConfig {
+            input_device_priority: vec![reference("device-a", "Saved Name")],
+            ..Default::default()
+        };
 
         let ranked = rank_input_devices(&config, &available);
 
@@ -467,8 +469,10 @@ mod tests {
             device("new-id", "Preferred Mic", false),
             device("default", "Default Mic", true),
         ];
-        let mut config = AudioConfig::default();
-        config.input_device_priority = vec![reference("old-id", "Preferred Mic")];
+        let config = AudioConfig {
+            input_device_priority: vec![reference("old-id", "Preferred Mic")],
+            ..Default::default()
+        };
 
         let ranked = rank_input_devices(&config, &available);
 
@@ -482,8 +486,10 @@ mod tests {
             device("other", "Other Mic", false),
             device("default", "Default Mic", true),
         ];
-        let mut config = AudioConfig::default();
-        config.input_device_priority = vec![reference("missing", "Missing Mic")];
+        let config = AudioConfig {
+            input_device_priority: vec![reference("missing", "Missing Mic")],
+            ..Default::default()
+        };
 
         let ranked = rank_input_devices(&config, &available);
 
@@ -502,9 +508,11 @@ mod tests {
             device("blocked-id", "Capture Card", true),
             device("safe-id", "Safe Mic", false),
         ];
-        let mut config = AudioConfig::default();
-        config.input_device_priority = vec![reference("blocked-id", "Old Capture Name")];
-        config.input_device_blacklist = vec![reference("old-id", "capture card")];
+        let config = AudioConfig {
+            input_device_priority: vec![reference("blocked-id", "Old Capture Name")],
+            input_device_blacklist: vec![reference("old-id", "capture card")],
+            ..Default::default()
+        };
 
         let ranked = rank_input_devices(&config, &available);
 
@@ -515,8 +523,10 @@ mod tests {
     #[test]
     fn all_blacklisted_devices_produce_no_candidates() {
         let available = vec![device("only", "Only Mic", true)];
-        let mut config = AudioConfig::default();
-        config.input_device_blacklist = vec![reference("only", "Only Mic")];
+        let config = AudioConfig {
+            input_device_blacklist: vec![reference("only", "Only Mic")],
+            ..Default::default()
+        };
 
         assert!(rank_input_devices(&config, &available).is_empty());
     }
@@ -528,8 +538,10 @@ mod tests {
             device("other", "Duplicate Mic", false),
             device("safe", "Safe Mic", false),
         ];
-        let mut config = AudioConfig::default();
-        config.input_device_blacklist = vec![reference("blocked", "")];
+        let config = AudioConfig {
+            input_device_blacklist: vec![reference("blocked", "")],
+            ..Default::default()
+        };
 
         let ranked = rank_input_devices(&config, &available);
 

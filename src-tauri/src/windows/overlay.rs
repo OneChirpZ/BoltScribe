@@ -1,6 +1,6 @@
 use super::monitor::active_overlay_monitor;
 use crate::config::ConfigStore;
-use crate::workflow;
+use crate::workflow_status::{WorkflowMode, WorkflowStatus};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Mutex,
@@ -306,7 +306,7 @@ fn overlay_collection_behavior(supports_all_applications: bool) -> NSWindowColle
     behavior
 }
 
-pub(crate) fn sync_overlay_window(app: &tauri::AppHandle, status: &workflow::WorkflowStatus) {
+pub(crate) fn sync_overlay_window(app: &tauri::AppHandle, status: &WorkflowStatus) {
     if !claim_overlay_revision(status.revision) {
         return;
     }
@@ -322,7 +322,7 @@ pub(crate) fn sync_overlay_window(app: &tauri::AppHandle, status: &workflow::Wor
         if should_show {
             let was_visible = window.is_visible().unwrap_or(false);
             if should_request_overlay_show(&status.mode, was_visible) {
-                let reset_monitor = status.mode == workflow::WorkflowMode::Starting;
+                let reset_monitor = status.mode == WorkflowMode::Starting;
                 if let Err(err) = configure_overlay_window(
                     &app,
                     &window,
@@ -358,18 +358,18 @@ fn overlay_revision_is_current(revision: u64) -> bool {
     OVERLAY_STATUS_REVISION.load(Ordering::Acquire) == revision
 }
 
-fn overlay_should_show(mode: &workflow::WorkflowMode) -> bool {
+fn overlay_should_show(mode: &WorkflowMode) -> bool {
     matches!(
         mode,
-        workflow::WorkflowMode::Starting
-            | workflow::WorkflowMode::Recording
-            | workflow::WorkflowMode::Processing
-            | workflow::WorkflowMode::Error
+        WorkflowMode::Starting
+            | WorkflowMode::Recording
+            | WorkflowMode::Processing
+            | WorkflowMode::Error
     )
 }
 
-fn should_request_overlay_show(mode: &workflow::WorkflowMode, is_visible: bool) -> bool {
-    *mode == workflow::WorkflowMode::Starting || !is_visible
+fn should_request_overlay_show(mode: &WorkflowMode, is_visible: bool) -> bool {
+    *mode == WorkflowMode::Starting || !is_visible
 }
 
 #[cfg(test)]
@@ -379,36 +379,27 @@ mod cross_platform_tests {
     #[test]
     fn overlay_is_visible_for_starting_recording_processing_and_error() {
         for mode in [
-            workflow::WorkflowMode::Starting,
-            workflow::WorkflowMode::Recording,
-            workflow::WorkflowMode::Processing,
-            workflow::WorkflowMode::Error,
+            WorkflowMode::Starting,
+            WorkflowMode::Recording,
+            WorkflowMode::Processing,
+            WorkflowMode::Error,
         ] {
             assert!(overlay_should_show(&mode));
         }
-        assert!(!overlay_should_show(&workflow::WorkflowMode::Idle));
+        assert!(!overlay_should_show(&WorkflowMode::Idle));
     }
 
     #[test]
     fn only_starting_forces_a_fresh_show_for_an_already_visible_panel() {
-        assert!(should_request_overlay_show(
-            &workflow::WorkflowMode::Starting,
-            true
-        ));
+        assert!(should_request_overlay_show(&WorkflowMode::Starting, true));
+        assert!(!should_request_overlay_show(&WorkflowMode::Recording, true));
+        assert!(!should_request_overlay_show(&WorkflowMode::Error, true));
         assert!(!should_request_overlay_show(
-            &workflow::WorkflowMode::Recording,
-            true
-        ));
-        assert!(!should_request_overlay_show(
-            &workflow::WorkflowMode::Error,
-            true
-        ));
-        assert!(!should_request_overlay_show(
-            &workflow::WorkflowMode::Processing,
+            &WorkflowMode::Processing,
             true
         ));
         assert!(should_request_overlay_show(
-            &workflow::WorkflowMode::Processing,
+            &WorkflowMode::Processing,
             false
         ));
     }

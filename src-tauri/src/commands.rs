@@ -11,6 +11,33 @@ use std::time::Duration;
 use tauri::{Emitter, Manager, State, Wry};
 use tauri_plugin_dialog::DialogExt;
 
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct ConfigApplyWarning {
+    code: ConfigApplyWarningCode,
+    detail: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ConfigApplyWarningCode {
+    #[serde(rename = "history_retention_failed")]
+    HistoryRetention,
+    #[serde(rename = "dock_visibility_failed")]
+    DockVisibility,
+    #[serde(rename = "fn_trigger_failed")]
+    FnTrigger,
+    #[serde(rename = "tray_sync_failed")]
+    TraySync,
+    #[serde(rename = "config_event_failed")]
+    ConfigEvent,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct SaveConfigResult {
+    config: config::AppConfig,
+    warnings: Vec<ConfigApplyWarning>,
+}
+
 const AUDIO_DEVICE_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
 const GITHUB_REPOSITORY_URL: &str = "https://github.com/OneChirpZ/BoltScribe";
 static AUDIO_INPUT_DEVICE_REFRESH_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
@@ -25,7 +52,7 @@ pub(crate) fn load_config() -> Result<config::AppConfig, String> {
 pub(crate) fn save_config(
     app: tauri::AppHandle<Wry>,
     config: config::AppConfig,
-) -> Result<config::AppConfig, String> {
+) -> Result<SaveConfigResult, String> {
     apply_and_save_config(&app, config)
 }
 
@@ -40,13 +67,21 @@ pub(crate) fn export_config(config: config::AppConfig) -> Result<String, String>
 pub(crate) fn import_config(
     app: tauri::AppHandle<Wry>,
     raw: String,
-) -> Result<config::ConfigImportResult, String> {
+) -> Result<ImportConfigResult, String> {
     let imported = config::ConfigStore::import_json(&raw).map_err(|err| err.to_string())?;
-    let config = apply_and_save_config(&app, imported.config)?;
-    Ok(config::ConfigImportResult {
-        config,
+    let applied = apply_and_save_config(&app, imported.config)?;
+    Ok(ImportConfigResult {
+        config: applied.config,
         report: imported.report,
+        warnings: applied.warnings,
     })
+}
+
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct ImportConfigResult {
+    config: config::AppConfig,
+    report: config::ConfigImportReport,
+    warnings: Vec<ConfigApplyWarning>,
 }
 
 #[tauri::command]
@@ -147,8 +182,8 @@ fn format_duration(duration: Duration) -> String {
 fn apply_and_save_config(
     app: &tauri::AppHandle<Wry>,
     config: config::AppConfig,
-) -> Result<config::AppConfig, String> {
-    let previous = config::ConfigStore::load().unwrap_or_default();
+) -> Result<SaveConfigResult, String> {
+    let previous = config::ConfigStore::load().map_err(|err| err.to_string())?;
     let mut next = config;
     next.normalize();
     next.validate().map_err(|err| err.to_string())?;
@@ -161,6 +196,10 @@ fn apply_and_save_config(
     autostart::apply_launch_at_login(next.system.launch_at_login).map_err(|err| {
         if let Err(restore_err) = shortcuts::apply_global_shortcuts(app, &previous) {
             eprintln!("failed to restore previous shortcuts after autostart error: {restore_err}");
+        }
+        if let Err(restore_err) = autostart::apply_launch_at_login(previous.system.launch_at_login)
+        {
+            eprintln!("failed to restore previous autostart setting: {restore_err}");
         }
         err.to_string()
     })?;
@@ -178,20 +217,45 @@ fn apply_and_save_config(
         err.to_string()
     })?;
     windows::sync_app_theme(app, &saved.ui.theme);
-    history::HistoryStore::prune(&saved.retention).map_err(|err| err.to_string())?;
-    windows::sync_dock_visibility(app).map_err(|err| err.to_string())?;
+    let mut warnings = Vec::new();
+    if let Err(err) = history::HistoryStore::prune(&saved.retention) {
+        warnings.push(ConfigApplyWarning {
+            code: ConfigApplyWarningCode::HistoryRetention,
+            detail: err.to_string(),
+        });
+    }
+    if let Err(err) = windows::sync_dock_visibility(app) {
+        warnings.push(ConfigApplyWarning {
+            code: ConfigApplyWarningCode::DockVisibility,
+            detail: err.to_string(),
+        });
+    }
     if let Err(err) = fn_trigger::apply(
         app,
         saved.system.fn_long_press_enabled,
         saved.system.fn_long_press_duration_ms,
     ) {
-        eprintln!("failed to apply Fn long-press trigger: {err:?}");
+        warnings.push(ConfigApplyWarning {
+            code: ConfigApplyWarningCode::FnTrigger,
+            detail: format!("{err:#}"),
+        });
     }
     if let Err(err) = tray::sync_llm_correction_label(app, saved.correction.enabled) {
-        eprintln!("failed to sync tray LLM correction item: {err}");
+        warnings.push(ConfigApplyWarning {
+            code: ConfigApplyWarningCode::TraySync,
+            detail: err.to_string(),
+        });
     }
-    let _ = app.emit("config://updated", &saved);
-    Ok(saved)
+    if let Err(err) = app.emit("config://updated", &saved) {
+        warnings.push(ConfigApplyWarning {
+            code: ConfigApplyWarningCode::ConfigEvent,
+            detail: err.to_string(),
+        });
+    }
+    Ok(SaveConfigResult {
+        config: saved,
+        warnings,
+    })
 }
 
 #[tauri::command]
@@ -481,6 +545,29 @@ pub(crate) fn copy_text_to_clipboard(text: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_warning_codes_serialize_to_public_contract() {
+        let actual = [
+            ConfigApplyWarningCode::HistoryRetention,
+            ConfigApplyWarningCode::DockVisibility,
+            ConfigApplyWarningCode::FnTrigger,
+            ConfigApplyWarningCode::TraySync,
+            ConfigApplyWarningCode::ConfigEvent,
+        ]
+        .map(|code| serde_json::to_value(code).unwrap());
+
+        assert_eq!(
+            actual,
+            [
+                serde_json::json!("history_retention_failed"),
+                serde_json::json!("dock_visibility_failed"),
+                serde_json::json!("fn_trigger_failed"),
+                serde_json::json!("tray_sync_failed"),
+                serde_json::json!("config_event_failed"),
+            ]
+        );
+    }
 
     #[test]
     fn audio_device_refresh_timeout_returns_error() {

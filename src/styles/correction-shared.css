@@ -1,0 +1,101 @@
+.template-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 16px;
+  align-items: stretch;
+}
+.template-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+code {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 7px;
+  color: #f6d999;
+  background: rgba(0, 0, 0, 0.16);
+  font-size: 12px;
+}
+
+.token-button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: #f6d999;
+  background: rgba(0, 0, 0, 0.16);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.token-button:hover {
+  color: #fff1c8;
+  border-color: rgba(245, 184, 75, 0.48);
+  background: rgba(245, 184, 75, 0.1);
+}
+
+.prompt-preview {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 430px;
+  min-height: 430px;
+  max-height: 430px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.preview-title {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 12px;
+}
+
+.prompt-preview pre {
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: transparent;
+}
+
+.dictionary-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 0 0;
+}
+
+.dictionary-list,
+.variable-list {
+  display: grid;
+  gap: 12px;
+}
+
+.variable-entry {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.4fr) minmax(220px, 1fr) 44px;
+  gap: 10px;
+  align-items: start;
+}
+
+.variable-entry textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.dictionary-entry {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(180px, 1.4fr) minmax(180px, 1.4fr) 44px;
+  gap: 10px;
+  align-items: center;
+}
+
+.icon-button {
+  height: 42px;
+  font-size: 20px;
+  line-height: 1;
+}

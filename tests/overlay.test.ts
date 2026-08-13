@@ -9,6 +9,8 @@ function status(mode: WorkflowStatus["mode"], revision: number): WorkflowStatus 
   return {
     mode,
     stage,
+    code: mode === "starting" ? "starting_microphone" : mode === "recording" ? "recording" : mode === "error" ? "failed" : "ready",
+    detail: null,
     message: mode,
     current_audio_path: null,
     last_record_id: null,
@@ -22,6 +24,7 @@ test("recording startup stages keep one capsule while using clear labels", () =>
   const waiting: WorkflowStatus = {
     ...recording,
     stage: "waiting_for_speech",
+    code: "waiting_for_speech",
     message: "等待说话",
   };
 
@@ -39,6 +42,8 @@ test("file ASR fallback remains a non-error processing capsule", () => {
   const fallback: WorkflowStatus = {
     mode: "processing",
     stage: "file_asr_fallback",
+    code: "file_asr_fallback",
+    detail: null,
     message: "实时识别失败，正在使用录音文件重试",
     current_audio_path: null,
     last_record_id: null,

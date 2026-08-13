@@ -25,8 +25,10 @@ mod system_audio;
 mod tray;
 mod vad;
 mod vad_test;
+mod vad_test_session;
 mod windows;
 mod workflow;
+mod workflow_status;
 
 use commands::{
     accessibility_permission_granted, apply_fn_trigger, cancel_current_workflow, choose_data_dir,
@@ -65,6 +67,7 @@ fn main() {
         .plugin(shortcuts::global_shortcut_plugin())
         .plugin(tauri_plugin_dialog::init())
         .manage(workflow::AppState::default())
+        .manage(tray::TrayState::default())
         .setup(|app| {
             let config = config::ConfigStore::load().unwrap_or_default();
             windows::sync_app_theme(app.handle(), &config.ui.theme);
@@ -72,7 +75,12 @@ fn main() {
                 .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
             windows::ensure_overlay_window(app.handle())
                 .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
-            tray::setup(app.handle()).map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
+            tray::setup(app.handle(), |app| {
+                if let Err(err) = workflow::toggle_recording_from_app(app) {
+                    eprintln!("failed to toggle voice input from tray: {err:?}");
+                }
+            })
+            .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
             if let Err(err) = history::HistoryStore::prune(&config.retention) {
                 eprintln!("failed to apply startup history retention: {err:#}");
             }

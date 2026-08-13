@@ -1,0 +1,333 @@
+.output-ducking-block {
+  display: grid;
+  gap: 12px;
+}
+
+.output-ducking-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.output-ducking-heading h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.3;
+}
+
+.output-ducking-controls {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.output-ducking-options {
+  display: grid;
+  gap: 16px;
+  padding-top: 2px;
+  animation: settings-options-enter 160ms ease-out both;
+}
+
+.output-ducking-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.72fr);
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.output-ducking-primary {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.output-ducking-controls:disabled {
+  opacity: 0.62;
+}
+
+.output-ducking-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sound-source-fallback {
+  display: grid;
+  gap: 10px;
+}
+
+.sound-source-fallback .shortcut-controls {
+  grid-template-columns: minmax(300px, 1fr) minmax(120px, 160px);
+}
+
+.sound-source-fallback .shortcut-modifiers {
+  grid-template-columns: repeat(4, minmax(64px, 1fr));
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.status-chip.warning {
+  color: #f2cd7c;
+  border-color: rgba(245, 184, 75, 0.34);
+  background: rgba(245, 184, 75, 0.08);
+}
+
+.device-checklist {
+  display: grid;
+  gap: 8px;
+  color: var(--text-soft);
+}
+
+.device-checklist-row {
+  display: flex;
+  align-items: center;
+  justify-self: start;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.audio-device-checklist,
+.output-device-checklist {
+  gap: 6px;
+}
+
+.audio-device-checklist .device-checklist-row,
+.output-device-checklist .device-checklist-row {
+  justify-self: stretch;
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 7px;
+  padding: 7px 8px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.device-checklist-row input {
+  width: auto;
+}
+
+.data-dir-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.recording-cleanup-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(225, 94, 86, 0.28);
+  border-radius: var(--radius);
+  padding: 12px;
+  background: rgba(225, 94, 86, 0.035);
+}
+
+.recording-cleanup-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.recording-cleanup-heading strong,
+.data-dir-heading strong {
+  color: var(--text);
+}
+
+.recording-cleanup-heading span,
+.recording-cleanup-controls label > span,
+.data-dir-heading span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.recording-cleanup-storage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.recording-cleanup-storage-item {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.recording-cleanup-storage-item > span,
+.recording-cleanup-storage-item > small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.recording-cleanup-storage-item > strong {
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.recording-cleanup-storage-item.reclaimable {
+  border-color: rgba(67, 194, 122, 0.28);
+  background: rgba(67, 194, 122, 0.045);
+}
+
+.recording-cleanup-storage-item.reclaimable > strong {
+  color: #b8f0ce;
+}
+
+.recording-cleanup-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  align-items: end;
+  gap: 10px;
+}
+
+.recording-cleanup-controls label {
+  display: grid;
+  gap: 8px;
+}
+
+.recording-cleanup-button {
+  min-height: 44px;
+}
+
+.recording-cleanup-button.secondary {
+  color: #f6bab5;
+  border-color: rgba(225, 94, 86, 0.5);
+  background: rgba(225, 94, 86, 0.1);
+}
+
+.recording-cleanup-button.secondary:hover:not(:disabled) {
+  color: #fff3f1;
+  border-color: rgba(242, 124, 116, 0.76);
+  background: rgba(225, 94, 86, 0.18);
+}
+
+.data-dir-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.data-dir-heading > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.data-dir-path {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  color: var(--text-soft);
+  background: rgba(0, 0, 0, 0.16);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.data-dir-actions {
+  justify-content: flex-start;
+}
+
+.hidden-file-input {
+  display: none;
+}
+
+.config-import-report {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  color: var(--text-soft);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.config-import-report strong {
+  color: var(--text);
+}
+
+.config-import-report p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.config-import-report-list {
+  display: grid;
+  gap: 6px;
+}
+
+.config-import-report-list span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.config-import-report-list ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.config-import-report-list li {
+  overflow-wrap: anywhere;
+}
+
+.retention-settings-grid {
+  grid-template-columns: repeat(2, minmax(min(100%, 220px), 1fr));
+}
+
+.retention-settings-grid > .field-wide {
+  grid-column: 1 / -1;
+  width: min(100%, 900px);
+}
+
+.overlay-control-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(100px, 140px));
+  align-items: end;
+  gap: 12px;
+}
+
+.overlay-scale-control,
+.overlay-control-row .field-compact {
+  min-width: 0;
+}
+
+@keyframes settings-options-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

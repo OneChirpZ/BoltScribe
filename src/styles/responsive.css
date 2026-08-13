@@ -1,0 +1,348 @@
+@media (max-width: 1180px) {
+  .history-item-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .history-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .sidebar {
+    z-index: 2;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    min-height: auto;
+    gap: 10px 14px;
+    padding: 14px 18px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow: visible;
+  }
+
+  .brand {
+    min-height: 40px;
+  }
+
+  .brand-mark {
+    width: 38px;
+    height: 38px;
+  }
+
+  .sidebar-nav {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+    overflow: visible;
+  }
+
+  .correction-nav-group {
+    display: contents;
+  }
+
+  .sidebar-nav .nav-button,
+  .correction-nav-primary .nav-button {
+    display: grid;
+    place-items: center;
+    min-height: 42px;
+    padding: 8px 6px;
+    line-height: 1.25;
+    text-align: center;
+  }
+
+  .sidebar-nav .nav-button:hover {
+    transform: translateY(-1px);
+  }
+
+  .correction-nav-primary {
+    grid-column: 4;
+    grid-row: 1;
+    grid-template-columns: minmax(0, 1fr) 32px;
+    gap: 2px;
+  }
+
+  .nav-toggle {
+    width: 32px;
+  }
+
+  .correction-subnav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    margin: 0;
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .ghost-button {
+    margin-top: 0;
+  }
+
+  .sidebar-footer {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+  }
+
+  .sidebar-footer .input-stats-card {
+    display: none;
+  }
+
+  .sidebar-footer .ghost-button {
+    width: auto;
+    padding: 9px 12px;
+  }
+
+  .sidebar-nav > .nav-button:last-child {
+    grid-column: 5;
+    grid-row: 1;
+  }
+
+  .content-scroll {
+    padding: 20px;
+  }
+
+  .config-save-bar {
+    padding-inline: 20px;
+  }
+
+  .permission-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .hero-status-row,
+  .history-item-header,
+  .history-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .status-visual {
+    width: 100%;
+  }
+
+  .permission-banner .permission-actions,
+  .history-header-actions,
+  .history-pagination,
+  .history-actions {
+    justify-content: stretch;
+  }
+
+  .form-grid,
+  .shortcut-grid,
+  .variable-entry,
+  .dictionary-entry,
+  .template-grid,
+  .permission-guide-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .audio-input-subsection {
+    grid-template-columns: 1fr;
+  }
+
+  .audio-input-policy > .settings-help-text {
+    grid-column: auto;
+  }
+
+  .correction-subpage-header,
+  .unparsed-lines-warning,
+  .prompt-editor-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .correction-subpage-header > p {
+    max-width: none;
+    text-align: left;
+  }
+
+  .correction-prompt-workspace,
+  .rule-item-row,
+  .rule-add-form,
+  .correction-variable-entry {
+    grid-template-columns: 1fr;
+  }
+
+  .correction-subpage-body-prompt,
+  .correction-subpage-body-rules {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .correction-prompt-workspace {
+    grid-template-rows: repeat(2, minmax(360px, 1fr));
+    height: auto;
+  }
+
+  .correction-subpage-body-rules .correction-items-panel {
+    min-height: 100%;
+    height: auto;
+  }
+
+  .correction-subpage-body-rules .correction-line-editor {
+    min-height: 100%;
+    height: auto;
+  }
+
+  .correction-subpage-body-rules .structured-item-list {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .shortcut-modifiers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vad-controls-grid {
+    grid-template-columns: repeat(2, minmax(240px, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .sidebar {
+    padding-inline: 14px;
+  }
+
+  .brand-subtitle,
+  .brand-version {
+    display: none;
+  }
+
+  .sidebar-footer .ghost-button {
+    max-width: 190px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .content-scroll {
+    padding: 14px;
+  }
+
+  .panel {
+    padding: 20px;
+  }
+
+  .config-save-bar {
+    padding-inline: 14px;
+  }
+
+  .vad-card-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .vad-controls-grid {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .vad-test-footer {
+    grid-template-columns: 1fr;
+  }
+
+  .vad-test-footer > button {
+    justify-self: start;
+  }
+}
+
+@container content (max-width: 840px) {
+  .correction-subpage-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .correction-subpage-header > div:first-child {
+    flex: 0 0 auto;
+  }
+
+  .correction-subpage-header > p {
+    max-width: none;
+    text-align: left;
+  }
+
+  .correction-subpage-body-prompt {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .correction-prompt-workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: repeat(2, minmax(360px, 1fr));
+    height: auto;
+  }
+
+  .rule-add-form,
+  .rule-item-row,
+  .correction-variable-entry {
+    grid-template-columns: 1fr;
+  }
+
+  .structured-row-error,
+  .structured-row-warning {
+    grid-column: 1;
+  }
+}
+
+@container content (max-width: 780px) {
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container content (max-width: 520px) {
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container settings-card (max-width: 620px) {
+  .shortcut-controls,
+  .fn-trigger-details,
+  .output-ducking-layout,
+  .recording-cleanup-storage {
+    grid-template-columns: 1fr;
+  }
+
+  .shortcut-modifiers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overlay-control-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overlay-scale-control {
+    grid-column: 1 / -1;
+  }
+}
+
+@container content (max-width: 620px) {
+  .retention-settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@container settings-card (max-width: 440px) {
+  .overlay-control-row,
+  .recording-cleanup-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .overlay-scale-control {
+    grid-column: auto;
+  }
+}
