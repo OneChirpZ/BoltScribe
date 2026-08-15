@@ -1,10 +1,11 @@
 use super::LiveAsrActivity;
-use crate::config::AsrConfig;
+use crate::config::{AsrConfig, AsrConnectionRetryConfig};
 use anyhow::{anyhow, bail, Context, Result};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{client::IntoClientRequest, Message};
@@ -13,9 +14,9 @@ pub(super) type VolcengineSocket = tungstenite::WebSocket<MaybeTlsStream<TcpStre
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const LIVE_DRAIN_TIMEOUT: Duration = Duration::from_millis(5);
 const LIVE_FINAL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(6);
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_ADDRESS_CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
+const RETRY_DELAY_MULTIPLIERS: [u64; 5] = [1, 3, 6, 12, 20];
 
 #[derive(Debug)]
 pub(super) struct ConnectFailure {
@@ -46,6 +47,8 @@ pub(super) fn connect_live_socket(
     config: &AsrConfig,
     task_id: &str,
 ) -> std::result::Result<(VolcengineSocket, Option<String>), ConnectFailure> {
+    let attempt_started_at = Instant::now();
+    let connect_timeout = connection_attempt_timeout(config);
     let request = build_ws_request(config, task_id)
         .map_err(|error| ConnectFailure::permanent("configuration", error))?;
     let host = request
@@ -74,7 +77,15 @@ pub(super) fn connect_live_socket(
     let mut last_error = None;
     let mut tcp = None;
     for address in addresses {
-        match TcpStream::connect_timeout(&address, CONNECT_TIMEOUT) {
+        let remaining = connect_timeout.saturating_sub(attempt_started_at.elapsed());
+        if remaining.is_zero() {
+            last_error = Some(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "ASR connection attempt timed out",
+            ));
+            break;
+        }
+        match TcpStream::connect_timeout(&address, remaining.min(MAX_ADDRESS_CONNECT_TIMEOUT)) {
             Ok(stream) => {
                 tcp = Some(stream);
                 break;
@@ -90,9 +101,16 @@ pub(super) fn connect_live_socket(
                 .unwrap_or_else(|| anyhow!("Failed to connect ASR TCP socket")),
         )
     })?;
-    tcp.set_read_timeout(Some(HANDSHAKE_TIMEOUT))
+    let handshake_timeout = connect_timeout.saturating_sub(attempt_started_at.elapsed());
+    if handshake_timeout.is_zero() {
+        return Err(ConnectFailure::retryable(
+            "timeout",
+            anyhow!("ASR connection attempt timed out before TLS handshake"),
+        ));
+    }
+    tcp.set_read_timeout(Some(handshake_timeout))
         .map_err(|error| ConnectFailure::retryable("timeout", error.into()))?;
-    tcp.set_write_timeout(Some(HANDSHAKE_TIMEOUT))
+    tcp.set_write_timeout(Some(handshake_timeout))
         .map_err(|error| ConnectFailure::retryable("timeout", error.into()))?;
 
     let (mut socket, response) =
@@ -103,6 +121,41 @@ pub(super) fn connect_live_socket(
     set_socket_read_timeout(&mut socket, Some(LIVE_DRAIN_TIMEOUT))
         .map_err(|error| ConnectFailure::retryable("socket", error))?;
     Ok((socket, log_id))
+}
+
+pub(super) fn spawn_connect_socket_attempt(
+    config: &AsrConfig,
+    task_id: &str,
+) -> mpsc::Receiver<std::result::Result<(VolcengineSocket, Option<String>), ConnectFailure>> {
+    let (sender, receiver) = mpsc::channel();
+    let config = config.clone();
+    let task_id = task_id.to_string();
+    std::thread::spawn(move || {
+        let _ = sender.send(connect_live_socket(&config, &task_id));
+    });
+    receiver
+}
+
+pub(super) fn connection_attempt_timeout(config: &AsrConfig) -> Duration {
+    Duration::from_millis(u64::from(config.connection_retry.connect_timeout_ms))
+}
+
+pub(super) fn connection_retry_delay(
+    retry: &AsrConnectionRetryConfig,
+    completed_attempts: u32,
+) -> Duration {
+    let delay_ms = if completed_attempts as usize > RETRY_DELAY_MULTIPLIERS.len() {
+        u64::from(retry.max_delay_ms)
+    } else {
+        let multiplier = RETRY_DELAY_MULTIPLIERS[completed_attempts
+            .saturating_sub(1)
+            .min((RETRY_DELAY_MULTIPLIERS.len() - 1) as u32)
+            as usize];
+        u64::from(retry.initial_delay_ms)
+            .saturating_mul(multiplier)
+            .min(u64::from(retry.max_delay_ms))
+    };
+    Duration::from_millis(delay_ms)
 }
 
 pub(super) fn classify_handshake_error(
@@ -123,9 +176,7 @@ pub(super) fn classify_handshake_error(
                     ConnectFailure::permanent("http_client", error)
                 }
             }
-            tungstenite::Error::Tls(error) => {
-                ConnectFailure::permanent("tls_certificate", error.into())
-            }
+            tungstenite::Error::Tls(error) => classify_tls_error(error.into()),
             tungstenite::Error::Url(error) => {
                 ConnectFailure::permanent("invalid_url", error.into())
             }
@@ -148,6 +199,10 @@ pub(super) fn classify_handshake_error(
             anyhow!("Live ASR websocket handshake did not finish within the timeout"),
         ),
     }
+}
+
+pub(super) fn classify_tls_error(error: anyhow::Error) -> ConnectFailure {
+    ConnectFailure::retryable("tls", error)
 }
 
 pub(super) fn build_full_request(config: &AsrConfig, audio_format: &str) -> Value {

@@ -113,6 +113,30 @@ impl AppConfig {
 impl AsrConfig {
     pub fn normalize(&mut self) {
         self.auth_mode = normalize_asr_auth_mode(&self.auth_mode, &self.app_key);
+        self.connection_retry.normalize();
+    }
+}
+
+impl AsrConnectionRetryConfig {
+    pub fn normalize(&mut self) {
+        self.live_post_stop_max_attempts = self.live_post_stop_max_attempts.clamp(
+            ASR_MIN_LIVE_POST_STOP_MAX_ATTEMPTS,
+            ASR_MAX_LIVE_POST_STOP_MAX_ATTEMPTS,
+        );
+        self.file_max_attempts = self
+            .file_max_attempts
+            .clamp(ASR_MIN_FILE_MAX_ATTEMPTS, ASR_MAX_FILE_MAX_ATTEMPTS);
+        self.connect_timeout_ms = self
+            .connect_timeout_ms
+            .clamp(ASR_MIN_CONNECT_TIMEOUT_MS, ASR_MAX_CONNECT_TIMEOUT_MS);
+        self.initial_delay_ms = self.initial_delay_ms.clamp(
+            ASR_MIN_RETRY_INITIAL_DELAY_MS,
+            ASR_MAX_RETRY_INITIAL_DELAY_MS,
+        );
+        self.max_delay_ms = self
+            .max_delay_ms
+            .clamp(ASR_MIN_RETRY_MAX_DELAY_MS, ASR_MAX_RETRY_MAX_DELAY_MS);
+        self.max_delay_ms = self.max_delay_ms.max(self.initial_delay_ms);
     }
 }
 

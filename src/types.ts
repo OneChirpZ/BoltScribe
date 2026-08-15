@@ -69,6 +69,15 @@ export interface AsrConfig {
   submit_url: string;
   query_url: string;
   language: string;
+  connection_retry: AsrConnectionRetryConfig;
+}
+
+export interface AsrConnectionRetryConfig {
+  live_post_stop_max_attempts: number;
+  file_max_attempts: number;
+  connect_timeout_ms: number;
+  initial_delay_ms: number;
+  max_delay_ms: number;
 }
 
 export interface LlmConfig {

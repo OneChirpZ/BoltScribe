@@ -1,5 +1,5 @@
 use super::*;
-use crate::config::AsrConfig;
+use crate::config::{AsrConfig, AsrConnectionRetryConfig};
 use crate::recorder::AudioChunk;
 use serde_json::json;
 use std::path::Path;
@@ -132,17 +132,62 @@ fn test_asr_config(auth_mode: &str, app_key: &str, access_key: &str) -> AsrConfi
         submit_url: String::new(),
         query_url: String::new(),
         language: "zh-CN".to_string(),
+        connection_retry: AsrConnectionRetryConfig::default(),
     }
 }
 
 #[test]
 fn retry_backoff_reaches_five_second_ceiling() {
-    assert_eq!(live_retry_delay(1), Duration::from_millis(250));
-    assert_eq!(live_retry_delay(2), Duration::from_millis(750));
-    assert_eq!(live_retry_delay(3), Duration::from_millis(1_500));
-    assert_eq!(live_retry_delay(4), Duration::from_secs(3));
-    assert_eq!(live_retry_delay(5), Duration::from_secs(5));
-    assert_eq!(live_retry_delay(50), Duration::from_secs(5));
+    let retry = AsrConnectionRetryConfig::default();
+    assert_eq!(
+        connection_retry_delay(&retry, 1),
+        Duration::from_millis(250)
+    );
+    assert_eq!(
+        connection_retry_delay(&retry, 2),
+        Duration::from_millis(750)
+    );
+    assert_eq!(
+        connection_retry_delay(&retry, 3),
+        Duration::from_millis(1_500)
+    );
+    assert_eq!(connection_retry_delay(&retry, 4), Duration::from_secs(3));
+    assert_eq!(connection_retry_delay(&retry, 5), Duration::from_secs(5));
+    assert_eq!(connection_retry_delay(&retry, 50), Duration::from_secs(5));
+}
+
+#[test]
+fn retry_backoff_uses_configured_initial_and_max_delays() {
+    let retry = AsrConnectionRetryConfig {
+        initial_delay_ms: 400,
+        max_delay_ms: 10_000,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        connection_retry_delay(&retry, 1),
+        Duration::from_millis(400)
+    );
+    assert_eq!(
+        connection_retry_delay(&retry, 2),
+        Duration::from_millis(1_200)
+    );
+    assert_eq!(
+        connection_retry_delay(&retry, 4),
+        Duration::from_millis(4_800)
+    );
+    assert_eq!(
+        connection_retry_delay(&retry, 5),
+        Duration::from_millis(8_000)
+    );
+    assert_eq!(connection_retry_delay(&retry, 6), Duration::from_secs(10));
+}
+
+#[test]
+fn live_retry_limit_applies_only_after_recording_stops() {
+    assert!(!live_connection_attempts_exhausted(false, 50, 5));
+    assert!(!live_connection_attempts_exhausted(true, 4, 5));
+    assert!(live_connection_attempts_exhausted(true, 5, 5));
 }
 
 #[test]
@@ -221,6 +266,29 @@ fn temporary_server_errors_are_retried() {
 
     assert!(failure.retryable);
     assert_eq!(failure.category, "http_temporary");
+}
+
+#[test]
+fn tls_handshake_errors_are_retried_within_attempt_limit() {
+    let failure = classify_tls_error(anyhow::anyhow!("temporary TLS handshake failure"));
+
+    assert!(failure.retryable);
+    assert_eq!(failure.category, "tls");
+    assert!(should_retry_file_connection(&failure, 1, 3));
+    assert!(!should_retry_file_connection(&failure, 3, 3));
+}
+
+#[test]
+fn file_connection_retry_stops_immediately_for_http_client_errors() {
+    let response = tungstenite::http::Response::builder()
+        .status(401)
+        .body(None)
+        .unwrap();
+    let failure = classify_handshake_error(tungstenite::HandshakeError::Failure(
+        tungstenite::Error::Http(Box::new(response)),
+    ));
+
+    assert!(!should_retry_file_connection(&failure, 1, 3));
 }
 
 #[test]

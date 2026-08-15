@@ -8,6 +8,7 @@ import type {
   VadTestStatus,
   WorkflowStatus,
 } from "../../types";
+import { defaultAsrConnectionRetry } from "../../domain/asrConnectionRetry";
 
 export interface BrowserPreviewState {
   status: WorkflowStatus;
@@ -165,6 +166,7 @@ function previewConfig(language: "zh-CN" | "en-US"): AppConfig {
       submit_url: "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit",
       query_url: "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query",
       language,
+      connection_retry: { ...defaultAsrConnectionRetry },
     },
     llm: {
       provider: "openai",

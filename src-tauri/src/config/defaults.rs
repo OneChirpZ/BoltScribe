@@ -121,3 +121,23 @@ pub(super) fn default_query_url() -> String {
 pub(super) fn default_asr_auth_mode() -> String {
     "api_key".to_string()
 }
+
+pub(super) fn default_asr_live_post_stop_max_attempts() -> u32 {
+    3
+}
+
+pub(super) fn default_asr_file_max_attempts() -> u32 {
+    3
+}
+
+pub(super) fn default_asr_connect_timeout_ms() -> u32 {
+    10_000
+}
+
+pub(super) fn default_asr_retry_initial_delay_ms() -> u32 {
+    250
+}
+
+pub(super) fn default_asr_retry_max_delay_ms() -> u32 {
+    5_000
+}

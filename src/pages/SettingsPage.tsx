@@ -1,4 +1,5 @@
 import PanelHeader from "../components/PanelHeader";
+import AdvancedSettingsSection from "./settings/AdvancedSettingsSection";
 import AppearanceSystemSection from "./settings/AppearanceSystemSection";
 import AudioSection from "./settings/AudioSection";
 import ConfigPortabilitySection from "./settings/ConfigPortabilitySection";
@@ -67,6 +68,8 @@ export default function SettingsPage(props: SettingsPageProps) {
           text={props.text}
         />
       </div>
+
+      <AdvancedSettingsSection config={props.config} onChange={props.onChange} text={props.text} />
     </section>
   );
 }

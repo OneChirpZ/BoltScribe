@@ -30,7 +30,14 @@
     "stream_url": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_nostream",
     "submit_url": "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit",
     "query_url": "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query",
-    "language": "zh-CN"
+    "language": "zh-CN",
+    "connection_retry": {
+      "live_post_stop_max_attempts": 3,
+      "file_max_attempts": 3,
+      "connect_timeout_ms": 10000,
+      "initial_delay_ms": 250,
+      "max_delay_ms": 5000
+    }
   },
   "llm": {
     "provider": "openai",

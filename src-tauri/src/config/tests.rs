@@ -123,6 +123,67 @@ fn explicit_api_key_auth_mode_survives_leftover_app_key() {
 }
 
 #[test]
+fn asr_connection_retry_defaults_when_missing() {
+    let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+    value["asr"]
+        .as_object_mut()
+        .unwrap()
+        .remove("connection_retry");
+
+    let config: AppConfig = serde_json::from_value(value).unwrap();
+
+    assert_eq!(
+        config.asr.connection_retry,
+        AsrConnectionRetryConfig::default()
+    );
+    assert_eq!(config.asr.connection_retry.live_post_stop_max_attempts, 3);
+    assert_eq!(config.asr.connection_retry.file_max_attempts, 3);
+    assert_eq!(config.asr.connection_retry.connect_timeout_ms, 10_000);
+    assert_eq!(config.asr.connection_retry.initial_delay_ms, 250);
+    assert_eq!(config.asr.connection_retry.max_delay_ms, 5_000);
+}
+
+#[test]
+fn asr_connection_retry_fields_default_individually_and_normalize() {
+    let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+    value["asr"]["connection_retry"] = serde_json::json!({
+        "live_post_stop_max_attempts": 8
+    });
+    let mut config: AppConfig = serde_json::from_value(value).unwrap();
+    assert_eq!(config.asr.connection_retry.live_post_stop_max_attempts, 8);
+    assert_eq!(config.asr.connection_retry.file_max_attempts, 3);
+    assert_eq!(config.asr.connection_retry.connect_timeout_ms, 10_000);
+
+    config.asr.connection_retry.live_post_stop_max_attempts = 0;
+    config.asr.connection_retry.file_max_attempts = 99;
+    config.asr.connection_retry.connect_timeout_ms = 10;
+    config.asr.connection_retry.initial_delay_ms = 99_000;
+    config.asr.connection_retry.max_delay_ms = 1;
+    config.normalize();
+
+    assert_eq!(
+        config.asr.connection_retry.live_post_stop_max_attempts,
+        ASR_MIN_LIVE_POST_STOP_MAX_ATTEMPTS
+    );
+    assert_eq!(
+        config.asr.connection_retry.file_max_attempts,
+        ASR_MAX_FILE_MAX_ATTEMPTS
+    );
+    assert_eq!(
+        config.asr.connection_retry.connect_timeout_ms,
+        ASR_MIN_CONNECT_TIMEOUT_MS
+    );
+    assert_eq!(
+        config.asr.connection_retry.initial_delay_ms,
+        ASR_MAX_RETRY_INITIAL_DELAY_MS
+    );
+    assert_eq!(
+        config.asr.connection_retry.max_delay_ms,
+        ASR_MAX_RETRY_INITIAL_DELAY_MS
+    );
+}
+
+#[test]
 fn missing_asr_auth_mode_without_app_key_uses_new_console() {
     let mut value = serde_json::to_value(AppConfig::default()).unwrap();
     value["asr"].as_object_mut().unwrap().remove("auth_mode");
@@ -773,6 +834,10 @@ fn config_import_fills_missing_fields_and_reports_unknown_fields() {
         .as_object_mut()
         .unwrap()
         .remove("output_volume_ducking");
+    config_value["asr"]
+        .as_object_mut()
+        .unwrap()
+        .remove("connection_retry");
     config_value["llm"]["provider_settings"] = serde_json::json!([
         {
             "provider": "custom",
@@ -809,6 +874,10 @@ fn config_import_fills_missing_fields_and_reports_unknown_fields() {
         .contains(&"audio.output_volume_ducking".to_string()));
     assert!(result
         .report
+        .missing_fields
+        .contains(&"asr.connection_retry".to_string()));
+    assert!(result
+        .report
         .unknown_fields
         .contains(&"future_top_level".to_string()));
     assert!(result
@@ -824,6 +893,10 @@ fn config_import_fills_missing_fields_and_reports_unknown_fields() {
     assert_eq!(
         result.config.audio.output_volume_ducking,
         OutputVolumeDuckingConfig::default()
+    );
+    assert_eq!(
+        result.config.asr.connection_retry,
+        AsrConnectionRetryConfig::default()
     );
     assert_eq!(result.config.llm.provider_settings.len(), 1);
     assert_eq!(result.config.llm.provider_settings[0].provider, "custom");

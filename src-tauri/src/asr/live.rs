@@ -1,7 +1,8 @@
 use super::pcm::{pcm_bytes, StreamingPcmConverter, TARGET_SAMPLE_RATE};
 use super::protocol::{
-    audio_request, build_full_request, build_ws_request, connect_live_socket,
-    drain_available_responses, full_client_request, set_socket_read_timeout, validate_config,
+    audio_request, build_full_request, build_ws_request, connection_attempt_timeout,
+    connection_retry_delay, drain_available_responses, full_client_request,
+    set_socket_read_timeout, spawn_connect_socket_attempt, validate_config,
     wait_for_final_response, AsrResponseState, ConnectFailure, VolcengineSocket,
 };
 use super::{AsrOutput, LiveAsrActivity, LiveAsrDiagnostics, LiveAsrResult, TranscriptionOutcome};
@@ -18,15 +19,7 @@ use uuid::Uuid;
 pub(super) const STREAM_CHUNK_BYTES: usize = 6_400;
 pub(super) const STREAM_FRAME_SAMPLES: usize = (TARGET_SAMPLE_RATE as usize) / 5;
 const FINAL_READ_TIMEOUT: Duration = Duration::from_millis(250);
-const CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(15);
 const LIVE_AUDIO_BUFFER_LIMIT: usize = 128 * 1024 * 1024;
-const LIVE_RETRY_DELAYS: [Duration; 5] = [
-    Duration::from_millis(250),
-    Duration::from_millis(750),
-    Duration::from_millis(1_500),
-    Duration::from_secs(3),
-    Duration::from_secs(5),
-];
 
 pub struct VolcengineLiveAsrSession {
     sender: Option<AudioSink>,
@@ -99,21 +92,17 @@ fn live_asr_worker(
     let mut buffered = Vec::new();
     let mut buffered_bytes = 0usize;
     let mut recording_finished = false;
-    let mut final_attempt_used = false;
+    let mut post_stop_attempts = 0u32;
+    let connect_timeout = connection_attempt_timeout(&config);
 
     loop {
         if recording_finished {
-            final_attempt_used = true;
+            post_stop_attempts = post_stop_attempts.saturating_add(1);
         }
         diagnostics.connection_attempts = diagnostics.connection_attempts.saturating_add(1);
         let task_id = Uuid::new_v4().to_string();
-        let (attempt_sender, attempt_receiver) = mpsc::channel();
+        let attempt_receiver = spawn_connect_socket_attempt(&config, &task_id);
         let attempt_started_at = Instant::now();
-        let attempt_config = config.clone();
-        let attempt_task_id = task_id.clone();
-        std::thread::spawn(move || {
-            let _ = attempt_sender.send(connect_live_socket(&attempt_config, &attempt_task_id));
-        });
 
         let connection = loop {
             match attempt_receiver.try_recv() {
@@ -125,7 +114,7 @@ fn live_asr_worker(
                     ));
                 }
                 Err(mpsc::TryRecvError::Empty)
-                    if attempt_started_at.elapsed() >= CONNECT_ATTEMPT_TIMEOUT =>
+                    if attempt_started_at.elapsed() >= connect_timeout =>
                 {
                     break Err(ConnectFailure::retryable(
                         "timeout",
@@ -196,20 +185,22 @@ fn live_asr_worker(
                     };
                 }
 
-                if recording_finished {
-                    if final_attempt_used {
-                        diagnostics.fallback_reason =
-                            Some("connection_attempts_exhausted".to_string());
-                        return LiveAsrResult {
-                            output: Err(failure.error),
-                            diagnostics,
-                        };
-                    }
-                    final_attempt_used = true;
-                    continue;
+                if live_connection_attempts_exhausted(
+                    recording_finished,
+                    post_stop_attempts,
+                    config.connection_retry.live_post_stop_max_attempts,
+                ) {
+                    diagnostics.fallback_reason = Some("connection_attempts_exhausted".to_string());
+                    return LiveAsrResult {
+                        output: Err(failure.error),
+                        diagnostics,
+                    };
                 }
 
-                let delay = live_retry_delay(diagnostics.connection_attempts as usize);
+                let delay = connection_retry_delay(
+                    &config.connection_retry,
+                    diagnostics.connection_attempts,
+                );
                 if let Err(error) = buffer_live_audio_for_delay(
                     &receiver,
                     delay,
@@ -229,10 +220,12 @@ fn live_asr_worker(
     }
 }
 
-pub(super) fn live_retry_delay(completed_attempts: usize) -> Duration {
-    LIVE_RETRY_DELAYS[completed_attempts
-        .saturating_sub(1)
-        .min(LIVE_RETRY_DELAYS.len() - 1)]
+pub(super) fn live_connection_attempts_exhausted(
+    recording_finished: bool,
+    post_stop_attempts: u32,
+    max_attempts: u32,
+) -> bool {
+    recording_finished && post_stop_attempts >= max_attempts
 }
 
 fn audio_chunk_bytes(chunk: &AudioChunk) -> usize {
@@ -283,9 +276,13 @@ fn buffer_live_audio_for_delay(
     recording_finished: &mut bool,
 ) -> Result<()> {
     let deadline = Instant::now() + delay;
-    while !*recording_finished {
+    loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
+            break;
+        }
+        if *recording_finished {
+            std::thread::sleep(remaining);
             break;
         }
         match receiver.recv_timeout(remaining.min(Duration::from_millis(20))) {

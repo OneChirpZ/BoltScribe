@@ -641,3 +641,86 @@
 .settings-card-actions {
   justify-content: flex-start;
 }
+
+.settings-page details.advanced-settings-section {
+  display: block;
+  margin-top: 0;
+}
+
+.advanced-settings-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  list-style: none;
+}
+
+.advanced-settings-summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-settings-summary::marker {
+  content: "";
+}
+
+.advanced-settings-summary:focus-visible {
+  border-radius: 6px;
+  outline: 3px solid rgba(36, 152, 255, 0.24);
+  outline-offset: 4px;
+}
+
+.advanced-settings-chevron {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg) translate(-2px, 2px);
+  transition: transform 140ms ease;
+}
+
+.advanced-settings-section[open] .advanced-settings-chevron {
+  transform: rotate(225deg) translate(-2px, 2px);
+}
+
+.advanced-settings-content {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.advanced-settings-section:not([open]) > .advanced-settings-content {
+  display: none;
+}
+
+.advanced-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 16px;
+}
+
+.advanced-retry-field {
+  min-width: 0;
+}
+
+.advanced-retry-label-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 20px;
+}
+
+.advanced-retry-label-row label {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.advanced-retry-field .number-with-unit {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}

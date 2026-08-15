@@ -1,13 +1,15 @@
 use super::pcm::normalized_wav_bytes;
 use super::protocol::{
-    audio_request, build_full_request, connect_live_socket, full_client_request, is_timeout_error,
-    parse_server_message, set_socket_read_timeout, validate_config, AsrResponseState,
-    ServerMessage,
+    audio_request, build_full_request, connection_attempt_timeout, connection_retry_delay,
+    full_client_request, is_timeout_error, parse_server_message, set_socket_read_timeout,
+    spawn_connect_socket_attempt, validate_config, AsrResponseState, ConnectFailure, ServerMessage,
+    VolcengineSocket,
 };
 use super::{AsrOutput, AsrProvider, TranscriptionOutcome};
 use crate::config::AsrConfig;
 use anyhow::{anyhow, bail, Context, Result};
 use std::path::Path;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use tungstenite::Message;
 use uuid::Uuid;
@@ -21,14 +23,9 @@ impl AsrProvider for VolcengineFileAsr {
     fn transcribe(&self, audio_path: &Path, config: &AsrConfig) -> Result<TranscriptionOutcome> {
         validate_config(config)?;
 
-        let task_id = Uuid::new_v4().to_string();
         let audio = normalized_wav_bytes(audio_path)
             .with_context(|| format!("Failed to prepare {}", audio_path.display()))?;
-        let (mut socket, log_id) = connect_live_socket(config, &task_id).map_err(|failure| {
-            failure
-                .error
-                .context("Failed to connect Volcengine ASR websocket")
-        })?;
+        let (mut socket, log_id, task_id) = connect_file_socket(config)?;
 
         let full_request = build_full_request(config, "wav");
 
@@ -91,4 +88,54 @@ impl AsrProvider for VolcengineFileAsr {
             duration_ms: response_state.service_duration_ms,
         }))
     }
+}
+
+fn connect_file_socket(config: &AsrConfig) -> Result<(VolcengineSocket, Option<String>, String)> {
+    let retry = &config.connection_retry;
+    let timeout = connection_attempt_timeout(config);
+
+    for attempt in 1..=retry.file_max_attempts {
+        let task_id = Uuid::new_v4().to_string();
+        let receiver = spawn_connect_socket_attempt(config, &task_id);
+        let result = match receiver.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(ConnectFailure::retryable(
+                "timeout",
+                anyhow!("File ASR connection attempt timed out"),
+            )),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(ConnectFailure::retryable(
+                "connection_worker",
+                anyhow!("File ASR connection worker exited unexpectedly"),
+            )),
+        };
+
+        match result {
+            Ok((socket, log_id)) => return Ok((socket, log_id, task_id)),
+            Err(failure) => {
+                eprintln!(
+                    "file ASR connection attempt {} failed ({}): {:#}",
+                    attempt, failure.category, failure.error
+                );
+                if !should_retry_file_connection(&failure, attempt, retry.file_max_attempts) {
+                    let category = failure.category;
+                    return Err(failure.error).with_context(|| {
+                        format!(
+                            "Failed to connect Volcengine ASR websocket after {attempt} attempt(s) ({category})"
+                        )
+                    });
+                }
+                std::thread::sleep(connection_retry_delay(retry, attempt));
+            }
+        }
+    }
+
+    unreachable!("file_max_attempts is normalized to at least one")
+}
+
+pub(super) fn should_retry_file_connection(
+    failure: &ConnectFailure,
+    attempt: u32,
+    max_attempts: u32,
+) -> bool {
+    failure.retryable && attempt < max_attempts
 }

@@ -10,6 +10,16 @@ pub const VAD_MIN_NOISE_WINDOW_MS: u32 = 400;
 pub const VAD_MAX_NOISE_WINDOW_MS: u32 = 3_000;
 pub const VAD_NOISE_WINDOW_STEP_MS: u32 = 100;
 pub const VAD_CONTINUOUS_SPEECH_MS: u32 = 240;
+pub const ASR_MIN_LIVE_POST_STOP_MAX_ATTEMPTS: u32 = 1;
+pub const ASR_MAX_LIVE_POST_STOP_MAX_ATTEMPTS: u32 = 20;
+pub const ASR_MIN_FILE_MAX_ATTEMPTS: u32 = 1;
+pub const ASR_MAX_FILE_MAX_ATTEMPTS: u32 = 10;
+pub const ASR_MIN_CONNECT_TIMEOUT_MS: u32 = 1_000;
+pub const ASR_MAX_CONNECT_TIMEOUT_MS: u32 = 60_000;
+pub const ASR_MIN_RETRY_INITIAL_DELAY_MS: u32 = 100;
+pub const ASR_MAX_RETRY_INITIAL_DELAY_MS: u32 = 10_000;
+pub const ASR_MIN_RETRY_MAX_DELAY_MS: u32 = 100;
+pub const ASR_MAX_RETRY_MAX_DELAY_MS: u32 = 30_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppConfig {
@@ -103,6 +113,26 @@ pub struct AsrConfig {
     #[serde(default = "defaults::default_query_url")]
     pub query_url: String,
     pub language: String,
+    #[serde(default)]
+    pub connection_retry: AsrConnectionRetryConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AsrConnectionRetryConfig {
+    /// Extra live connection attempts allowed after recording stops. While audio
+    /// capture is active, retryable connection failures keep using bounded backoff.
+    #[serde(default = "defaults::default_asr_live_post_stop_max_attempts")]
+    pub live_post_stop_max_attempts: u32,
+    /// Total connection attempts for file fallback, including the first attempt.
+    #[serde(default = "defaults::default_asr_file_max_attempts")]
+    pub file_max_attempts: u32,
+    /// Wall-clock budget for one logical DNS/TCP/TLS connection attempt.
+    #[serde(default = "defaults::default_asr_connect_timeout_ms")]
+    pub connect_timeout_ms: u32,
+    #[serde(default = "defaults::default_asr_retry_initial_delay_ms")]
+    pub initial_delay_ms: u32,
+    #[serde(default = "defaults::default_asr_retry_max_delay_ms")]
+    pub max_delay_ms: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -267,6 +297,7 @@ impl Default for AppConfig {
                 submit_url: defaults::default_submit_url(),
                 query_url: defaults::default_query_url(),
                 language: "zh-CN".to_string(),
+                connection_retry: AsrConnectionRetryConfig::default(),
             },
             llm: LlmConfig {
                 provider: defaults::default_llm_provider(),
@@ -300,6 +331,18 @@ impl Default for AppConfig {
             ui: UiConfig::default(),
             retention: RetentionConfig::default(),
             system: SystemConfig::default(),
+        }
+    }
+}
+
+impl Default for AsrConnectionRetryConfig {
+    fn default() -> Self {
+        Self {
+            live_post_stop_max_attempts: defaults::default_asr_live_post_stop_max_attempts(),
+            file_max_attempts: defaults::default_asr_file_max_attempts(),
+            connect_timeout_ms: defaults::default_asr_connect_timeout_ms(),
+            initial_delay_ms: defaults::default_asr_retry_initial_delay_ms(),
+            max_delay_ms: defaults::default_asr_retry_max_delay_ms(),
         }
     }
 }
