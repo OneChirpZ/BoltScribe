@@ -36,9 +36,6 @@ export default function SettingsPage(props: SettingsPageProps) {
         onRefreshAudioDevices={props.onRefreshAudioDevices}
         onRestartAudioService={props.onRestartAudioService}
         vadTestStatus={props.vadTestStatus}
-        onStartVadTest={props.onStartVadTest}
-        onUpdateVadTestSettings={props.onUpdateVadTestSettings}
-        onStopVadTest={props.onStopVadTest}
         canRestartAudioService={props.canRestartAudioService}
         text={props.text}
       />
@@ -47,13 +44,8 @@ export default function SettingsPage(props: SettingsPageProps) {
         config={props.config}
         dataDir={props.dataDir}
         onChange={props.onChange}
-        onOpenDataDir={props.onOpenDataDir}
-        onChooseDataDir={props.onChooseDataDir}
-        onResetDataDir={props.onResetDataDir}
         onCleanupRecordingFiles={props.onCleanupRecordingFiles}
         onPreviewRecordingCleanup={props.onPreviewRecordingCleanup}
-        canSave={props.canSave}
-        canChangeDataDir={props.canChangeDataDir}
         canCleanupRecordings={props.canCleanupRecordings}
         text={props.text}
       />
@@ -69,7 +61,21 @@ export default function SettingsPage(props: SettingsPageProps) {
         />
       </div>
 
-      <AdvancedSettingsSection config={props.config} onChange={props.onChange} text={props.text} />
+      <AdvancedSettingsSection
+        config={props.config}
+        onChange={props.onChange}
+        dataDir={props.dataDir}
+        canSave={props.canSave}
+        canChangeDataDir={props.canChangeDataDir}
+        onOpenDataDir={props.onOpenDataDir}
+        onChooseDataDir={props.onChooseDataDir}
+        onResetDataDir={props.onResetDataDir}
+        vadTestStatus={props.vadTestStatus}
+        onStartVadTest={props.onStartVadTest}
+        onUpdateVadTestSettings={props.onUpdateVadTestSettings}
+        onStopVadTest={props.onStopVadTest}
+        text={props.text}
+      />
     </section>
   );
 }

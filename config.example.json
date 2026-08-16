@@ -34,6 +34,7 @@
     "connection_retry": {
       "live_post_stop_max_attempts": 3,
       "file_max_attempts": 3,
+      "live_connect_timeout_ms": 3000,
       "connect_timeout_ms": 10000,
       "initial_delay_ms": 250,
       "max_delay_ms": 5000

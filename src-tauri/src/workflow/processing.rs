@@ -157,7 +157,7 @@ fn process_recording(
             stage: WorkflowStage::Recognizing,
             code: WorkflowStatusCode::Recognizing,
             detail: None,
-            message: "录音已保存，正在调用语音识别".to_string(),
+            message: "录音已保存，正在并行进行实时与录音文件识别".to_string(),
             current_audio_path: Some(audio_path.display().to_string()),
             last_record_id: None,
             revision: 0,
@@ -172,14 +172,13 @@ fn process_recording(
         None => ConfigStore::load()?,
     };
     let asr_started_at = Instant::now();
-    let asr_outcome = transcribe_with_live_fallback(
-        &app,
-        &task.id,
+    let asr_outcome = transcribe_live_and_file_race(
         &recorded,
         &config,
         live_asr,
         live_asr_start_error,
         live_asr_diagnostics,
+        &task,
     )?;
     let asr_output = match asr_outcome {
         TranscriptionOutcome::Text(output) => output,
@@ -370,62 +369,190 @@ fn paste_failure_status() -> (WorkflowStatusCode, String) {
     }
 }
 
-fn transcribe_with_live_fallback(
-    app: &AppHandle,
-    task_id: &str,
+fn transcribe_live_and_file_race(
     recorded: &RecordedAudio,
     config: &AppConfig,
     live_asr: Option<VolcengineLiveAsrSession>,
     live_asr_start_error: Option<String>,
     diagnostics: &mut Option<LiveAsrDiagnostics>,
+    task: &WorkflowTask,
 ) -> Result<TranscriptionOutcome> {
-    if let Some(session) = live_asr {
-        let result = session.finish();
-        *diagnostics = Some(result.diagnostics);
-        match result.output {
-            Ok(TranscriptionOutcome::Text(output)) => {
-                return Ok(TranscriptionOutcome::Text(output))
-            }
-            Ok(TranscriptionOutcome::NoSpeech) => return Ok(TranscriptionOutcome::NoSpeech),
-            Err(err) => {
-                publish_file_asr_fallback_status(app, task_id, recorded);
-                eprintln!("live ASR failed, falling back to file ASR: {err:#}");
-            }
-        }
-    } else if let Some(err) = live_asr_start_error {
+    enum RaceEvent {
+        Live(LiveAsrResult),
+        File(Result<TranscriptionOutcome>),
+    }
+
+    let live_cancellation = live_asr
+        .as_ref()
+        .map(VolcengineLiveAsrSession::cancellation)
+        .unwrap_or_default();
+    let file_cancellation = AsrCancellation::new();
+    let (sender, receiver) = std::sync::mpsc::channel();
+
+    let live_handle = live_asr.map(|session| {
+        let sender = sender.clone();
+        std::thread::spawn(move || {
+            let _ = sender.send(RaceEvent::Live(session.finish()));
+        })
+    });
+
+    let file_path = recorded.path.clone();
+    let file_config = config.asr.clone();
+    let file_worker_cancellation = file_cancellation.clone();
+    let file_sender = sender.clone();
+    let file_handle = std::thread::spawn(move || {
+        let result = VolcengineFileAsr
+            .transcribe_cancellable(&file_path, &file_config, &file_worker_cancellation)
+            .map(|outcome| match outcome {
+                TranscriptionOutcome::Text(mut output) => {
+                    output.provider = "volcengine_ws_file_fallback".to_string();
+                    TranscriptionOutcome::Text(output)
+                }
+                TranscriptionOutcome::NoSpeech => TranscriptionOutcome::NoSpeech,
+            });
+        let _ = file_sender.send(RaceEvent::File(result));
+    });
+    drop(sender);
+
+    let mut race = AsrRaceState::default();
+    let mut terminal = None;
+    let mut winner = None;
+    if live_handle.is_none() {
+        let message =
+            live_asr_start_error.unwrap_or_else(|| "Live ASR session was unavailable".to_string());
         *diagnostics = Some(LiveAsrDiagnostics {
             last_error_category: Some("configuration".to_string()),
             fallback_reason: Some("session_start_failed".to_string()),
             ..Default::default()
         });
-        publish_file_asr_fallback_status(app, task_id, recorded);
-        eprintln!("live ASR did not start, falling back to file ASR: {err}");
-    } else {
-        publish_file_asr_fallback_status(app, task_id, recorded);
+        terminal = race.accept(AsrRaceBranch::Live, Err(anyhow!(message)));
     }
 
-    match VolcengineFileAsr.transcribe(&recorded.path, &config.asr)? {
-        TranscriptionOutcome::Text(mut output) => {
-            output.provider = "volcengine_ws_file_fallback".to_string();
-            Ok(TranscriptionOutcome::Text(output))
+    let mut cancelled = false;
+    while terminal.is_none() {
+        if task.cancelled() {
+            cancelled = true;
+            live_cancellation.cancel();
+            file_cancellation.cancel();
         }
-        TranscriptionOutcome::NoSpeech => Ok(TranscriptionOutcome::NoSpeech),
+
+        match receiver.recv_timeout(Duration::from_millis(20)) {
+            Ok(RaceEvent::Live(result)) => {
+                *diagnostics = Some(result.diagnostics);
+                if !cancelled {
+                    let has_text = matches!(&result.output, Ok(TranscriptionOutcome::Text(_)));
+                    terminal = race.accept(AsrRaceBranch::Live, result.output);
+                    if has_text {
+                        winner = Some(AsrRaceBranch::Live);
+                    }
+                }
+            }
+            Ok(RaceEvent::File(result)) => {
+                if !cancelled {
+                    let has_text = matches!(&result, Ok(TranscriptionOutcome::Text(_)));
+                    terminal = race.accept(AsrRaceBranch::File, result);
+                    if has_text {
+                        winner = Some(AsrRaceBranch::File);
+                    }
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+
+        if terminal
+            .as_ref()
+            .is_some_and(|result| matches!(result, Ok(TranscriptionOutcome::Text(_))))
+        {
+            live_cancellation.cancel();
+            file_cancellation.cancel();
+            break;
+        }
     }
+
+    live_cancellation.cancel();
+    file_cancellation.cancel();
+    let live_panicked = live_handle.is_some_and(|handle| handle.join().is_err());
+    let file_panicked = file_handle.join().is_err();
+    for event in receiver.try_iter() {
+        if let RaceEvent::Live(result) = event {
+            *diagnostics = Some(result.diagnostics);
+        }
+    }
+    if winner == Some(AsrRaceBranch::File) {
+        if let Some(diagnostics) = diagnostics.as_mut() {
+            if diagnostics.fallback_reason.as_deref() == Some("cancelled") {
+                diagnostics.fallback_reason = Some("parallel_file_won".to_string());
+            }
+        }
+    }
+
+    if task.cancelled() || cancelled {
+        return Err(anyhow!("ASR operation cancelled"));
+    }
+    if terminal.is_none() && race.live.is_none() && live_panicked {
+        *diagnostics = Some(LiveAsrDiagnostics {
+            last_error_category: Some("worker_panicked".to_string()),
+            fallback_reason: Some("worker_panicked".to_string()),
+            ..Default::default()
+        });
+        terminal = race.accept(
+            AsrRaceBranch::Live,
+            Err(anyhow!("Live ASR worker panicked")),
+        );
+    }
+    if terminal.is_none() && race.file.is_none() && file_panicked {
+        terminal = race.accept(
+            AsrRaceBranch::File,
+            Err(anyhow!("File ASR worker panicked")),
+        );
+    }
+
+    terminal.unwrap_or_else(|| {
+        Err(anyhow!(
+            "ASR race ended before either branch produced a result"
+        ))
+    })
 }
 
-fn publish_file_asr_fallback_status(app: &AppHandle, task_id: &str, recorded: &RecordedAudio) {
-    set_status_for_task(
-        app,
-        task_id,
-        WorkflowStatus {
-            mode: WorkflowMode::Processing,
-            stage: WorkflowStage::FileAsrFallback,
-            code: WorkflowStatusCode::FileAsrFallback,
-            detail: None,
-            message: "正在回退到录音文件识别".to_string(),
-            current_audio_path: Some(recorded.path.display().to_string()),
-            last_record_id: None,
-            revision: 0,
-        },
-    );
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AsrRaceBranch {
+    Live,
+    File,
+}
+
+#[derive(Default)]
+pub(super) struct AsrRaceState {
+    live: Option<Result<TranscriptionOutcome>>,
+    file: Option<Result<TranscriptionOutcome>>,
+}
+
+impl AsrRaceState {
+    pub(super) fn accept(
+        &mut self,
+        branch: AsrRaceBranch,
+        result: Result<TranscriptionOutcome>,
+    ) -> Option<Result<TranscriptionOutcome>> {
+        if matches!(&result, Ok(TranscriptionOutcome::Text(_))) {
+            return Some(result);
+        }
+        match branch {
+            AsrRaceBranch::Live => self.live = Some(result),
+            AsrRaceBranch::File => self.file = Some(result),
+        }
+        if self.live.is_none() || self.file.is_none() {
+            return None;
+        }
+        let live = self.live.take().expect("live result was checked");
+        let file = self.file.take().expect("file result was checked");
+        Some(match (live, file) {
+            (Ok(TranscriptionOutcome::NoSpeech), _) | (_, Ok(TranscriptionOutcome::NoSpeech)) => {
+                Ok(TranscriptionOutcome::NoSpeech)
+            }
+            (Err(live_error), Err(file_error)) => Err(anyhow!(
+                "Both live and file ASR failed; live: {live_error:#}; file: {file_error:#}"
+            )),
+            _ => unreachable!("text outcomes are returned immediately"),
+        })
+    }
 }

@@ -75,6 +75,7 @@ export interface AsrConfig {
 export interface AsrConnectionRetryConfig {
   live_post_stop_max_attempts: number;
   file_max_attempts: number;
+  live_connect_timeout_ms: number;
   connect_timeout_ms: number;
   initial_delay_ms: number;
   max_delay_ms: number;

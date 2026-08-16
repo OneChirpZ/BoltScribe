@@ -6,19 +6,44 @@ import {
   updateAsrConnectionRetry,
   type AsrConnectionRetryKey,
 } from "../../domain/asrConnectionRetry";
-import type { AppConfig } from "../../types";
-import type { TextBundle } from "../../domain/i18n";
+import DataDirectorySection from "./DataDirectorySection";
+import type { SettingsPageProps } from "./types";
+import VadProtectionSection from "./VadProtectionSection";
+
+type AdvancedSettingsSectionProps = Pick<
+  SettingsPageProps,
+  | "config"
+  | "onChange"
+  | "dataDir"
+  | "canSave"
+  | "canChangeDataDir"
+  | "onOpenDataDir"
+  | "onChooseDataDir"
+  | "onResetDataDir"
+  | "vadTestStatus"
+  | "onStartVadTest"
+  | "onUpdateVadTestSettings"
+  | "onStopVadTest"
+  | "text"
+>;
 
 export default function AdvancedSettingsSection({
   config,
   onChange,
+  dataDir,
+  canSave,
+  canChangeDataDir,
+  onOpenDataDir,
+  onChooseDataDir,
+  onResetDataDir,
+  vadTestStatus,
+  onStartVadTest,
+  onUpdateVadTestSettings,
+  onStopVadTest,
   text,
-}: {
-  config: AppConfig;
-  onChange: (config: AppConfig) => void;
-  text: TextBundle;
-}) {
+}: AdvancedSettingsSectionProps) {
   const [open, setOpen] = useState(false);
+  const closingRef = useRef(false);
   const connectionRetry = normalizeAsrConnectionRetry(config.asr.connection_retry);
 
   function update(key: AsrConnectionRetryKey, value: string) {
@@ -31,7 +56,14 @@ export default function AdvancedSettingsSection({
     <details
       className="settings-section advanced-settings-section"
       open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onToggle={(event) => {
+        const nextOpen = event.currentTarget.open;
+        closingRef.current = !nextOpen;
+        if (!nextOpen) {
+          onStopVadTest();
+        }
+        setOpen(nextOpen);
+      }}
     >
       <summary className="advanced-settings-summary">
         <span>{text.settings.advancedSettings}</span>
@@ -54,6 +86,14 @@ export default function AdvancedSettingsSection({
               onChange={update}
             />
             <RetryNumberField
+              configKey="live_connect_timeout_ms"
+              label={text.settings.asrLiveConnectTimeout}
+              help={text.settings.asrLiveConnectTimeoutHelp}
+              unit={text.common.milliseconds}
+              value={connectionRetry.live_connect_timeout_ms}
+              onChange={update}
+            />
+            <RetryNumberField
               configKey="file_max_attempts"
               label={text.settings.asrFileMaxAttempts}
               help={text.settings.asrFileMaxAttemptsHelp}
@@ -63,8 +103,8 @@ export default function AdvancedSettingsSection({
             />
             <RetryNumberField
               configKey="connect_timeout_ms"
-              label={text.settings.asrConnectTimeout}
-              help={text.settings.asrConnectTimeoutHelp}
+              label={text.settings.asrFileConnectTimeout}
+              help={text.settings.asrFileConnectTimeoutHelp}
               unit={text.common.milliseconds}
               value={connectionRetry.connect_timeout_ms}
               onChange={update}
@@ -86,6 +126,28 @@ export default function AdvancedSettingsSection({
               onChange={update}
             />
           </div>
+          <VadProtectionSection
+            config={config}
+            onChange={onChange}
+            vadTestStatus={vadTestStatus}
+            onStartVadTest={onStartVadTest}
+            onUpdateVadTestSettings={onUpdateVadTestSettings}
+            onStopVadTest={() => {
+              if (!closingRef.current) {
+                onStopVadTest();
+              }
+            }}
+            text={text}
+          />
+          <DataDirectorySection
+            dataDir={dataDir}
+            canSave={canSave}
+            canChangeDataDir={canChangeDataDir}
+            onOpenDataDir={onOpenDataDir}
+            onChooseDataDir={onChooseDataDir}
+            onResetDataDir={onResetDataDir}
+            text={text}
+          />
         </div>
       ) : null}
     </details>

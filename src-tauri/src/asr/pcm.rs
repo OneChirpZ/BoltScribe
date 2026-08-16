@@ -102,43 +102,71 @@ pub(super) fn pcm_bytes(samples: &[i16]) -> Vec<u8> {
     out
 }
 
-pub(super) fn normalized_wav_bytes(path: &Path) -> Result<Vec<u8>> {
+pub(super) fn normalized_wav_bytes_with_cancel(
+    path: &Path,
+    is_cancelled: impl Fn() -> bool,
+) -> Result<Vec<u8>> {
     let mut reader = hound::WavReader::open(path)?;
     let spec = reader.spec();
     if spec.bits_per_sample != 16 || spec.sample_format != hound::SampleFormat::Int {
         bail!("Only 16-bit PCM WAV recordings are supported");
     }
 
-    let samples = reader.samples::<i16>().collect::<Result<Vec<_>, _>>()?;
-    let mono = downmix_to_mono(&samples, spec.channels);
+    let mut samples = Vec::new();
+    for (index, sample) in reader.samples::<i16>().enumerate() {
+        if index % 8_192 == 0 && is_cancelled() {
+            bail!("ASR operation cancelled");
+        }
+        samples.push(sample?);
+    }
+    if is_cancelled() {
+        bail!("ASR operation cancelled");
+    }
+    let channels = spec.channels.max(1) as usize;
+    let mut mono = Vec::with_capacity(samples.len().div_ceil(channels));
+    for (index, frame) in samples.chunks(channels).enumerate() {
+        if index % 8_192 == 0 && is_cancelled() {
+            bail!("ASR operation cancelled");
+        }
+        let sum: i32 = frame.iter().map(|sample| *sample as i32).sum();
+        mono.push((sum / frame.len() as i32).clamp(i16::MIN as i32, i16::MAX as i32) as i16);
+    }
 
     let resampled = if spec.sample_rate == TARGET_SAMPLE_RATE {
         mono
     } else {
-        resample_linear(&mono, spec.sample_rate, TARGET_SAMPLE_RATE)
+        resample_linear_with_cancel(&mono, spec.sample_rate, TARGET_SAMPLE_RATE, &is_cancelled)?
     };
-    Ok(wav_bytes_from_mono(&resampled, TARGET_SAMPLE_RATE))
+    wav_bytes_from_mono_with_cancel(&resampled, TARGET_SAMPLE_RATE, &is_cancelled)
 }
 
-fn resample_linear(samples: &[i16], from_rate: u32, to_rate: u32) -> Vec<i16> {
+fn resample_linear_with_cancel(
+    samples: &[i16],
+    from_rate: u32,
+    to_rate: u32,
+    is_cancelled: &impl Fn() -> bool,
+) -> Result<Vec<i16>> {
     if samples.is_empty() || from_rate == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-
     let out_len = ((samples.len() as u64 * to_rate as u64) / from_rate as u64).max(1) as usize;
     let ratio = from_rate as f64 / to_rate as f64;
-    (0..out_len)
-        .map(|index| {
-            let src = index as f64 * ratio;
-            let left = src.floor() as usize;
-            let right = (left + 1).min(samples.len() - 1);
-            let frac = src - left as f64;
-            let value = samples[left] as f64 * (1.0 - frac) + samples[right] as f64 * frac;
-            value.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16
-        })
-        .collect()
+    let mut output = Vec::with_capacity(out_len);
+    for index in 0..out_len {
+        if index % 8_192 == 0 && is_cancelled() {
+            bail!("ASR operation cancelled");
+        }
+        let src = index as f64 * ratio;
+        let left = src.floor() as usize;
+        let right = (left + 1).min(samples.len() - 1);
+        let frac = src - left as f64;
+        let value = samples[left] as f64 * (1.0 - frac) + samples[right] as f64 * frac;
+        output.push(value.round().clamp(i16::MIN as f64, i16::MAX as f64) as i16);
+    }
+    Ok(output)
 }
 
+#[cfg(test)]
 pub(super) fn wav_bytes_from_mono(samples: &[i16], sample_rate: u32) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut out = Vec::with_capacity(44 + data_len as usize);
@@ -158,4 +186,32 @@ pub(super) fn wav_bytes_from_mono(samples: &[i16], sample_rate: u32) -> Vec<u8> 
         out.extend_from_slice(&sample.to_le_bytes());
     }
     out
+}
+
+fn wav_bytes_from_mono_with_cancel(
+    samples: &[i16],
+    sample_rate: u32,
+    is_cancelled: &impl Fn() -> bool,
+) -> Result<Vec<u8>> {
+    let data_len = (samples.len() * 2) as u32;
+    let mut out = Vec::with_capacity(44 + data_len as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_len).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&sample_rate.to_le_bytes());
+    out.extend_from_slice(&(sample_rate * 2).to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&data_len.to_le_bytes());
+    for (index, sample) in samples.iter().enumerate() {
+        if index % 8_192 == 0 && is_cancelled() {
+            bail!("ASR operation cancelled");
+        }
+        out.extend_from_slice(&sample.to_le_bytes());
+    }
+    Ok(out)
 }

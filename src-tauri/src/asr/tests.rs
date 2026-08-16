@@ -184,6 +184,57 @@ fn retry_backoff_uses_configured_initial_and_max_delays() {
 }
 
 #[test]
+fn live_and_file_connection_timeouts_are_independent() {
+    let mut config = test_asr_config("api_key", "", "new-api-key");
+    config.connection_retry.live_connect_timeout_ms = 1_500;
+    config.connection_retry.connect_timeout_ms = 12_000;
+
+    assert_eq!(
+        live_connection_attempt_timeout(&config),
+        Duration::from_millis(1_500)
+    );
+    assert_eq!(
+        file_connection_attempt_timeout(&config),
+        Duration::from_secs(12)
+    );
+}
+
+#[test]
+fn live_connection_budget_is_shared_fairly_across_dns_addresses() {
+    assert_eq!(
+        fair_address_connect_timeout(Duration::from_secs(3), 2),
+        Duration::from_millis(1_500)
+    );
+    assert_eq!(
+        fair_address_connect_timeout(Duration::from_secs(10), 2),
+        Duration::from_secs(4)
+    );
+    assert_eq!(
+        fair_address_connect_timeout(Duration::from_millis(900), 1),
+        Duration::from_millis(900)
+    );
+}
+
+#[test]
+fn cancellation_interrupts_retry_wait() {
+    let cancellation = AsrCancellation::new();
+    cancellation.cancel();
+
+    assert!(!cancellation.wait(Duration::from_secs(10)));
+    assert!(cancellation.check().is_err());
+}
+
+#[test]
+fn cancellation_interrupts_live_audio_receive_while_sender_is_alive() {
+    let (sender, receiver) = std::sync::mpsc::channel::<AudioChunk>();
+    let cancellation = AsrCancellation::new();
+    cancellation.cancel();
+
+    assert!(recv_live_audio_chunk(&receiver, &cancellation).is_err());
+    drop(sender);
+}
+
+#[test]
 fn live_retry_limit_applies_only_after_recording_stops() {
     assert!(!live_connection_attempts_exhausted(false, 50, 5));
     assert!(!live_connection_attempts_exhausted(true, 4, 5));

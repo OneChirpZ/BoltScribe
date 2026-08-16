@@ -1,9 +1,9 @@
 use super::pcm::{pcm_bytes, StreamingPcmConverter, TARGET_SAMPLE_RATE};
 use super::protocol::{
-    audio_request, build_full_request, build_ws_request, connection_attempt_timeout,
-    connection_retry_delay, drain_available_responses, full_client_request,
+    audio_request, build_full_request, build_ws_request, connection_retry_delay,
+    drain_available_responses, full_client_request, live_connection_attempt_timeout,
     set_socket_read_timeout, spawn_connect_socket_attempt, validate_config,
-    wait_for_final_response, AsrResponseState, ConnectFailure, VolcengineSocket,
+    wait_for_final_response, AsrCancellation, AsrResponseState, ConnectFailure, VolcengineSocket,
 };
 use super::{AsrOutput, LiveAsrActivity, LiveAsrDiagnostics, LiveAsrResult, TranscriptionOutcome};
 use crate::config::AsrConfig;
@@ -25,6 +25,7 @@ pub struct VolcengineLiveAsrSession {
     sender: Option<AudioSink>,
     handle: Option<JoinHandle<LiveAsrResult>>,
     activity: Option<LiveAsrActivity>,
+    cancellation: AsrCancellation,
 }
 
 impl VolcengineLiveAsrSession {
@@ -42,12 +43,17 @@ impl VolcengineLiveAsrSession {
         let config = config.clone();
         let (sender, receiver) = mpsc::channel::<AudioChunk>();
         let worker_activity = activity.clone();
-        let handle = std::thread::spawn(move || live_asr_worker(config, receiver, worker_activity));
+        let cancellation = AsrCancellation::new();
+        let worker_cancellation = cancellation.clone();
+        let handle = std::thread::spawn(move || {
+            live_asr_worker(config, receiver, worker_activity, worker_cancellation)
+        });
 
         Ok(Self {
             sender: Some(sender),
             handle: Some(handle),
             activity,
+            cancellation,
         })
     }
 
@@ -60,6 +66,10 @@ impl VolcengineLiveAsrSession {
             .as_ref()
             .cloned()
             .ok_or_else(|| anyhow!("Live ASR session is already finishing"))
+    }
+
+    pub fn cancellation(&self) -> AsrCancellation {
+        self.cancellation.clone()
     }
 
     pub fn finish(mut self) -> LiveAsrResult {
@@ -82,10 +92,22 @@ impl VolcengineLiveAsrSession {
         })
     }
 }
+
+impl Drop for VolcengineLiveAsrSession {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+        self.sender.take();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 fn live_asr_worker(
     config: AsrConfig,
     receiver: mpsc::Receiver<AudioChunk>,
     activity: Option<LiveAsrActivity>,
+    cancellation: AsrCancellation,
 ) -> LiveAsrResult {
     let started_at = Instant::now();
     let mut diagnostics = LiveAsrDiagnostics::default();
@@ -93,18 +115,33 @@ fn live_asr_worker(
     let mut buffered_bytes = 0usize;
     let mut recording_finished = false;
     let mut post_stop_attempts = 0u32;
-    let connect_timeout = connection_attempt_timeout(&config);
+    let connect_timeout = live_connection_attempt_timeout(&config);
 
     loop {
+        if cancellation.is_cancelled() {
+            mark_live_asr_cancelled(&mut diagnostics);
+            return LiveAsrResult {
+                output: Err(anyhow!("ASR operation cancelled")),
+                diagnostics,
+            };
+        }
         if recording_finished {
             post_stop_attempts = post_stop_attempts.saturating_add(1);
         }
         diagnostics.connection_attempts = diagnostics.connection_attempts.saturating_add(1);
         let task_id = Uuid::new_v4().to_string();
-        let attempt_receiver = spawn_connect_socket_attempt(&config, &task_id);
+        let (attempt_receiver, attempt_cancellation) =
+            spawn_connect_socket_attempt(&config, &task_id, connect_timeout, cancellation.clone());
         let attempt_started_at = Instant::now();
 
         let connection = loop {
+            if cancellation.is_cancelled() {
+                attempt_cancellation.cancel();
+                break Err(ConnectFailure::retryable(
+                    "cancelled",
+                    anyhow!("ASR operation cancelled"),
+                ));
+            }
             match attempt_receiver.try_recv() {
                 Ok(result) => break result,
                 Err(mpsc::TryRecvError::Disconnected) => {
@@ -116,6 +153,7 @@ fn live_asr_worker(
                 Err(mpsc::TryRecvError::Empty)
                     if attempt_started_at.elapsed() >= connect_timeout =>
                 {
+                    attempt_cancellation.cancel();
                     break Err(ConnectFailure::retryable(
                         "timeout",
                         anyhow!("Live ASR connection attempt timed out"),
@@ -150,18 +188,31 @@ fn live_asr_worker(
 
         match connection {
             Ok((socket, log_id)) => {
+                if let Err(error) = cancellation.register_websocket(&socket) {
+                    mark_live_asr_cancelled(&mut diagnostics);
+                    return LiveAsrResult {
+                        output: Err(error),
+                        diagnostics,
+                    };
+                }
                 diagnostics.first_connected_after_ms =
                     Some(started_at.elapsed().as_millis() as u64);
                 let output = stream_live_audio(
                     &config,
-                    task_id,
-                    socket,
-                    log_id,
+                    ConnectedLiveSocket {
+                        task_id,
+                        socket,
+                        log_id,
+                    },
                     buffered,
                     receiver,
                     activity.clone(),
+                    &cancellation,
                 );
-                if output.is_err() {
+                cancellation.clear_socket();
+                if cancellation.is_cancelled() {
+                    mark_live_asr_cancelled(&mut diagnostics);
+                } else if output.is_err() {
                     diagnostics.last_error_category = Some("stream_interrupted".to_string());
                     diagnostics.fallback_reason = Some("stream_interrupted".to_string());
                 }
@@ -171,6 +222,13 @@ fn live_asr_worker(
                 };
             }
             Err(failure) => {
+                if cancellation.is_cancelled() {
+                    mark_live_asr_cancelled(&mut diagnostics);
+                    return LiveAsrResult {
+                        output: Err(anyhow!("ASR operation cancelled")),
+                        diagnostics,
+                    };
+                }
                 eprintln!(
                     "live ASR connection attempt {} failed ({}): {:#}",
                     diagnostics.connection_attempts, failure.category, failure.error
@@ -208,8 +266,13 @@ fn live_asr_worker(
                     &mut buffered_bytes,
                     &mut diagnostics,
                     &mut recording_finished,
+                    &cancellation,
                 ) {
-                    diagnostics.fallback_reason = Some("buffer_limit_exceeded".to_string());
+                    if cancellation.is_cancelled() {
+                        mark_live_asr_cancelled(&mut diagnostics);
+                    } else {
+                        diagnostics.fallback_reason = Some("buffer_limit_exceeded".to_string());
+                    }
                     return LiveAsrResult {
                         output: Err(error),
                         diagnostics,
@@ -218,6 +281,13 @@ fn live_asr_worker(
             }
         }
     }
+}
+
+fn mark_live_asr_cancelled(diagnostics: &mut LiveAsrDiagnostics) {
+    diagnostics
+        .last_error_category
+        .get_or_insert_with(|| "cancelled".to_string());
+    diagnostics.fallback_reason = Some("cancelled".to_string());
 }
 
 pub(super) fn live_connection_attempts_exhausted(
@@ -274,16 +344,20 @@ fn buffer_live_audio_for_delay(
     buffered_bytes: &mut usize,
     diagnostics: &mut LiveAsrDiagnostics,
     recording_finished: &mut bool,
+    cancellation: &AsrCancellation,
 ) -> Result<()> {
     let deadline = Instant::now() + delay;
     loop {
+        cancellation.check()?;
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             break;
         }
         if *recording_finished {
-            std::thread::sleep(remaining);
-            break;
+            if !cancellation.wait(remaining) {
+                bail!("ASR operation cancelled");
+            }
+            return Ok(());
         }
         match receiver.recv_timeout(remaining.min(Duration::from_millis(20))) {
             Ok(chunk) => buffer_live_audio_chunk(chunk, buffered, buffered_bytes, diagnostics)?,
@@ -294,16 +368,27 @@ fn buffer_live_audio_for_delay(
     Ok(())
 }
 
+struct ConnectedLiveSocket {
+    task_id: String,
+    socket: VolcengineSocket,
+    log_id: Option<String>,
+}
+
 fn stream_live_audio(
     config: &AsrConfig,
-    task_id: String,
-    mut socket: VolcengineSocket,
-    log_id: Option<String>,
+    connection: ConnectedLiveSocket,
     buffered: Vec<AudioChunk>,
     receiver: mpsc::Receiver<AudioChunk>,
     activity: Option<LiveAsrActivity>,
+    cancellation: &AsrCancellation,
 ) -> Result<TranscriptionOutcome> {
+    let ConnectedLiveSocket {
+        task_id,
+        mut socket,
+        log_id,
+    } = connection;
     let full_request = build_full_request(config, "pcm");
+    cancellation.check()?;
     socket
         .send(Message::Binary(full_client_request(&full_request)?.into()))
         .context("Failed to send Volcengine live ASR request metadata")?;
@@ -313,29 +398,47 @@ fn stream_live_audio(
     let mut delayed_frame: Option<Vec<u8>> = None;
     let mut response_state = AsrResponseState::new(activity);
 
-    for chunk in buffered.into_iter().chain(receiver) {
-        let pcm = converter.push_chunk(&chunk)?;
-        for frame in framer.push_samples(&pcm) {
-            if let Some(frame_to_send) = delayed_frame.replace(frame) {
-                socket
-                    .send(Message::Binary(
-                        audio_request(&frame_to_send, false)?.into(),
-                    ))
-                    .context("Failed to send Volcengine live ASR audio chunk")?;
-                drain_available_responses(&mut socket, &mut response_state, &log_id)?;
+    {
+        let mut process_chunk = |chunk: AudioChunk| -> Result<()> {
+            cancellation.check()?;
+            let pcm = converter.push_chunk(&chunk)?;
+            for frame in framer.push_samples(&pcm) {
+                if let Some(frame_to_send) = delayed_frame.replace(frame) {
+                    cancellation.check()?;
+                    socket
+                        .send(Message::Binary(
+                            audio_request(&frame_to_send, false)?.into(),
+                        ))
+                        .context("Failed to send Volcengine live ASR audio chunk")?;
+                    drain_available_responses(
+                        &mut socket,
+                        &mut response_state,
+                        &log_id,
+                        cancellation,
+                    )?;
+                }
             }
+            Ok(())
+        };
+
+        for chunk in buffered {
+            process_chunk(chunk)?;
+        }
+        while let Some(chunk) = recv_live_audio_chunk(&receiver, cancellation)? {
+            process_chunk(chunk)?;
         }
     }
 
     let tail = converter.finish();
     for frame in framer.push_samples(&tail) {
         if let Some(frame_to_send) = delayed_frame.replace(frame) {
+            cancellation.check()?;
             socket
                 .send(Message::Binary(
                     audio_request(&frame_to_send, false)?.into(),
                 ))
                 .context("Failed to send Volcengine live ASR audio chunk")?;
-            drain_available_responses(&mut socket, &mut response_state, &log_id)?;
+            drain_available_responses(&mut socket, &mut response_state, &log_id, cancellation)?;
         }
     }
 
@@ -345,6 +448,7 @@ fn stream_live_audio(
     }
 
     for (frame, is_final) in final_frames {
+        cancellation.check()?;
         let context = if is_final {
             "Failed to send Volcengine live ASR final audio chunk"
         } else {
@@ -354,11 +458,11 @@ fn stream_live_audio(
             .send(Message::Binary(audio_request(&frame, is_final)?.into()))
             .context(context)?;
         if !is_final {
-            drain_available_responses(&mut socket, &mut response_state, &log_id)?;
+            drain_available_responses(&mut socket, &mut response_state, &log_id, cancellation)?;
         }
     }
     set_socket_read_timeout(&mut socket, Some(FINAL_READ_TIMEOUT))?;
-    wait_for_final_response(&mut socket, &mut response_state, &log_id)?;
+    wait_for_final_response(&mut socket, &mut response_state, &log_id, cancellation)?;
 
     if response_state.best_text.trim().is_empty() {
         return Ok(TranscriptionOutcome::NoSpeech);
@@ -370,6 +474,20 @@ fn stream_live_audio(
         task_id: Some(task_id),
         duration_ms: response_state.service_duration_ms,
     }))
+}
+
+pub(super) fn recv_live_audio_chunk(
+    receiver: &mpsc::Receiver<AudioChunk>,
+    cancellation: &AsrCancellation,
+) -> Result<Option<AudioChunk>> {
+    loop {
+        cancellation.check()?;
+        match receiver.recv_timeout(Duration::from_millis(20)) {
+            Ok(chunk) => return Ok(Some(chunk)),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return Ok(None),
+        }
+    }
 }
 
 #[derive(Default)]

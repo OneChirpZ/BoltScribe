@@ -1,9 +1,9 @@
-use super::pcm::normalized_wav_bytes;
+use super::pcm::normalized_wav_bytes_with_cancel;
 use super::protocol::{
-    audio_request, build_full_request, connection_attempt_timeout, connection_retry_delay,
+    audio_request, build_full_request, connection_retry_delay, file_connection_attempt_timeout,
     full_client_request, is_timeout_error, parse_server_message, set_socket_read_timeout,
-    spawn_connect_socket_attempt, validate_config, AsrResponseState, ConnectFailure, ServerMessage,
-    VolcengineSocket,
+    spawn_connect_socket_attempt, validate_config, AsrCancellation, AsrResponseState,
+    ConnectFailure, ServerMessage, VolcengineSocket,
 };
 use super::{AsrOutput, AsrProvider, TranscriptionOutcome};
 use crate::config::AsrConfig;
@@ -21,20 +21,46 @@ const FILE_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 pub struct VolcengineFileAsr;
 impl AsrProvider for VolcengineFileAsr {
     fn transcribe(&self, audio_path: &Path, config: &AsrConfig) -> Result<TranscriptionOutcome> {
-        validate_config(config)?;
+        self.transcribe_cancellable(audio_path, config, &AsrCancellation::new())
+    }
+}
 
-        let audio = normalized_wav_bytes(audio_path)
+impl VolcengineFileAsr {
+    pub fn transcribe_cancellable(
+        &self,
+        audio_path: &Path,
+        config: &AsrConfig,
+        cancellation: &AsrCancellation,
+    ) -> Result<TranscriptionOutcome> {
+        let result = self.transcribe_inner(audio_path, config, cancellation);
+        cancellation.clear_socket();
+        result
+    }
+
+    fn transcribe_inner(
+        &self,
+        audio_path: &Path,
+        config: &AsrConfig,
+        cancellation: &AsrCancellation,
+    ) -> Result<TranscriptionOutcome> {
+        validate_config(config)?;
+        cancellation.check()?;
+
+        let audio = normalized_wav_bytes_with_cancel(audio_path, || cancellation.is_cancelled())
             .with_context(|| format!("Failed to prepare {}", audio_path.display()))?;
-        let (mut socket, log_id, task_id) = connect_file_socket(config)?;
+        cancellation.check()?;
+        let (mut socket, log_id, task_id) = connect_file_socket(config, cancellation)?;
 
         let full_request = build_full_request(config, "wav");
 
+        cancellation.check()?;
         socket
             .send(Message::Binary(full_client_request(&full_request)?.into()))
             .context("Failed to send Volcengine ASR request metadata")?;
 
         let chunk_count = audio.len().div_ceil(STREAM_CHUNK_BYTES);
         for (index, chunk) in audio.chunks(STREAM_CHUNK_BYTES).enumerate() {
+            cancellation.check()?;
             let is_final = index + 1 == chunk_count;
             socket
                 .send(Message::Binary(audio_request(chunk, is_final)?.into()))
@@ -45,6 +71,7 @@ impl AsrProvider for VolcengineFileAsr {
         let started_at = Instant::now();
         let mut response_state = AsrResponseState::default();
         loop {
+            cancellation.check()?;
             if started_at.elapsed() >= FILE_RESPONSE_TIMEOUT {
                 bail!("Volcengine ASR websocket timed out");
             }
@@ -90,28 +117,56 @@ impl AsrProvider for VolcengineFileAsr {
     }
 }
 
-fn connect_file_socket(config: &AsrConfig) -> Result<(VolcengineSocket, Option<String>, String)> {
+fn connect_file_socket(
+    config: &AsrConfig,
+    cancellation: &AsrCancellation,
+) -> Result<(VolcengineSocket, Option<String>, String)> {
     let retry = &config.connection_retry;
-    let timeout = connection_attempt_timeout(config);
+    let timeout = file_connection_attempt_timeout(config);
 
     for attempt in 1..=retry.file_max_attempts {
+        cancellation.check()?;
         let task_id = Uuid::new_v4().to_string();
-        let receiver = spawn_connect_socket_attempt(config, &task_id);
-        let result = match receiver.recv_timeout(timeout) {
-            Ok(result) => result,
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(ConnectFailure::retryable(
-                "timeout",
-                anyhow!("File ASR connection attempt timed out"),
-            )),
-            Err(mpsc::RecvTimeoutError::Disconnected) => Err(ConnectFailure::retryable(
-                "connection_worker",
-                anyhow!("File ASR connection worker exited unexpectedly"),
-            )),
+        let (receiver, attempt_cancellation) =
+            spawn_connect_socket_attempt(config, &task_id, timeout, cancellation.clone());
+        let attempt_started_at = Instant::now();
+        let result = loop {
+            if cancellation.is_cancelled() {
+                attempt_cancellation.cancel();
+                break Err(ConnectFailure::retryable(
+                    "cancelled",
+                    anyhow!("ASR operation cancelled"),
+                ));
+            }
+            let remaining = timeout.saturating_sub(attempt_started_at.elapsed());
+            if remaining.is_zero() {
+                attempt_cancellation.cancel();
+                break Err(ConnectFailure::retryable(
+                    "timeout",
+                    anyhow!("File ASR connection attempt timed out"),
+                ));
+            }
+            match receiver.recv_timeout(remaining.min(Duration::from_millis(20))) {
+                Ok(result) => break result,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    break Err(ConnectFailure::retryable(
+                        "connection_worker",
+                        anyhow!("File ASR connection worker exited unexpectedly"),
+                    ));
+                }
+            }
         };
 
         match result {
-            Ok((socket, log_id)) => return Ok((socket, log_id, task_id)),
+            Ok((socket, log_id)) => {
+                cancellation.register_websocket(&socket)?;
+                return Ok((socket, log_id, task_id));
+            }
             Err(failure) => {
+                if cancellation.is_cancelled() {
+                    return Err(anyhow!("ASR operation cancelled"));
+                }
                 eprintln!(
                     "file ASR connection attempt {} failed ({}): {:#}",
                     attempt, failure.category, failure.error
@@ -124,7 +179,9 @@ fn connect_file_socket(config: &AsrConfig) -> Result<(VolcengineSocket, Option<S
                         )
                     });
                 }
-                std::thread::sleep(connection_retry_delay(retry, attempt));
+                if !cancellation.wait(connection_retry_delay(retry, attempt)) {
+                    return Err(anyhow!("ASR operation cancelled"));
+                }
             }
         }
     }

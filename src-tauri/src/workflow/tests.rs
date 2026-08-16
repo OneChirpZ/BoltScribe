@@ -1,4 +1,5 @@
 use super::correction::*;
+use super::processing::*;
 use super::publish::*;
 use super::recording::*;
 use super::state::*;
@@ -470,6 +471,86 @@ fn retried_record_replaces_failed_text_without_pasting() {
             .map(|diagnostics| diagnostics.connection_attempts),
         Some(3)
     );
+}
+
+fn race_text(provider: &str) -> TranscriptionOutcome {
+    TranscriptionOutcome::Text(AsrOutput {
+        text: "race winner".to_string(),
+        provider: provider.to_string(),
+        task_id: Some("race-task".to_string()),
+        duration_ms: Some(100),
+    })
+}
+
+#[test]
+fn asr_race_no_speech_waits_for_the_other_branch_text() {
+    let mut race = AsrRaceState::default();
+
+    assert!(race
+        .accept(AsrRaceBranch::Live, Ok(TranscriptionOutcome::NoSpeech))
+        .is_none());
+    let result = race
+        .accept(
+            AsrRaceBranch::File,
+            Ok(race_text("volcengine_ws_file_fallback")),
+        )
+        .unwrap()
+        .unwrap();
+
+    let TranscriptionOutcome::Text(output) = result else {
+        panic!("file text should win after live no-speech");
+    };
+    assert_eq!(output.provider, "volcengine_ws_file_fallback");
+}
+
+#[test]
+fn asr_race_single_failure_waits_for_the_other_branch_text() {
+    let mut race = AsrRaceState::default();
+
+    assert!(race
+        .accept(AsrRaceBranch::File, Err(anyhow!("file failed")))
+        .is_none());
+    let result = race
+        .accept(AsrRaceBranch::Live, Ok(race_text("volcengine_ws_live")))
+        .unwrap()
+        .unwrap();
+
+    let TranscriptionOutcome::Text(output) = result else {
+        panic!("live text should win after file failure");
+    };
+    assert_eq!(output.provider, "volcengine_ws_live");
+}
+
+#[test]
+fn asr_race_reports_both_branch_failures_together() {
+    let mut race = AsrRaceState::default();
+
+    assert!(race
+        .accept(AsrRaceBranch::Live, Err(anyhow!("live failed")))
+        .is_none());
+    let error = race
+        .accept(AsrRaceBranch::File, Err(anyhow!("file failed")))
+        .unwrap()
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("live failed"));
+    assert!(error.contains("file failed"));
+}
+
+#[test]
+fn asr_race_no_speech_beats_a_single_branch_failure() {
+    let mut race = AsrRaceState::default();
+
+    assert!(race
+        .accept(AsrRaceBranch::Live, Err(anyhow!("live failed")))
+        .is_none());
+    let result = race
+        .accept(AsrRaceBranch::File, Ok(TranscriptionOutcome::NoSpeech))
+        .unwrap()
+        .unwrap();
+
+    assert!(matches!(result, TranscriptionOutcome::NoSpeech));
 }
 
 #[test]

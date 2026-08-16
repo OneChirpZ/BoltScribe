@@ -14,6 +14,8 @@ pub const ASR_MIN_LIVE_POST_STOP_MAX_ATTEMPTS: u32 = 1;
 pub const ASR_MAX_LIVE_POST_STOP_MAX_ATTEMPTS: u32 = 20;
 pub const ASR_MIN_FILE_MAX_ATTEMPTS: u32 = 1;
 pub const ASR_MAX_FILE_MAX_ATTEMPTS: u32 = 10;
+pub const ASR_MIN_LIVE_CONNECT_TIMEOUT_MS: u32 = 500;
+pub const ASR_MAX_LIVE_CONNECT_TIMEOUT_MS: u32 = 10_000;
 pub const ASR_MIN_CONNECT_TIMEOUT_MS: u32 = 1_000;
 pub const ASR_MAX_CONNECT_TIMEOUT_MS: u32 = 60_000;
 pub const ASR_MIN_RETRY_INITIAL_DELAY_MS: u32 = 100;
@@ -123,10 +125,14 @@ pub struct AsrConnectionRetryConfig {
     /// capture is active, retryable connection failures keep using bounded backoff.
     #[serde(default = "defaults::default_asr_live_post_stop_max_attempts")]
     pub live_post_stop_max_attempts: u32,
-    /// Total connection attempts for file fallback, including the first attempt.
+    /// Total connection attempts for the parallel recorded-file branch, including the first.
     #[serde(default = "defaults::default_asr_file_max_attempts")]
     pub file_max_attempts: u32,
-    /// Wall-clock budget for one logical DNS/TCP/TLS connection attempt.
+    /// Wall-clock budget for one live DNS/TCP/TLS connection attempt.
+    #[serde(default = "defaults::default_asr_live_connect_timeout_ms")]
+    pub live_connect_timeout_ms: u32,
+    /// Wall-clock budget for one file-ASR DNS/TCP/TLS connection attempt.
+    /// This name is retained for backward-compatible configuration loading.
     #[serde(default = "defaults::default_asr_connect_timeout_ms")]
     pub connect_timeout_ms: u32,
     #[serde(default = "defaults::default_asr_retry_initial_delay_ms")]
@@ -340,6 +346,7 @@ impl Default for AsrConnectionRetryConfig {
         Self {
             live_post_stop_max_attempts: defaults::default_asr_live_post_stop_max_attempts(),
             file_max_attempts: defaults::default_asr_file_max_attempts(),
+            live_connect_timeout_ms: defaults::default_asr_live_connect_timeout_ms(),
             connect_timeout_ms: defaults::default_asr_connect_timeout_ms(),
             initial_delay_ms: defaults::default_asr_retry_initial_delay_ms(),
             max_delay_ms: defaults::default_asr_retry_max_delay_ms(),

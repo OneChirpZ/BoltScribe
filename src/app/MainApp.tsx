@@ -59,7 +59,6 @@ export default function MainApp() {
                 page="correction"
                 onClick={configActions.requestPageChange}
                 label={text.nav.correction}
-                ariaExpanded={page === "correction"}
               />
               <label className="nav-toggle" title={text.correction.enabled}>
                 <span className="visually-hidden">{text.correction.enabled}</span>
@@ -79,21 +78,22 @@ export default function MainApp() {
                 />
               </label>
             </div>
-            {page === "correction" ? (
-              <nav className="correction-subnav" aria-label={text.correction.navigationLabel}>
-                {correctionNavItems.map((item) => (
+            <nav className="correction-subnav" aria-label={text.correction.navigationLabel}>
+              {correctionNavItems.map((item) => {
+                const active = page === "correction" && correctionSection === item.section;
+                return (
                   <button
                     key={item.section}
-                    className={correctionSection === item.section ? "correction-subnav-button active" : "correction-subnav-button"}
+                    className={active ? "correction-subnav-button active" : "correction-subnav-button"}
                     type="button"
-                    aria-current={correctionSection === item.section ? "page" : undefined}
-                    onClick={() => configActions.setCorrectionSection(item.section)}
+                    aria-current={active ? "page" : undefined}
+                    onClick={() => configActions.requestCorrectionSection(item.section)}
                   >
                     {item.label}
                   </button>
-                ))}
-              </nav>
-            ) : null}
+                );
+              })}
+            </nav>
           </div>
           <NavButton current={page} page="settings" onClick={configActions.requestPageChange} label={text.nav.settings} />
         </nav>

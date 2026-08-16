@@ -24,6 +24,7 @@ pub enum WorkflowStatusCode {
     Cancelled,
     NoSpeech,
     Recognizing,
+    #[allow(dead_code)] // Retained for status compatibility with older frontends.
     FileAsrFallback,
     Correcting,
     Pasting,
@@ -58,6 +59,7 @@ pub enum WorkflowStage {
     WaitingForSpeech,
     Recording,
     Recognizing,
+    #[allow(dead_code)] // Retained for status compatibility with older frontends.
     FileAsrFallback,
     Correcting,
     Pasting,

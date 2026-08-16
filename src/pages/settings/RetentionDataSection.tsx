@@ -12,13 +12,8 @@ type RetentionDataSectionProps = Pick<
   | "config"
   | "dataDir"
   | "onChange"
-  | "onOpenDataDir"
-  | "onChooseDataDir"
-  | "onResetDataDir"
   | "onCleanupRecordingFiles"
   | "onPreviewRecordingCleanup"
-  | "canSave"
-  | "canChangeDataDir"
   | "canCleanupRecordings"
   | "text"
 >;
@@ -156,39 +151,6 @@ export default function RetentionDataSection(props: RetentionDataSectionProps) {
             : null}
           {!props.canCleanupRecordings
             ? <p className="settings-help-text warning">{text.settings.cleanupRecordingsBusy}</p>
-            : null}
-        </div>
-        <div className="field-wide data-dir-panel">
-          <div className="data-dir-heading">
-            <div>
-              <strong>{text.settings.dataDirectory}</strong>
-              <span>{text.settings.dataDirHelp}</span>
-            </div>
-            <span className="status-chip">
-              {dataDir ? (dataDir.is_default ? text.settings.defaultDataDir : text.settings.customDataDir) : text.common.checking}
-            </span>
-          </div>
-          <div className="data-dir-path" title={dataDir?.path ?? ""}>
-            {dataDir?.path ?? text.common.checking}
-          </div>
-          <div className="section-actions data-dir-actions">
-            <button className="secondary small" type="button" disabled={!props.canSave} onClick={props.onOpenDataDir}>
-              {text.nav.openDataDir}
-            </button>
-            <button className="secondary small" type="button" disabled={!props.canChangeDataDir} onClick={props.onChooseDataDir}>
-              {text.settings.changeDataDir}
-            </button>
-            <button
-              className="secondary small"
-              type="button"
-              disabled={!props.canChangeDataDir || !dataDir || dataDir.is_default}
-              onClick={props.onResetDataDir}
-            >
-              {text.settings.resetDataDir}
-            </button>
-          </div>
-          {props.canSave && !props.canChangeDataDir
-            ? <p className="settings-help-text warning">{text.settings.dataDirBusy}</p>
             : null}
         </div>
       </div>

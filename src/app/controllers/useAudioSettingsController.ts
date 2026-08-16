@@ -46,6 +46,7 @@ export function useAudioSettingsController({
   const [vadStatus, setVadStatus] = useState(initialVadTestStatus);
   const vadSettingsRequestRef = useRef(0);
   const vadTestStartingRef = useRef(false);
+  const vadTestStartPromiseRef = useRef<Promise<void> | null>(null);
 
   const acceptVadStatus = useCallback((nextStatus: VadTestStatus) => {
     setVadStatus((current) => nextStatus.revision > current.revision ? nextStatus : current);
@@ -99,30 +100,39 @@ export function useAudioSettingsController({
     }
   }, [api, refreshDevices, setBusy, setNotice, text.notices]);
 
-  const startVadTest = useCallback(async () => {
+  const startVadTest = useCallback(() => {
     if (!config || busy || workflowStatus.mode !== "idle" || vadTestStartingRef.current) {
-      return;
+      return Promise.resolve();
     }
     vadTestStartingRef.current = true;
     const request = ++vadSettingsRequestRef.current;
-    try {
-      const nextStatus = await api.audio.startVadTest(config.audio);
-      if (request === vadSettingsRequestRef.current) {
-        acceptVadStatus(nextStatus);
+    const startPromise = (async () => {
+      try {
+        const nextStatus = await api.audio.startVadTest(config.audio);
+        if (request === vadSettingsRequestRef.current) {
+          acceptVadStatus(nextStatus);
+        }
+      } catch (error) {
+        if (request === vadSettingsRequestRef.current) {
+          setVadStatus((current) => ({
+            ...current,
+            mode: "error",
+            error: String(error),
+            revision: current.revision + 1,
+          }));
+          setNotice(String(error));
+        }
+      } finally {
+        vadTestStartingRef.current = false;
       }
-    } catch (error) {
-      if (request === vadSettingsRequestRef.current) {
-        setVadStatus((current) => ({
-          ...current,
-          mode: "error",
-          error: String(error),
-          revision: current.revision + 1,
-        }));
-        setNotice(String(error));
+    })();
+    vadTestStartPromiseRef.current = startPromise;
+    void startPromise.then(() => {
+      if (vadTestStartPromiseRef.current === startPromise) {
+        vadTestStartPromiseRef.current = null;
       }
-    } finally {
-      vadTestStartingRef.current = false;
-    }
+    });
+    return startPromise;
   }, [acceptVadStatus, api, busy, config, setNotice, workflowStatus.mode]);
 
   const updateVadSettings = useCallback(async (
@@ -145,6 +155,7 @@ export function useAudioSettingsController({
 
   const stopVadTest = useCallback(async () => {
     vadSettingsRequestRef.current += 1;
+    await vadTestStartPromiseRef.current;
     try {
       acceptVadStatus(await api.audio.stopVadTest());
     } catch (error) {

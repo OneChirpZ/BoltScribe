@@ -3,6 +3,7 @@ import type { AppConfig, AsrConnectionRetryConfig } from "../types";
 export const defaultAsrConnectionRetry: AsrConnectionRetryConfig = {
   live_post_stop_max_attempts: 3,
   file_max_attempts: 3,
+  live_connect_timeout_ms: 3_000,
   connect_timeout_ms: 10_000,
   initial_delay_ms: 250,
   max_delay_ms: 5_000,
@@ -11,6 +12,7 @@ export const defaultAsrConnectionRetry: AsrConnectionRetryConfig = {
 export const asrConnectionRetryLimits = {
   live_post_stop_max_attempts: { min: 1, max: 20 },
   file_max_attempts: { min: 1, max: 10 },
+  live_connect_timeout_ms: { min: 500, max: 10_000 },
   connect_timeout_ms: { min: 1_000, max: 60_000 },
   initial_delay_ms: { min: 100, max: 10_000 },
   max_delay_ms: { min: 100, max: 30_000 },
@@ -28,6 +30,10 @@ export function normalizeAsrConnectionRetry(
       asrConnectionRetryLimits.live_post_stop_max_attempts,
     ),
     file_max_attempts: clampInt(source.file_max_attempts, asrConnectionRetryLimits.file_max_attempts),
+    live_connect_timeout_ms: clampInt(
+      source.live_connect_timeout_ms,
+      asrConnectionRetryLimits.live_connect_timeout_ms,
+    ),
     connect_timeout_ms: clampInt(source.connect_timeout_ms, asrConnectionRetryLimits.connect_timeout_ms),
     initial_delay_ms: clampInt(source.initial_delay_ms, asrConnectionRetryLimits.initial_delay_ms),
     max_delay_ms: clampInt(source.max_delay_ms, asrConnectionRetryLimits.max_delay_ms),

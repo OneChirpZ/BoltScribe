@@ -130,6 +130,10 @@ pub(super) fn default_asr_file_max_attempts() -> u32 {
     3
 }
 
+pub(super) fn default_asr_live_connect_timeout_ms() -> u32 {
+    3_000
+}
+
 pub(super) fn default_asr_connect_timeout_ms() -> u32 {
     10_000
 }

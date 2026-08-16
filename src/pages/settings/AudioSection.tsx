@@ -14,9 +14,6 @@ type AudioSectionProps = Pick<
   | "onRefreshAudioDevices"
   | "onRestartAudioService"
   | "vadTestStatus"
-  | "onStartVadTest"
-  | "onUpdateVadTestSettings"
-  | "onStopVadTest"
   | "canRestartAudioService"
   | "text"
 >;
@@ -74,10 +71,6 @@ export default function AudioSection(props: AudioSectionProps) {
           config={props.config}
           audioDevices={props.audioDevices}
           onChange={props.onChange}
-          vadTestStatus={vadTestStatus}
-          onStartVadTest={props.onStartVadTest}
-          onUpdateVadTestSettings={props.onUpdateVadTestSettings}
-          onStopVadTest={props.onStopVadTest}
           text={text}
         />
         <OutputDuckingSection

@@ -118,6 +118,28 @@ describe("useConfigController", () => {
     });
   });
 
+  it("opens the requested correction subpage from another page", async () => {
+    const api = createBrowserPreviewAppApi({ appVersion: "test-version" });
+    const { result } = renderHook(() => useConfigController({
+      api,
+      busy: false,
+      setBusy: vi.fn(),
+      setNotice: vi.fn(),
+    }));
+
+    await act(async () => {
+      await result.current.actions.loadInitial();
+    });
+    expect(result.current.state.page).toBe("home");
+
+    act(() => {
+      result.current.actions.requestCorrectionSection("dictionary");
+    });
+
+    expect(result.current.state.page).toBe("correction");
+    expect(result.current.state.correctionSection).toBe("dictionary");
+  });
+
   it("keeps the draft and pending navigation when a fatal save fails", async () => {
     const api = createBrowserPreviewAppApi({
       appVersion: "test-version",

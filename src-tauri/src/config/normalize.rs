@@ -126,6 +126,10 @@ impl AsrConnectionRetryConfig {
         self.file_max_attempts = self
             .file_max_attempts
             .clamp(ASR_MIN_FILE_MAX_ATTEMPTS, ASR_MAX_FILE_MAX_ATTEMPTS);
+        self.live_connect_timeout_ms = self.live_connect_timeout_ms.clamp(
+            ASR_MIN_LIVE_CONNECT_TIMEOUT_MS,
+            ASR_MAX_LIVE_CONNECT_TIMEOUT_MS,
+        );
         self.connect_timeout_ms = self
             .connect_timeout_ms
             .clamp(ASR_MIN_CONNECT_TIMEOUT_MS, ASR_MAX_CONNECT_TIMEOUT_MS);

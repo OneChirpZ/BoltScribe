@@ -4,19 +4,106 @@ use anyhow::{anyhow, bail, Context, Result};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
-use std::net::{TcpStream, ToSocketAddrs};
-use std::sync::mpsc;
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc, Mutex,
+};
 use std::time::{Duration, Instant};
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{client::IntoClientRequest, Message};
 
 pub(super) type VolcengineSocket = tungstenite::WebSocket<MaybeTlsStream<TcpStream>>;
+type SocketConnectResult = std::result::Result<(VolcengineSocket, Option<String>), ConnectFailure>;
+pub(super) type SocketConnectReceiver = mpsc::Receiver<SocketConnectResult>;
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const LIVE_DRAIN_TIMEOUT: Duration = Duration::from_millis(5);
 const LIVE_FINAL_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
 const STREAM_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_ADDRESS_CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
 const RETRY_DELAY_MULTIPLIERS: [u64; 5] = [1, 3, 6, 12, 20];
+
+#[derive(Clone, Default)]
+pub struct AsrCancellation {
+    inner: Arc<AsrCancellationInner>,
+}
+
+#[derive(Default)]
+struct AsrCancellationInner {
+    cancelled: AtomicBool,
+    active_socket: Mutex<Option<TcpStream>>,
+}
+
+impl AsrCancellation {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.inner.cancelled.store(true, Ordering::Release);
+        if let Ok(socket) = self.inner.active_socket.lock() {
+            if let Some(socket) = socket.as_ref() {
+                let _ = socket.shutdown(Shutdown::Both);
+            }
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.inner.cancelled.load(Ordering::Acquire)
+    }
+
+    pub(super) fn check(&self) -> Result<()> {
+        if self.is_cancelled() {
+            bail!("ASR operation cancelled");
+        }
+        Ok(())
+    }
+
+    pub(super) fn wait(&self, duration: Duration) -> bool {
+        let deadline = Instant::now() + duration;
+        loop {
+            if self.is_cancelled() {
+                return false;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return true;
+            }
+            std::thread::sleep(remaining.min(Duration::from_millis(20)));
+        }
+    }
+
+    fn register_socket(&self, socket: &TcpStream) -> Result<()> {
+        self.check()?;
+        let cloned = socket.try_clone()?;
+        let mut active = self
+            .inner
+            .active_socket
+            .lock()
+            .map_err(|_| anyhow!("Failed to lock ASR cancellation socket"))?;
+        if self.is_cancelled() {
+            let _ = cloned.shutdown(Shutdown::Both);
+            bail!("ASR operation cancelled");
+        }
+        *active = Some(cloned);
+        Ok(())
+    }
+
+    pub(super) fn register_websocket(&self, socket: &VolcengineSocket) -> Result<()> {
+        match socket.get_ref() {
+            MaybeTlsStream::Plain(stream) => self.register_socket(stream),
+            MaybeTlsStream::NativeTls(stream) => self.register_socket(stream.get_ref()),
+            #[allow(unreachable_patterns)]
+            _ => Ok(()),
+        }
+    }
+
+    pub(super) fn clear_socket(&self) {
+        if let Ok(mut socket) = self.inner.active_socket.lock() {
+            socket.take();
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(super) struct ConnectFailure {
@@ -46,9 +133,15 @@ impl ConnectFailure {
 pub(super) fn connect_live_socket(
     config: &AsrConfig,
     task_id: &str,
+    connect_timeout: Duration,
+    cancellation: &AsrCancellation,
+    attempt_cancellation: &AsrCancellation,
 ) -> std::result::Result<(VolcengineSocket, Option<String>), ConnectFailure> {
     let attempt_started_at = Instant::now();
-    let connect_timeout = connection_attempt_timeout(config);
+    cancellation
+        .check()
+        .and_then(|_| attempt_cancellation.check())
+        .map_err(|error| ConnectFailure::permanent("cancelled", error))?;
     let request = build_ws_request(config, task_id)
         .map_err(|error| ConnectFailure::permanent("configuration", error))?;
     let host = request
@@ -67,6 +160,10 @@ pub(super) fn connect_live_socket(
         .to_socket_addrs()
         .map_err(|error| ConnectFailure::retryable("dns", error.into()))?
         .collect::<Vec<_>>();
+    cancellation
+        .check()
+        .and_then(|_| attempt_cancellation.check())
+        .map_err(|error| ConnectFailure::permanent("cancelled", error))?;
     if addresses.is_empty() {
         return Err(ConnectFailure::retryable(
             "dns",
@@ -74,9 +171,14 @@ pub(super) fn connect_live_socket(
         ));
     }
 
+    let address_count = addresses.len();
     let mut last_error = None;
     let mut tcp = None;
-    for address in addresses {
+    for (index, address) in addresses.into_iter().enumerate() {
+        cancellation
+            .check()
+            .and_then(|_| attempt_cancellation.check())
+            .map_err(|error| ConnectFailure::permanent("cancelled", error))?;
         let remaining = connect_timeout.saturating_sub(attempt_started_at.elapsed());
         if remaining.is_zero() {
             last_error = Some(std::io::Error::new(
@@ -85,7 +187,9 @@ pub(super) fn connect_live_socket(
             ));
             break;
         }
-        match TcpStream::connect_timeout(&address, remaining.min(MAX_ADDRESS_CONNECT_TIMEOUT)) {
+        let addresses_left = address_count.saturating_sub(index);
+        let address_timeout = fair_address_connect_timeout(remaining, addresses_left);
+        match TcpStream::connect_timeout(&address, address_timeout) {
             Ok(stream) => {
                 tcp = Some(stream);
                 break;
@@ -101,6 +205,9 @@ pub(super) fn connect_live_socket(
                 .unwrap_or_else(|| anyhow!("Failed to connect ASR TCP socket")),
         )
     })?;
+    attempt_cancellation
+        .register_socket(&tcp)
+        .map_err(|error| ConnectFailure::permanent("cancelled", error))?;
     let handshake_timeout = connect_timeout.saturating_sub(attempt_started_at.elapsed());
     if handshake_timeout.is_zero() {
         return Err(ConnectFailure::retryable(
@@ -113,8 +220,17 @@ pub(super) fn connect_live_socket(
     tcp.set_write_timeout(Some(handshake_timeout))
         .map_err(|error| ConnectFailure::retryable("timeout", error.into()))?;
 
-    let (mut socket, response) =
-        tungstenite::client_tls(request, tcp).map_err(classify_handshake_error)?;
+    let (mut socket, response) = tungstenite::client_tls(request, tcp).map_err(|error| {
+        if cancellation.is_cancelled() || attempt_cancellation.is_cancelled() {
+            ConnectFailure::permanent("cancelled", anyhow!("ASR operation cancelled"))
+        } else {
+            classify_handshake_error(error)
+        }
+    })?;
+    cancellation
+        .check()
+        .and_then(|_| attempt_cancellation.check())
+        .map_err(|error| ConnectFailure::permanent("cancelled", error))?;
     let log_id = header_value(response.headers(), "x-tt-logid");
     set_socket_write_timeout(&mut socket, Some(STREAM_WRITE_TIMEOUT))
         .map_err(|error| ConnectFailure::retryable("socket", error))?;
@@ -123,21 +239,40 @@ pub(super) fn connect_live_socket(
     Ok((socket, log_id))
 }
 
+pub(super) fn fair_address_connect_timeout(remaining: Duration, addresses_left: usize) -> Duration {
+    let divisor = u32::try_from(addresses_left.max(1)).unwrap_or(u32::MAX);
+    (remaining / divisor).min(MAX_ADDRESS_CONNECT_TIMEOUT)
+}
+
 pub(super) fn spawn_connect_socket_attempt(
     config: &AsrConfig,
     task_id: &str,
-) -> mpsc::Receiver<std::result::Result<(VolcengineSocket, Option<String>), ConnectFailure>> {
+    connect_timeout: Duration,
+    cancellation: AsrCancellation,
+) -> (SocketConnectReceiver, AsrCancellation) {
     let (sender, receiver) = mpsc::channel();
     let config = config.clone();
     let task_id = task_id.to_string();
+    let attempt_cancellation = AsrCancellation::new();
+    let worker_attempt_cancellation = attempt_cancellation.clone();
     std::thread::spawn(move || {
-        let _ = sender.send(connect_live_socket(&config, &task_id));
+        let _ = sender.send(connect_live_socket(
+            &config,
+            &task_id,
+            connect_timeout,
+            &cancellation,
+            &worker_attempt_cancellation,
+        ));
     });
-    receiver
+    (receiver, attempt_cancellation)
 }
 
-pub(super) fn connection_attempt_timeout(config: &AsrConfig) -> Duration {
+pub(super) fn file_connection_attempt_timeout(config: &AsrConfig) -> Duration {
     Duration::from_millis(u64::from(config.connection_retry.connect_timeout_ms))
+}
+
+pub(super) fn live_connection_attempt_timeout(config: &AsrConfig) -> Duration {
+    Duration::from_millis(u64::from(config.connection_retry.live_connect_timeout_ms))
 }
 
 pub(super) fn connection_retry_delay(
@@ -432,8 +567,10 @@ pub(super) fn drain_available_responses(
     socket: &mut VolcengineSocket,
     response_state: &mut AsrResponseState,
     log_id: &Option<String>,
+    cancellation: &AsrCancellation,
 ) -> Result<()> {
     loop {
+        cancellation.check()?;
         match read_server_response(socket, response_state, log_id) {
             Ok(_) => {}
             Err(err) if is_timeout_error(err.as_ref()) => break,
@@ -447,9 +584,11 @@ pub(super) fn wait_for_final_response(
     socket: &mut VolcengineSocket,
     response_state: &mut AsrResponseState,
     log_id: &Option<String>,
+    cancellation: &AsrCancellation,
 ) -> Result<()> {
     let started_at = Instant::now();
     loop {
+        cancellation.check()?;
         if started_at.elapsed() >= LIVE_FINAL_RESPONSE_TIMEOUT {
             bail!(
                 "Volcengine live ASR websocket timed out, log_id={:?}",

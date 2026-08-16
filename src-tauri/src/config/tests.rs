@@ -138,6 +138,7 @@ fn asr_connection_retry_defaults_when_missing() {
     );
     assert_eq!(config.asr.connection_retry.live_post_stop_max_attempts, 3);
     assert_eq!(config.asr.connection_retry.file_max_attempts, 3);
+    assert_eq!(config.asr.connection_retry.live_connect_timeout_ms, 3_000);
     assert_eq!(config.asr.connection_retry.connect_timeout_ms, 10_000);
     assert_eq!(config.asr.connection_retry.initial_delay_ms, 250);
     assert_eq!(config.asr.connection_retry.max_delay_ms, 5_000);
@@ -152,10 +153,12 @@ fn asr_connection_retry_fields_default_individually_and_normalize() {
     let mut config: AppConfig = serde_json::from_value(value).unwrap();
     assert_eq!(config.asr.connection_retry.live_post_stop_max_attempts, 8);
     assert_eq!(config.asr.connection_retry.file_max_attempts, 3);
+    assert_eq!(config.asr.connection_retry.live_connect_timeout_ms, 3_000);
     assert_eq!(config.asr.connection_retry.connect_timeout_ms, 10_000);
 
     config.asr.connection_retry.live_post_stop_max_attempts = 0;
     config.asr.connection_retry.file_max_attempts = 99;
+    config.asr.connection_retry.live_connect_timeout_ms = 20;
     config.asr.connection_retry.connect_timeout_ms = 10;
     config.asr.connection_retry.initial_delay_ms = 99_000;
     config.asr.connection_retry.max_delay_ms = 1;
@@ -168,6 +171,10 @@ fn asr_connection_retry_fields_default_individually_and_normalize() {
     assert_eq!(
         config.asr.connection_retry.file_max_attempts,
         ASR_MAX_FILE_MAX_ATTEMPTS
+    );
+    assert_eq!(
+        config.asr.connection_retry.live_connect_timeout_ms,
+        ASR_MIN_LIVE_CONNECT_TIMEOUT_MS
     );
     assert_eq!(
         config.asr.connection_retry.connect_timeout_ms,
