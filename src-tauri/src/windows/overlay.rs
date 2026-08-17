@@ -1,4 +1,4 @@
-use super::monitor::active_overlay_monitor;
+use super::monitor::{active_overlay_monitor, focused_overlay_monitor};
 use crate::config::ConfigStore;
 use crate::workflow_status::{WorkflowMode, WorkflowStatus};
 use serde::Serialize;
@@ -55,9 +55,12 @@ const OVERLAY_SNAP_PREVIEW_INTERVAL: Duration = Duration::from_millis(16);
 const OVERLAY_DRAG_RELEASE_POLL_INTERVAL: Duration = Duration::from_millis(12);
 const OVERLAY_SNAP_ANIMATION_FRAMES: u32 = 10;
 const OVERLAY_SNAP_ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+const OVERLAY_FOCUS_FOLLOW_INTERVAL: Duration = Duration::from_millis(200);
+const OVERLAY_FOCUS_FOLLOW_CONFIRMATIONS: u8 = 2;
 pub(crate) const OVERLAY_POSITION_UPDATED_EVENT: &str = "overlay://position-updated";
 static OVERLAY_MONITOR_LOCK: Mutex<Option<LockedMonitor>> = Mutex::new(None);
 static OVERLAY_STATUS_REVISION: AtomicU64 = AtomicU64::new(0);
+static OVERLAY_FOCUS_FOLLOW_GENERATION: AtomicU64 = AtomicU64::new(0);
 static OVERLAY_DRAG_GENERATION: AtomicU64 = AtomicU64::new(0);
 static OVERLAY_DRAG_SESSION: Mutex<Option<OverlayDragSession>> = Mutex::new(None);
 static OVERLAY_CURRENT_LAYOUT: Mutex<Option<OverlayLayout>> = Mutex::new(None);
@@ -67,12 +70,70 @@ static OVERLAY_WINDOWS_RELEASE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static OVERLAY_WINDOWS_SUBCLASS_INSTALLED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LockedMonitor {
     x: i32,
     y: i32,
     width: u32,
     height: u32,
+}
+
+impl LockedMonitor {
+    fn from_monitor(monitor: &Monitor) -> Self {
+        let position = monitor.position();
+        let size = monitor.size();
+        Self {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct OverlayFocusFollowState {
+    current: Option<LockedMonitor>,
+    pending: Option<LockedMonitor>,
+    confirmations: u8,
+}
+
+impl OverlayFocusFollowState {
+    fn new(current: Option<LockedMonitor>) -> Self {
+        Self {
+            current,
+            pending: None,
+            confirmations: 0,
+        }
+    }
+
+    fn observe(&mut self, candidate: Option<LockedMonitor>) -> Option<LockedMonitor> {
+        let Some(candidate) = candidate else {
+            self.pending = None;
+            self.confirmations = 0;
+            return None;
+        };
+        if self.current == Some(candidate) {
+            self.pending = None;
+            self.confirmations = 0;
+            return None;
+        }
+
+        if self.pending == Some(candidate) {
+            self.confirmations = self.confirmations.saturating_add(1);
+        } else {
+            self.pending = Some(candidate);
+            self.confirmations = 1;
+        }
+        if self.confirmations < OVERLAY_FOCUS_FOLLOW_CONFIRMATIONS {
+            return None;
+        }
+
+        self.current = Some(candidate);
+        self.pending = None;
+        self.confirmations = 0;
+        Some(candidate)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -570,7 +631,10 @@ fn supports_joining_all_applications() -> bool {
 
 #[cfg(target_os = "macos")]
 fn overlay_collection_behavior(supports_all_applications: bool) -> NSWindowCollectionBehavior {
-    let mut behavior = NSWindowCollectionBehavior::MoveToActiveSpace
+    // This panel cannot become active, so MoveToActiveSpace never gets the
+    // activation event it needs. Joining Spaces keeps the capsule present on
+    // whichever desktop or full-screen Space the user switches to.
+    let mut behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
         | NSWindowCollectionBehavior::FullScreenAuxiliary
         | NSWindowCollectionBehavior::Transient
         | NSWindowCollectionBehavior::IgnoresCycle;
@@ -585,6 +649,9 @@ pub(crate) fn sync_overlay_window(app: &tauri::AppHandle, status: &WorkflowStatu
         return;
     }
     let should_show = overlay_should_show(&status.mode);
+    if !should_show {
+        stop_overlay_focus_following();
+    }
 
     let app = app.clone();
     if let Err(err) = ensure_overlay_window(&app) {
@@ -597,7 +664,7 @@ pub(crate) fn sync_overlay_window(app: &tauri::AppHandle, status: &WorkflowStatu
             let was_visible = window.is_visible().unwrap_or(false);
             if should_request_overlay_show(&status.mode, was_visible) {
                 let reset_monitor = status.mode == WorkflowMode::Starting;
-                if let Err(err) = configure_overlay_window(
+                match configure_overlay_window(
                     &app,
                     &window,
                     true,
@@ -605,7 +672,8 @@ pub(crate) fn sync_overlay_window(app: &tauri::AppHandle, status: &WorkflowStatu
                     true,
                     status.revision,
                 ) {
-                    eprintln!("failed to show overlay window: {err:?}");
+                    Ok(()) => start_overlay_focus_following(&app),
+                    Err(err) => eprintln!("failed to show overlay window: {err:?}"),
                 }
             }
         } else {
@@ -623,6 +691,122 @@ pub(crate) fn sync_overlay_window(app: &tauri::AppHandle, status: &WorkflowStatu
             }
         }
     }
+}
+
+fn start_overlay_focus_following(app: &tauri::AppHandle<Wry>) {
+    let generation = OVERLAY_FOCUS_FOLLOW_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    let initial_monitor = current_overlay_monitor_lock();
+    let follower_app = app.clone();
+    if let Err(err) = thread::Builder::new()
+        .name("overlay-focus-follow".to_string())
+        .spawn(move || run_overlay_focus_follower(follower_app, generation, initial_monitor))
+    {
+        eprintln!("failed to start overlay focus follower: {err:?}");
+    }
+}
+
+fn stop_overlay_focus_following() {
+    OVERLAY_FOCUS_FOLLOW_GENERATION.fetch_add(1, Ordering::AcqRel);
+}
+
+fn run_overlay_focus_follower(
+    app: tauri::AppHandle<Wry>,
+    generation: u64,
+    initial_monitor: Option<LockedMonitor>,
+) {
+    let mut state = OverlayFocusFollowState::new(initial_monitor);
+    let mut monitor_error_reported = false;
+    loop {
+        thread::sleep(OVERLAY_FOCUS_FOLLOW_INTERVAL);
+        if !overlay_focus_follow_is_current(generation) {
+            return;
+        }
+        if overlay_drag_in_progress() {
+            continue;
+        }
+
+        let monitor = match focused_overlay_monitor(&app) {
+            Ok(monitor) => {
+                monitor_error_reported = false;
+                monitor
+            }
+            Err(err) => {
+                if !monitor_error_reported {
+                    eprintln!("failed to resolve focused overlay monitor: {err:?}");
+                    monitor_error_reported = true;
+                }
+                state.observe(None);
+                continue;
+            }
+        };
+        let Some(monitor) = monitor else {
+            state.observe(None);
+            continue;
+        };
+        if state
+            .observe(Some(LockedMonitor::from_monitor(&monitor)))
+            .is_none()
+        {
+            continue;
+        }
+        if !overlay_focus_follow_is_current(generation) {
+            return;
+        }
+        if let Err(err) = follow_overlay_to_monitor(&app, &monitor, generation) {
+            state.current = None;
+            eprintln!("failed to follow focused overlay monitor: {err:?}");
+        }
+    }
+}
+
+fn follow_overlay_to_monitor(
+    app: &tauri::AppHandle<Wry>,
+    monitor: &Monitor,
+    generation: u64,
+) -> tauri::Result<()> {
+    if !overlay_focus_follow_is_current(generation) {
+        return Ok(());
+    }
+    let Some(window) = app.get_webview_window("overlay") else {
+        return Ok(());
+    };
+    let layout = current_overlay_layout();
+    set_overlay_monitor_lock(monitor);
+
+    #[cfg(target_os = "macos")]
+    {
+        let placement = macos_overlay_placement(app, monitor, layout)?;
+        let window = window.clone();
+        app.run_on_main_thread(move || {
+            if !overlay_focus_follow_is_current(generation) {
+                return;
+            }
+            if let Err(err) = configure_and_show_macos_overlay(&window, Some(placement)) {
+                eprintln!("failed to move native macOS overlay panel: {err:?}");
+            }
+        })?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    position_overlay_window(&window, monitor, layout)?;
+
+    let target = LockedMonitor::from_monitor(monitor);
+    eprintln!(
+        "overlay followed focused monitor position=({}, {}) size={}x{}",
+        target.x, target.y, target.width, target.height
+    );
+    Ok(())
+}
+
+fn overlay_focus_follow_is_current(generation: u64) -> bool {
+    OVERLAY_FOCUS_FOLLOW_GENERATION.load(Ordering::Acquire) == generation
+}
+
+fn overlay_drag_in_progress() -> bool {
+    OVERLAY_DRAG_SESSION
+        .lock()
+        .map(|session| session.is_some())
+        .unwrap_or(false)
 }
 
 pub(crate) fn start_overlay_drag(app: &tauri::AppHandle<Wry>) -> anyhow::Result<()> {
@@ -961,6 +1145,15 @@ mod cross_platform_tests {
         }
     }
 
+    fn locked_monitor(x: i32) -> LockedMonitor {
+        LockedMonitor {
+            x,
+            y: 0,
+            width: 1_920,
+            height: 1_080,
+        }
+    }
+
     #[test]
     fn overlay_is_visible_for_starting_recording_processing_and_error() {
         for mode in [
@@ -987,6 +1180,29 @@ mod cross_platform_tests {
             &WorkflowMode::Processing,
             false
         ));
+    }
+
+    #[test]
+    fn focused_monitor_change_requires_two_matching_observations() {
+        let first = locked_monitor(0);
+        let second = locked_monitor(1_920);
+        let mut state = OverlayFocusFollowState::new(Some(first));
+
+        assert_eq!(state.observe(Some(second)), None);
+        assert_eq!(state.observe(Some(second)), Some(second));
+        assert_eq!(state.observe(Some(second)), None);
+    }
+
+    #[test]
+    fn unresolved_focus_clears_a_pending_monitor_change() {
+        let first = locked_monitor(0);
+        let second = locked_monitor(1_920);
+        let mut state = OverlayFocusFollowState::new(Some(first));
+
+        assert_eq!(state.observe(Some(second)), None);
+        assert_eq!(state.observe(None), None);
+        assert_eq!(state.observe(Some(second)), None);
+        assert_eq!(state.observe(Some(second)), Some(second));
     }
 
     #[test]
@@ -1201,7 +1417,7 @@ fn locked_overlay_monitor(app: &tauri::AppHandle<Wry>) -> tauri::Result<Option<M
 }
 
 fn resolve_locked_monitor(app: &tauri::AppHandle<Wry>) -> tauri::Result<Option<Monitor>> {
-    let locked = OVERLAY_MONITOR_LOCK.lock().ok().and_then(|lock| *lock);
+    let locked = current_overlay_monitor_lock();
     let Some(locked) = locked else {
         return Ok(None);
     };
@@ -1216,16 +1432,13 @@ fn resolve_locked_monitor(app: &tauri::AppHandle<Wry>) -> tauri::Result<Option<M
     }))
 }
 
+fn current_overlay_monitor_lock() -> Option<LockedMonitor> {
+    OVERLAY_MONITOR_LOCK.lock().ok().and_then(|lock| *lock)
+}
+
 fn set_overlay_monitor_lock(monitor: &Monitor) {
     if let Ok(mut lock) = OVERLAY_MONITOR_LOCK.lock() {
-        let position = monitor.position();
-        let size = monitor.size();
-        *lock = Some(LockedMonitor {
-            x: position.x,
-            y: position.y,
-            width: size.width,
-            height: size.height,
-        });
+        *lock = Some(LockedMonitor::from_monitor(monitor));
     }
 }
 
@@ -1810,17 +2023,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn overlay_behavior_follows_active_space_and_can_join_current_full_screen() {
+    fn overlay_behavior_is_visible_on_every_space_and_can_join_current_full_screen() {
         let behavior = overlay_collection_behavior(true);
 
-        assert_eq!(behavior.bits(), 0x4014a);
-        assert!(behavior.contains(NSWindowCollectionBehavior::MoveToActiveSpace));
+        assert_eq!(behavior.bits(), 0x40149);
+        assert!(behavior.contains(NSWindowCollectionBehavior::CanJoinAllSpaces));
         assert!(behavior.contains(NSWindowCollectionBehavior::FullScreenAuxiliary));
         assert!(behavior.contains(NSWindowCollectionBehavior::CanJoinAllApplications));
         assert!(behavior.contains(NSWindowCollectionBehavior::Transient));
         assert!(behavior.contains(NSWindowCollectionBehavior::IgnoresCycle));
         assert!(!behavior.intersects(
-            NSWindowCollectionBehavior::CanJoinAllSpaces
+            NSWindowCollectionBehavior::MoveToActiveSpace
                 | NSWindowCollectionBehavior::FullScreenPrimary
                 | NSWindowCollectionBehavior::FullScreenNone
                 | NSWindowCollectionBehavior::Primary
@@ -1835,11 +2048,11 @@ mod tests {
     fn overlay_behavior_keeps_pre_macos_13_compatibility() {
         let behavior = overlay_collection_behavior(false);
 
-        assert_eq!(behavior.bits(), 0x14a);
-        assert!(behavior.contains(NSWindowCollectionBehavior::MoveToActiveSpace));
+        assert_eq!(behavior.bits(), 0x149);
+        assert!(behavior.contains(NSWindowCollectionBehavior::CanJoinAllSpaces));
         assert!(behavior.contains(NSWindowCollectionBehavior::FullScreenAuxiliary));
         assert!(behavior.contains(NSWindowCollectionBehavior::Transient));
-        assert!(!behavior.contains(NSWindowCollectionBehavior::CanJoinAllSpaces));
+        assert!(!behavior.contains(NSWindowCollectionBehavior::MoveToActiveSpace));
         assert!(!behavior.contains(NSWindowCollectionBehavior::CanJoinAllApplications));
     }
 

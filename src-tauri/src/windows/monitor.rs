@@ -22,18 +22,9 @@ use objc2_app_kit::NSWorkspace;
 pub(crate) fn active_overlay_monitor(
     app: &tauri::AppHandle<Wry>,
 ) -> tauri::Result<Option<Monitor>> {
-    #[cfg(target_os = "macos")]
-    if let Some(monitor) = focused_foreground_monitor(app)? {
+    if let Some(monitor) = focused_overlay_monitor(app)? {
         log_selected_monitor("frontmost-window", &monitor);
         return Ok(Some(monitor));
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    if let Some((x, y)) = focused_foreground_window_center() {
-        if let Some(monitor) = monitor_from_point_variants(app, x, y)? {
-            log_selected_monitor("frontmost-window", &monitor);
-            return Ok(Some(monitor));
-        }
     }
 
     if let Ok(cursor) = app.cursor_position() {
@@ -69,6 +60,29 @@ pub(crate) fn active_overlay_monitor(
         log_selected_monitor("primary", monitor);
     }
     Ok(monitor)
+}
+
+pub(crate) fn focused_overlay_monitor(
+    app: &tauri::AppHandle<Wry>,
+) -> tauri::Result<Option<Monitor>> {
+    if let Some(main) = app.get_webview_window("main") {
+        if main.is_focused()? {
+            return main.current_monitor();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        focused_foreground_monitor(app)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let Some((x, y)) = focused_foreground_window_center() else {
+            return Ok(None);
+        };
+        monitor_from_point_variants(app, x, y)
+    }
 }
 
 #[cfg(target_os = "macos")]
