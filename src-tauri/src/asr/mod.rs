@@ -17,7 +17,8 @@ use file::should_retry_file_connection;
 #[cfg(test)]
 use live::{
     buffer_live_audio_chunk_with_limit, finish_live_audio_frames,
-    live_connection_attempts_exhausted, recv_live_audio_chunk, LiveAudioFramer, STREAM_CHUNK_BYTES,
+    live_connection_attempts_exhausted, live_connection_retry_delay, recv_live_audio_chunk,
+    should_start_file_race_after_live_failure, LiveAudioFramer, STREAM_CHUNK_BYTES,
     STREAM_FRAME_SAMPLES,
 };
 #[cfg(test)]

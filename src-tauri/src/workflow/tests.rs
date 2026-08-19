@@ -554,6 +554,26 @@ fn asr_race_no_speech_beats_a_single_branch_failure() {
 }
 
 #[test]
+fn file_asr_waits_for_the_live_priority_gate() {
+    assert!(!should_launch_file_asr(
+        false,
+        LivePriorityEvent::ProducedText,
+    ));
+    assert!(should_launch_file_asr(
+        false,
+        LivePriorityEvent::PostStopReconnectFailed,
+    ));
+    assert!(should_launch_file_asr(
+        false,
+        LivePriorityEvent::EndedWithoutText,
+    ));
+    assert!(!should_launch_file_asr(
+        true,
+        LivePriorityEvent::PostStopReconnectFailed,
+    ));
+}
+
+#[test]
 fn race_correction_reports_each_failed_model() {
     let mut config = AppConfig::default();
     config.llm.race_enabled = true;

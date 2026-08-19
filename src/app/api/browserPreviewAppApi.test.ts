@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AppApi } from "./contracts";
 import { createBrowserPreviewAppApi } from "./browserPreviewAppApi";
+import { createBrowserPreviewState } from "./previewData";
 import { nativeAppApi } from "./nativeAppApi";
 
 describe("browser preview AppApi", () => {
@@ -47,5 +48,15 @@ describe("browser preview AppApi", () => {
     expect(samples[0]).toBe(recording.revision);
     unlisten();
     expect((await api.workflow.cancelCurrentWorkflow()).mode).toBe("idle");
+  });
+
+  it("supports a recognizing overlay preview", () => {
+    const state = createBrowserPreviewState("http://localhost/?preview-status=recognizing");
+
+    expect(state.status).toMatchObject({
+      mode: "processing",
+      stage: "recognizing",
+      code: "recognizing",
+    });
   });
 });

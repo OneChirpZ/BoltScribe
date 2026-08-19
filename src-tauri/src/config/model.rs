@@ -125,7 +125,7 @@ pub struct AsrConnectionRetryConfig {
     /// capture is active, retryable connection failures keep using bounded backoff.
     #[serde(default = "defaults::default_asr_live_post_stop_max_attempts")]
     pub live_post_stop_max_attempts: u32,
-    /// Total connection attempts for the parallel recorded-file branch, including the first.
+    /// Total connection attempts for the delayed recorded-file race branch, including the first.
     #[serde(default = "defaults::default_asr_file_max_attempts")]
     pub file_max_attempts: u32,
     /// Wall-clock budget for one live DNS/TCP/TLS connection attempt.

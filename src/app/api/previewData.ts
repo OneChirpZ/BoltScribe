@@ -117,6 +117,18 @@ function initialBrowserPreviewStatus(location: URL): WorkflowStatus {
       revision: 1,
     };
   }
+  if (mode === "recognizing") {
+    return {
+      mode: "processing",
+      stage: "recognizing",
+      code: "recognizing",
+      detail: null,
+      message: "录音已保存，正在进行语音识别",
+      current_audio_path: "/preview/recordings/current.wav",
+      last_record_id: null,
+      revision: 1,
+    };
+  }
   return {
     mode: "idle",
     stage: "idle",

@@ -242,6 +242,32 @@ fn live_retry_limit_applies_only_after_recording_stops() {
 }
 
 #[test]
+fn file_race_starts_only_after_the_first_post_stop_live_failure() {
+    assert!(!should_start_file_race_after_live_failure(false, 20, false));
+    assert!(!should_start_file_race_after_live_failure(true, 0, false));
+    assert!(should_start_file_race_after_live_failure(true, 1, false));
+    assert!(!should_start_file_race_after_live_failure(true, 2, true));
+}
+
+#[test]
+fn first_post_stop_live_retry_skips_accumulated_backoff() {
+    let config = test_asr_config("api_key", "", "new-api-key");
+
+    assert_eq!(
+        live_connection_retry_delay(&config, 20, true, 0),
+        Duration::ZERO
+    );
+    assert_eq!(
+        live_connection_retry_delay(&config, 20, true, 1),
+        Duration::from_secs(5)
+    );
+    assert_eq!(
+        live_connection_retry_delay(&config, 20, false, 0),
+        Duration::from_secs(5)
+    );
+}
+
+#[test]
 fn live_audio_buffer_preserves_order_and_enforces_limit() {
     let first = AudioChunk {
         samples: vec![1, 2],

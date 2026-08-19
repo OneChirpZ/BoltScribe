@@ -59,8 +59,8 @@ test("file ASR fallback remains a non-error processing capsule", () => {
     stage: "recognizing" as const,
     code: "recognizing" as const,
   };
-  assert.equal(recordingOverlayLabel(recognizing, translations["zh-CN"]), "实时与文件识别中");
-  assert.equal(recordingOverlayLabel(recognizing, translations["en-US"]), "Live + File ASR");
+  assert.equal(recordingOverlayLabel(recognizing, translations["zh-CN"]), "ASR 识别中");
+  assert.equal(recordingOverlayLabel(recognizing, translations["en-US"]), "ASR");
 });
 
 test("only semantic error stage uses the red failure capsule", () => {

@@ -26,6 +26,7 @@ pub struct VolcengineLiveAsrSession {
     handle: Option<JoinHandle<LiveAsrResult>>,
     activity: Option<LiveAsrActivity>,
     cancellation: AsrCancellation,
+    file_race_trigger: Option<mpsc::Receiver<()>>,
 }
 
 impl VolcengineLiveAsrSession {
@@ -45,8 +46,15 @@ impl VolcengineLiveAsrSession {
         let worker_activity = activity.clone();
         let cancellation = AsrCancellation::new();
         let worker_cancellation = cancellation.clone();
+        let (file_race_trigger_sender, file_race_trigger_receiver) = mpsc::channel();
         let handle = std::thread::spawn(move || {
-            live_asr_worker(config, receiver, worker_activity, worker_cancellation)
+            live_asr_worker(
+                config,
+                receiver,
+                worker_activity,
+                worker_cancellation,
+                file_race_trigger_sender,
+            )
         });
 
         Ok(Self {
@@ -54,6 +62,7 @@ impl VolcengineLiveAsrSession {
             handle: Some(handle),
             activity,
             cancellation,
+            file_race_trigger: Some(file_race_trigger_receiver),
         })
     }
 
@@ -70,6 +79,10 @@ impl VolcengineLiveAsrSession {
 
     pub fn cancellation(&self) -> AsrCancellation {
         self.cancellation.clone()
+    }
+
+    pub fn take_file_race_trigger(&mut self) -> Option<mpsc::Receiver<()>> {
+        self.file_race_trigger.take()
     }
 
     pub fn finish(mut self) -> LiveAsrResult {
@@ -108,6 +121,7 @@ fn live_asr_worker(
     receiver: mpsc::Receiver<AudioChunk>,
     activity: Option<LiveAsrActivity>,
     cancellation: AsrCancellation,
+    file_race_trigger: mpsc::Sender<()>,
 ) -> LiveAsrResult {
     let started_at = Instant::now();
     let mut diagnostics = LiveAsrDiagnostics::default();
@@ -115,6 +129,7 @@ fn live_asr_worker(
     let mut buffered_bytes = 0usize;
     let mut recording_finished = false;
     let mut post_stop_attempts = 0u32;
+    let mut file_race_triggered = false;
     let connect_timeout = live_connection_attempt_timeout(&config);
 
     loop {
@@ -234,6 +249,14 @@ fn live_asr_worker(
                     diagnostics.connection_attempts, failure.category, failure.error
                 );
                 diagnostics.last_error_category = Some(failure.category.to_string());
+                if should_start_file_race_after_live_failure(
+                    recording_finished,
+                    post_stop_attempts,
+                    file_race_triggered,
+                ) {
+                    let _ = file_race_trigger.send(());
+                    file_race_triggered = true;
+                }
                 if !failure.retryable {
                     diagnostics.fallback_reason =
                         Some("non_retryable_connection_error".to_string());
@@ -255,9 +278,11 @@ fn live_asr_worker(
                     };
                 }
 
-                let delay = connection_retry_delay(
-                    &config.connection_retry,
+                let delay = live_connection_retry_delay(
+                    &config,
                     diagnostics.connection_attempts,
+                    recording_finished,
+                    post_stop_attempts,
                 );
                 if let Err(error) = buffer_live_audio_for_delay(
                     &receiver,
@@ -280,6 +305,27 @@ fn live_asr_worker(
                 }
             }
         }
+    }
+}
+
+pub(super) fn should_start_file_race_after_live_failure(
+    recording_finished: bool,
+    post_stop_attempts: u32,
+    already_triggered: bool,
+) -> bool {
+    recording_finished && post_stop_attempts >= 1 && !already_triggered
+}
+
+pub(super) fn live_connection_retry_delay(
+    config: &AsrConfig,
+    completed_attempts: u32,
+    recording_finished: bool,
+    post_stop_attempts: u32,
+) -> Duration {
+    if recording_finished && post_stop_attempts == 0 {
+        Duration::ZERO
+    } else {
+        connection_retry_delay(&config.connection_retry, completed_attempts)
     }
 }
 
@@ -362,7 +408,10 @@ fn buffer_live_audio_for_delay(
         match receiver.recv_timeout(remaining.min(Duration::from_millis(20))) {
             Ok(chunk) => buffer_live_audio_chunk(chunk, buffered, buffered_bytes, diagnostics)?,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => *recording_finished = true,
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                *recording_finished = true;
+                return Ok(());
+            }
         }
     }
     Ok(())

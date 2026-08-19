@@ -142,8 +142,8 @@ test("workflow status translation uses stable codes and preserves dynamic detail
   assert.equal(translateWorkflowMessage(startFailed, "en-US"), "Failed to start recording: microphone unavailable");
 
   const recognizing = { ...status("processing", 6), code: "recognizing" as const, detail: null };
-  assert.equal(translateWorkflowMessage(recognizing, "zh-CN"), "录音已保存，正在并行进行实时与录音文件识别");
-  assert.equal(translateWorkflowMessage(recognizing, "en-US"), "Recording saved, running live and file recognition in parallel");
+  assert.equal(translateWorkflowMessage(recognizing, "zh-CN"), "录音已保存，正在进行语音识别");
+  assert.equal(translateWorkflowMessage(recognizing, "en-US"), "Recording saved, running speech recognition");
 
   const unknown = { ...failed, code: "future_status" as WorkflowStatus["code"], message: "Future status" };
   assert.equal(translateWorkflowMessage(unknown, "en-US"), "Future status");
