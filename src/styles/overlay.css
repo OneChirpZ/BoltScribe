@@ -45,8 +45,9 @@
 
 .recording-overlay::before {
   background:
-    radial-gradient(ellipse at 34% 48%, rgba(215, 255, 226, 0.22), rgba(154, 255, 190, 0.06) 48%, transparent 76%),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.035), transparent 58%);
+    radial-gradient(ellipse at 34% 48%, rgba(222, 255, 231, 0.3), rgba(145, 255, 181, 0.13) 48%, transparent 78%),
+    linear-gradient(90deg, rgba(179, 255, 204, 0.11), rgba(129, 238, 165, 0.07) 58%, rgba(255, 255, 255, 0.04));
+  box-shadow: inset 0 0 var(--recording-overlay-inner-blur, 36px) rgba(150, 255, 185, 0.1);
 }
 
 .recording-overlay::after {
@@ -236,8 +237,7 @@
   justify-content: center;
   gap: 6px;
   opacity: 0;
-  transform: scale(0.84);
-  transition: opacity 180ms ease, transform 220ms ease;
+  transition: opacity 180ms ease;
 }
 
 .processing-indicator span {
@@ -302,7 +302,7 @@
 }
 
 .recording-overlay.overlay-stage-recording::before {
-  animation: overlay-listening-ambient 1800ms ease-in-out infinite;
+  animation: overlay-listening-ambient 1500ms ease-in-out infinite;
 }
 
 .overlay-transition-active .voice-bars {
@@ -318,7 +318,6 @@
 
 .recording-overlay.phase-processing .processing-indicator {
   opacity: 1;
-  transform: scale(1);
   transition-delay: 70ms;
 }
 
@@ -444,11 +443,11 @@
 @keyframes overlay-listening-ambient {
   0%,
   100% {
-    opacity: 0.14;
+    opacity: 0.18;
   }
 
   50% {
-    opacity: 0.38;
+    opacity: 0.68;
   }
 }
 
@@ -457,12 +456,10 @@
   72%,
   100% {
     opacity: 0.42;
-    transform: translateY(0) scale(0.82);
   }
 
   36% {
     opacity: 1;
-    transform: translateY(-3px) scale(1);
   }
 }
 
@@ -538,7 +535,7 @@
   }
 
   .recording-overlay.overlay-stage-recording::before {
-    opacity: 0.22;
+    opacity: 0.36;
   }
 
   .recording-overlay::before,
