@@ -6,6 +6,8 @@ export const recordingOverlayBaseWidth = (language: AppLanguage) => language ===
 export const defaultRecordingOverlayScale = 0.5;
 export const minRecordingOverlayScale = 0.25;
 export const maxRecordingOverlayScale = 1.0;
+// Keep in sync with OVERLAY_EFFECT_MARGIN in src-tauri/src/windows/overlay.rs.
+export const recordingOverlayEffectMargin = 12;
 export const defaultRecordingOverlaySnapRangePercent = 200;
 export const minRecordingOverlaySnapRangePercent = 50;
 export const maxRecordingOverlaySnapRangePercent = 500;

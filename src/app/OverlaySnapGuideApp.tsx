@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, type CSSProperties } from "react";
+import { recordingOverlayEffectMargin } from "../domain/overlay";
 
 export default function OverlaySnapGuideApp() {
   useEffect(() => {
@@ -12,7 +13,11 @@ export default function OverlaySnapGuideApp() {
   }, []);
 
   return (
-    <div className="overlay-snap-guide-shell" aria-hidden="true">
+    <div
+      className="overlay-snap-guide-shell"
+      style={{ "--recording-overlay-effect-margin": `${recordingOverlayEffectMargin}px` } as CSSProperties}
+      aria-hidden="true"
+    >
       <div className="overlay-snap-guide" />
     </div>
   );

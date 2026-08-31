@@ -30,6 +30,11 @@ export function clonePreview<T>(value: T): T {
 export function createBrowserPreviewState(locationHref = browserLocationHref()): BrowserPreviewState {
   const location = new URL(locationHref);
   const language = location.searchParams.get("preview-language") === "en-US" ? "en-US" : "zh-CN";
+  const overlayScaleParam = location.searchParams.get("preview-overlay-scale");
+  const requestedOverlayScale = overlayScaleParam === null ? Number.NaN : Number(overlayScaleParam);
+  const overlayScale = Number.isFinite(requestedOverlayScale)
+    ? Math.min(1, Math.max(0.25, requestedOverlayScale))
+    : 0.5;
   const defaultDataDirInfo: DataDirInfo = {
     path: "C:\\Users\\Preview\\AppData\\Roaming\\BoltScribe",
     default_path: "C:\\Users\\Preview\\AppData\\Roaming\\BoltScribe",
@@ -39,7 +44,7 @@ export function createBrowserPreviewState(locationHref = browserLocationHref()):
 
   return {
     status: initialBrowserPreviewStatus(location),
-    config: previewConfig(language),
+    config: previewConfig(language, overlayScale),
     vadTestStatus: {
       mode: "idle",
       raw_voice_active: false,
@@ -81,6 +86,18 @@ function browserLocationHref() {
 
 function initialBrowserPreviewStatus(location: URL): WorkflowStatus {
   const mode = location.searchParams.get("preview-status");
+  if (mode === "starting") {
+    return {
+      mode,
+      stage: "starting",
+      code: "starting_microphone",
+      detail: null,
+      message: "正在启动麦克风",
+      current_audio_path: null,
+      last_record_id: null,
+      revision: 1,
+    };
+  }
   if (mode === "recording") {
     return {
       mode,
@@ -129,6 +146,54 @@ function initialBrowserPreviewStatus(location: URL): WorkflowStatus {
       revision: 1,
     };
   }
+  if (mode === "correcting") {
+    return {
+      mode: "processing",
+      stage: mode,
+      code: mode,
+      detail: null,
+      message: "语音识别完成，正在纠错",
+      current_audio_path: "/preview/recordings/current.wav",
+      last_record_id: null,
+      revision: 1,
+    };
+  }
+  if (mode === "pasting") {
+    return {
+      mode: "processing",
+      stage: mode,
+      code: mode,
+      detail: null,
+      message: "正在粘贴文本",
+      current_audio_path: "/preview/recordings/current.wav",
+      last_record_id: null,
+      revision: 1,
+    };
+  }
+  if (mode === "complete") {
+    return {
+      mode: "processing",
+      stage: mode,
+      code: "paste_complete",
+      detail: null,
+      message: "粘贴完成",
+      current_audio_path: "/preview/recordings/current.wav",
+      last_record_id: null,
+      revision: 1,
+    };
+  }
+  if (mode === "error") {
+    return {
+      mode,
+      stage: mode,
+      code: "failed",
+      detail: "Browser preview error",
+      message: "处理失败",
+      current_audio_path: "/preview/recordings/current.wav",
+      last_record_id: null,
+      revision: 1,
+    };
+  }
   return {
     mode: "idle",
     stage: "idle",
@@ -141,7 +206,7 @@ function initialBrowserPreviewStatus(location: URL): WorkflowStatus {
   };
 }
 
-function previewConfig(language: "zh-CN" | "en-US"): AppConfig {
+function previewConfig(language: "zh-CN" | "en-US", overlayScale: number): AppConfig {
   return {
     hotkey: "PageUp",
     hotkeys: ["PageUp", "CmdOrCtrl+Shift+Space"],
@@ -219,7 +284,7 @@ function previewConfig(language: "zh-CN" | "en-US"): AppConfig {
     ui: {
       app_language: language,
       theme: "system",
-      recording_overlay_scale: 0.5,
+      recording_overlay_scale: overlayScale,
       recording_overlay_snap_range_percent: 200,
       recording_overlay_offset_x: 0,
       recording_overlay_offset_y: 0,

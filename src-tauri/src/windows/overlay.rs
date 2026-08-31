@@ -45,6 +45,8 @@ const OVERLAY_BASE_WIDTH_ZH: f64 = 340.0;
 const OVERLAY_BASE_WIDTH_EN: f64 = 400.0;
 const OVERLAY_BASE_HEIGHT: f64 = 78.0;
 const OVERLAY_BOTTOM_MARGIN: f64 = 28.0;
+// Keep in sync with recordingOverlayEffectMargin in src/domain/overlay.ts.
+const OVERLAY_EFFECT_MARGIN: f64 = 12.0;
 const OVERLAY_SNAP_GUIDE_LABEL: &str = "overlay-snap-guide";
 const OVERLAY_SNAP_ENTER_RADIUS: f64 = 32.0;
 const OVERLAY_SNAP_EXIT_RADIUS: f64 = 44.0;
@@ -1139,6 +1141,7 @@ mod cross_platform_tests {
         OverlayLayout {
             width: 170.0,
             height: 39.0,
+            effect_margin: 0.0,
             snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x,
             offset_y,
@@ -1220,6 +1223,56 @@ mod cross_platform_tests {
         assert_eq!(
             overlay_offsets_from_origin(work_area, layout, origin),
             (123, -15)
+        );
+    }
+
+    #[test]
+    fn effect_margin_expands_the_window_without_moving_the_visible_capsule() {
+        let work_area = LogicalRect {
+            x: 0.0,
+            y: 0.0,
+            width: 1_920.0,
+            height: 1_080.0,
+        };
+        let original = OverlayLayout {
+            width: 170.0,
+            height: 39.0,
+            effect_margin: 0.0,
+            snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
+            offset_x: 0,
+            offset_y: 0,
+        };
+        let expanded = OverlayLayout {
+            width: original.width + OVERLAY_EFFECT_MARGIN * 2.0,
+            height: original.height + OVERLAY_EFFECT_MARGIN * 2.0,
+            effect_margin: OVERLAY_EFFECT_MARGIN,
+            ..original
+        };
+
+        let original_origin = overlay_origin(work_area, original);
+        let expanded_origin = overlay_origin(work_area, expanded);
+
+        assert_eq!(
+            original_origin,
+            (
+                expanded_origin.0 + OVERLAY_EFFECT_MARGIN,
+                expanded_origin.1 + OVERLAY_EFFECT_MARGIN,
+            )
+        );
+
+        let clamped = OverlayLayout {
+            offset_x: 4_000,
+            offset_y: -4_000,
+            ..expanded
+        };
+        let clamped_origin = overlay_origin(work_area, clamped);
+        assert_eq!(clamped_origin, (1_738.0, 1_029.0));
+        assert_eq!(
+            (
+                clamped_origin.0 + OVERLAY_EFFECT_MARGIN + original.width,
+                clamped_origin.1 + OVERLAY_EFFECT_MARGIN + original.height,
+            ),
+            (work_area.width, work_area.height)
         );
     }
 
@@ -1345,6 +1398,7 @@ mod cross_platform_tests {
         let layout = OverlayLayout {
             width: 300.0,
             height: 80.0,
+            effect_margin: 0.0,
             snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x: 4_000,
             offset_y: -4_000,
@@ -1384,6 +1438,7 @@ mod cross_platform_tests {
         let default_layout = OverlayLayout {
             width: 170.0,
             height: 80.0,
+            effect_margin: 0.0,
             snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x: 0,
             offset_y: 0,
@@ -1564,6 +1619,7 @@ fn destination_overlay_monitor(
 struct OverlayLayout {
     width: f64,
     height: f64,
+    effect_margin: f64,
     snap_range_percent: u16,
     offset_x: i32,
     offset_y: i32,
@@ -1592,8 +1648,9 @@ fn current_overlay_layout() -> OverlayLayout {
         .ok()
         .and_then(|current| *current)
         .unwrap_or(OverlayLayout {
-            width: (OVERLAY_BASE_WIDTH_ZH * 0.5).ceil(),
-            height: (OVERLAY_BASE_HEIGHT * 0.5).ceil(),
+            width: (OVERLAY_BASE_WIDTH_ZH * 0.5).ceil() + OVERLAY_EFFECT_MARGIN * 2.0,
+            height: (OVERLAY_BASE_HEIGHT * 0.5).ceil() + OVERLAY_EFFECT_MARGIN * 2.0,
+            effect_margin: OVERLAY_EFFECT_MARGIN,
             snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x: 0,
             offset_y: 0,
@@ -1609,8 +1666,9 @@ fn overlay_layout_from_ui(ui: &crate::config::UiConfig) -> OverlayLayout {
     };
 
     OverlayLayout {
-        width: (base_width * scale).ceil(),
-        height: (OVERLAY_BASE_HEIGHT * scale).ceil(),
+        width: (base_width * scale).ceil() + OVERLAY_EFFECT_MARGIN * 2.0,
+        height: (OVERLAY_BASE_HEIGHT * scale).ceil() + OVERLAY_EFFECT_MARGIN * 2.0,
+        effect_margin: OVERLAY_EFFECT_MARGIN,
         snap_range_percent: ui.recording_overlay_snap_range_percent.clamp(
             OVERLAY_SNAP_RANGE_PERCENT_MIN,
             OVERLAY_SNAP_RANGE_PERCENT_MAX,
@@ -1954,15 +2012,16 @@ fn logical_rect_from_physical(x: i32, y: i32, width: u32, height: u32, scale: f6
 fn overlay_anchor(work_area: LogicalRect, layout: OverlayLayout) -> (f64, f64) {
     (
         work_area.x + ((work_area.width - layout.width) / 2.0).max(0.0),
-        work_area.y + work_area.height - layout.height - OVERLAY_BOTTOM_MARGIN,
+        work_area.y + work_area.height - layout.height - OVERLAY_BOTTOM_MARGIN
+            + layout.effect_margin,
     )
 }
 
 fn overlay_origin(work_area: LogicalRect, layout: OverlayLayout) -> (f64, f64) {
-    let min_x = work_area.x;
-    let max_x = work_area.x + work_area.width - layout.width;
-    let min_y = work_area.y;
-    let max_y = work_area.y + work_area.height - layout.height;
+    let min_x = work_area.x - layout.effect_margin;
+    let max_x = work_area.x + work_area.width - layout.width + layout.effect_margin;
+    let min_y = work_area.y - layout.effect_margin;
+    let max_y = work_area.y + work_area.height - layout.height + layout.effect_margin;
     let (base_x, base_y) = overlay_anchor(work_area, layout);
     let x = (base_x + layout.offset_x as f64).clamp(min_x, max_x.max(min_x));
     let y = (base_y - layout.offset_y as f64).clamp(min_y, max_y.max(min_y));
@@ -2067,6 +2126,7 @@ mod tests {
         let layout = OverlayLayout {
             width: 157.0,
             height: 39.0,
+            effect_margin: 0.0,
             snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x: 0,
             offset_y: 0,
@@ -2089,6 +2149,7 @@ mod tests {
         let layout = OverlayLayout {
             width: 300.0,
             height: 80.0,
+            effect_margin: 0.0,
             snap_range_percent: OVERLAY_SNAP_RANGE_PERCENT_DEFAULT,
             offset_x: 4000,
             offset_y: -4000,

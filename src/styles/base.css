@@ -155,6 +155,7 @@ body.overlay-window #root {
   min-width: 0;
   overflow: hidden;
   background: transparent;
+  pointer-events: none;
 }
 
 body.overlay-window {

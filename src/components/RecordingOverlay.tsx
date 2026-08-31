@@ -1,8 +1,8 @@
-import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useLayoutEffect, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import type { WorkflowStatus } from "../types";
 import type { TextBundle } from "../domain/i18n";
 import { createAudioLevelHistoryState, updateAudioLevelHistory } from "../domain/audioLevel";
-import { maxRecordingOverlayScale, minRecordingOverlayScale, recordingOverlayLabel, recordingOverlayPhase, recordingOverlayTransition, shouldStartRecordingOverlayDrag } from "../domain/overlay";
+import { maxRecordingOverlayScale, minRecordingOverlayScale, recordingOverlayEffectMargin, recordingOverlayLabel, recordingOverlayPhase, recordingOverlayTransition, shouldStartRecordingOverlayDrag } from "../domain/overlay";
 import { clampNumber } from "../domain/numbers";
 import AudioWaveform from "./AudioWaveform";
 
@@ -47,9 +47,17 @@ export default function RecordingOverlay({
   const label = recordingOverlayLabel(status, text);
   const transitionState = recordingOverlayTransition(status);
   const canCancel = Boolean(onCancel) && status.mode !== "starting";
+  const normalizedScale = clampNumber(scale, minRecordingOverlayScale, maxRecordingOverlayScale);
   const style = {
     "--recording-overlay-width": `${baseWidth}px`,
-    "--recording-overlay-scale": String(clampNumber(scale, minRecordingOverlayScale, maxRecordingOverlayScale)),
+    "--recording-overlay-scale": String(normalizedScale),
+    "--recording-overlay-effect-margin": `${recordingOverlayEffectMargin}px`,
+    "--recording-overlay-edge-width": `${1 / normalizedScale}px`,
+    "--recording-overlay-glow-blur": `${9 / normalizedScale}px`,
+    "--recording-overlay-glow-spread": `${0.75 / normalizedScale}px`,
+    "--recording-overlay-shadow-y": `${2 / normalizedScale}px`,
+    "--recording-overlay-shadow-blur": `${8 / normalizedScale}px`,
+    "--recording-overlay-inner-blur": `${18 / normalizedScale}px`,
   } as CSSProperties;
 
   function startDrag(event: ReactPointerEvent<HTMLDivElement>) {
@@ -64,17 +72,23 @@ export default function RecordingOverlay({
 
   return (
     <div
-      className={`recording-overlay ${phase} ${transitionState}`}
+      className={`recording-overlay ${phase} ${transitionState} overlay-stage-${status.stage}`}
       style={style}
       onPointerDown={startDrag}
     >
-      <span className="overlay-label" role="status" aria-live="polite" aria-atomic="true">
-        <span key={`${status.stage}-${label}`} className="overlay-label-text">{label}</span>
-      </span>
+      <AnimatedOverlayLabel label={label} />
       <i aria-hidden="true" />
       <div className="voice-visual" aria-hidden="true">
         <div className="startup-spinner" />
         <AudioWaveform samples={audioLevelHistory.samples} />
+        <div className="processing-indicator">
+          <span />
+          <span />
+          <span />
+        </div>
+        <svg className="completion-mark" viewBox="0 0 42 42" focusable="false">
+          <path d="M11 22.5 18.2 29.5 31.5 14.5" />
+        </svg>
       </div>
       {onCancel ? (
         <button
@@ -91,5 +105,68 @@ export default function RecordingOverlay({
         </button>
       ) : null}
     </div>
+  );
+}
+
+const overlayLabelTransitionMs = 240;
+
+interface OverlayLabelVisualState {
+  current: string;
+  previous: string | null;
+  transitionId: number;
+}
+
+function AnimatedOverlayLabel({ label }: { label: string }) {
+  const [visual, setVisual] = useState<OverlayLabelVisualState>(() => ({
+    current: label,
+    previous: null,
+    transitionId: 0,
+  }));
+
+  useLayoutEffect(() => {
+    setVisual((current) => current.current === label ? current : {
+      current: label,
+      previous: current.current,
+      transitionId: current.transitionId + 1,
+    });
+  }, [label]);
+
+  useEffect(() => {
+    if (visual.previous === null) {
+      return;
+    }
+    const transitionId = visual.transitionId;
+    const timer = window.setTimeout(() => {
+      setVisual((current) => current.transitionId === transitionId
+        ? { ...current, previous: null }
+        : current);
+    }, overlayLabelTransitionMs);
+    return () => window.clearTimeout(timer);
+  }, [visual.previous, visual.transitionId]);
+
+  const changing = visual.previous !== null;
+  return (
+    <span
+      className={`overlay-label${changing ? " overlay-label-changing" : ""}`}
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      {visual.previous !== null ? (
+        <span
+          key={`previous-${visual.transitionId}`}
+          className="overlay-label-text overlay-label-previous"
+          aria-hidden="true"
+        >
+          {visual.previous}
+        </span>
+      ) : null}
+      <span
+        key={`current-${visual.transitionId}`}
+        className="overlay-label-text overlay-label-current"
+      >
+        {visual.current}
+      </span>
+    </span>
   );
 }

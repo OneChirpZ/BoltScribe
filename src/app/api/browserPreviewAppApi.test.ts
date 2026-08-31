@@ -59,4 +59,13 @@ describe("browser preview AppApi", () => {
       code: "recognizing",
     });
   });
+
+  it("supports bounded overlay scales and terminal visual states for QA", () => {
+    const complete = createBrowserPreviewState("http://localhost/?preview-status=complete&preview-overlay-scale=1");
+    const compact = createBrowserPreviewState("http://localhost/?preview-overlay-scale=0.1");
+
+    expect(complete.status).toMatchObject({ mode: "processing", stage: "complete" });
+    expect(complete.config.ui.recording_overlay_scale).toBe(1);
+    expect(compact.config.ui.recording_overlay_scale).toBe(0.25);
+  });
 });
