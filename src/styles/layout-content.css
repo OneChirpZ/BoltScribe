@@ -318,7 +318,6 @@
     linear-gradient(180deg, var(--fill-soft), transparent 150px),
     var(--surface);
   box-shadow: var(--shadow-panel);
-  animation: panel-enter 240ms ease-out both;
 }
 
 .hero-panel {
@@ -346,6 +345,7 @@
   border: 1px solid rgba(36, 152, 255, 0.3);
   border-radius: var(--radius);
   background: rgba(36, 152, 255, 0.07);
+  contain: paint;
 }
 
 .status-visual span {
@@ -378,23 +378,8 @@
 }
 
 .status-recording .status-visual span {
-  animation: level-meter 820ms ease-in-out infinite;
-}
-
-.status-recording .status-visual span:nth-child(2) {
-  animation-delay: -110ms;
-}
-
-.status-recording .status-visual span:nth-child(3) {
-  animation-delay: -240ms;
-}
-
-.status-recording .status-visual span:nth-child(4) {
-  animation-delay: -180ms;
-}
-
-.status-recording .status-visual span:nth-child(5) {
-  animation-delay: -320ms;
+  /* The compact overlay carries live motion; keep the large main WebView static. */
+  opacity: 1;
 }
 
 .status-starting .status-visual,
@@ -458,41 +443,6 @@ h2 {
   margin-top: 10px;
   color: var(--text-soft);
   line-height: 1.6;
-}
-
-@keyframes app-enter {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes panel-enter {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes level-meter {
-  0%,
-  100% {
-    transform: scaleY(0.52);
-    opacity: 0.5;
-  }
-
-  50% {
-    transform: scaleY(1);
-    opacity: 1;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

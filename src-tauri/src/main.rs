@@ -32,8 +32,8 @@ mod workflow_status;
 
 use commands::{
     accessibility_permission_granted, apply_fn_trigger, cancel_current_workflow, choose_data_dir,
-    cleanup_recording_files, copy_text_to_clipboard, delete_history_record, export_config,
-    get_data_dir, get_status, get_vad_test_status, hide_main_window, import_config,
+    cleanup_recording_files, close_main_window, copy_text_to_clipboard, delete_history_record,
+    export_config, get_data_dir, get_status, get_vad_test_status, import_config,
     input_monitoring_permission_granted, load_audio_input_devices, load_audio_output_devices,
     load_config, load_history, load_stats, open_accessibility_settings, open_app_dir,
     open_github_repository, open_input_monitoring_settings, preview_recording_cleanup,
@@ -144,7 +144,7 @@ fn main() {
             choose_data_dir,
             set_data_dir,
             reset_data_dir,
-            hide_main_window,
+            close_main_window,
             accessibility_permission_granted,
             request_accessibility_permission,
             open_accessibility_settings,

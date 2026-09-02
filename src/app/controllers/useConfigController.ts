@@ -169,7 +169,7 @@ export function useConfigController({
       setPage(action.page);
       return;
     }
-    api.system.hideMainWindow().catch((error) => setNotice(String(error)));
+    api.system.closeMainWindow().catch((error) => setNotice(String(error)));
   }, [api, setNotice]);
 
   const requestPageChange = useCallback((nextPage: Page, resetHistoryPage = false) => {
@@ -219,7 +219,7 @@ export function useConfigController({
       dispatch({ type: "pending", action: { kind: "close" } });
       return;
     }
-    api.system.hideMainWindow().catch((error) => setNotice(String(error)));
+    api.system.closeMainWindow().catch((error) => setNotice(String(error)));
   }, [api, setNotice]);
 
   const savePending = useCallback(async () => {

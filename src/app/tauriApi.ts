@@ -65,7 +65,7 @@ export const {
   chooseDataDir,
   setDataDir,
   resetDataDir,
-  hideMainWindow,
+  closeMainWindow,
   applyFnTrigger,
   copyTextToClipboard,
 } = appApi.system;

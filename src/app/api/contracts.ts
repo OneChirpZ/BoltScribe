@@ -85,7 +85,7 @@ export interface SystemApi {
   chooseDataDir(): Promise<string | null>;
   setDataDir(path: string): Promise<DataDirInfo>;
   resetDataDir(): Promise<DataDirInfo>;
-  hideMainWindow(): Promise<void>;
+  closeMainWindow(): Promise<void>;
   applyFnTrigger(enabled: boolean, longPressDurationMs: number): Promise<void>;
   copyTextToClipboard(text: string): Promise<void>;
 }

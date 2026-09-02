@@ -91,7 +91,7 @@ export const nativeAppApi = {
     chooseDataDir: () => invoke<string | null>("choose_data_dir"),
     setDataDir: (path: string) => invoke<DataDirInfo>("set_data_dir", { path }),
     resetDataDir: () => invoke<DataDirInfo>("reset_data_dir"),
-    hideMainWindow: () => invoke<void>("hide_main_window"),
+    closeMainWindow: () => invoke<void>("close_main_window"),
     applyFnTrigger: (enabled: boolean, longPressDurationMs: number) =>
       invoke<void>("apply_fn_trigger", { enabled, longPressDurationMs }),
     copyTextToClipboard: (text: string) => invoke<void>("copy_text_to_clipboard", { text }),

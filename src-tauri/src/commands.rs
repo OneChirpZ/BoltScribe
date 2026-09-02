@@ -509,8 +509,8 @@ fn open_url(url: &str) -> std::io::Result<std::process::ExitStatus> {
 }
 
 #[tauri::command]
-pub(crate) fn hide_main_window(app: tauri::AppHandle<Wry>) -> Result<(), String> {
-    windows::hide_main_window(&app).map_err(|err| err.to_string())
+pub(crate) fn close_main_window(app: tauri::AppHandle<Wry>) -> Result<(), String> {
+    windows::destroy_main_window(&app).map_err(|err| err.to_string())
 }
 
 #[tauri::command]

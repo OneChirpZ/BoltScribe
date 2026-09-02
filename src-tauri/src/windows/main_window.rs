@@ -35,9 +35,11 @@ pub(crate) fn show_main_window(app: &tauri::AppHandle<Wry>) -> tauri::Result<()>
     ensure_main_window(app)
 }
 
-pub(crate) fn hide_main_window(app: &tauri::AppHandle<Wry>) -> tauri::Result<()> {
+pub(crate) fn destroy_main_window(app: &tauri::AppHandle<Wry>) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window("main") {
-        window.hide()?;
+        // A hidden WKWebView keeps its WebContent process and retained graphics
+        // surfaces alive. Recreate the main window on demand instead.
+        window.destroy()?;
     }
     sync_dock_visibility(app)?;
     Ok(())

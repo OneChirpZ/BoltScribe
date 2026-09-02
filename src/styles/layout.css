@@ -1,4 +1,5 @@
 .app-shell {
+  /* Avoid promoting the full main window to a long-lived compositor layer. */
   display: grid;
   grid-template-columns: 252px 1fr;
   width: 100%;
@@ -8,7 +9,6 @@
   background:
     linear-gradient(180deg, var(--fill-soft), transparent 180px),
     var(--bg);
-  animation: app-enter 220ms ease-out;
 }
 
 .sidebar {

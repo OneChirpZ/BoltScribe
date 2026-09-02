@@ -118,6 +118,27 @@ describe("useConfigController", () => {
     });
   });
 
+  it("closes a clean main window through the system lifecycle command", async () => {
+    const api = createBrowserPreviewAppApi({ appVersion: "test-version" });
+    const closeMainWindow = vi.spyOn(api.system, "closeMainWindow");
+    const { result } = renderHook(() => useConfigController({
+      api,
+      busy: false,
+      setBusy: vi.fn(),
+      setNotice: vi.fn(),
+    }));
+
+    await act(async () => {
+      await result.current.actions.loadInitial();
+    });
+    act(() => {
+      result.current.actions.requestWindowClose();
+    });
+
+    expect(closeMainWindow).toHaveBeenCalledOnce();
+    expect(result.current.state.pending).toBeNull();
+  });
+
   it("opens the requested correction subpage from another page", async () => {
     const api = createBrowserPreviewAppApi({ appVersion: "test-version" });
     const { result } = renderHook(() => useConfigController({

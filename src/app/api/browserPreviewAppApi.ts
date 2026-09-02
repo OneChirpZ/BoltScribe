@@ -194,7 +194,7 @@ export function createBrowserPreviewAppApi({ appVersion, locationHref }: Browser
         state.dataDirInfo = clonePreview(state.defaultDataDirInfo);
         return Promise.resolve(clonePreview(state.dataDirInfo));
       },
-      hideMainWindow: () => Promise.resolve(),
+      closeMainWindow: () => Promise.resolve(),
       applyFnTrigger: () => Promise.resolve(),
       copyTextToClipboard: (text) => navigator.clipboard?.writeText(text) ?? Promise.resolve(),
     },
