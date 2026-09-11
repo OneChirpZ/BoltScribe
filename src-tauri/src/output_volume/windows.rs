@@ -1,21 +1,21 @@
 use super::*;
+use ::windows::core::{PCWSTR, PWSTR};
+use ::windows::Win32::Devices::Properties::DEVPKEY_Device_FriendlyName;
+use ::windows::Win32::Foundation::{BOOL, RPC_E_CHANGED_MODE};
+use ::windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
+use ::windows::Win32::Media::Audio::{
+    eConsole, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
+};
+use ::windows::Win32::System::Com::StructuredStorage::PropVariantClear;
+use ::windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
+    COINIT_APARTMENTTHREADED, STGM_READ,
+};
+use ::windows::Win32::System::Variant::VT_LPWSTR;
 use anyhow::{anyhow, Context, Result};
 use std::ffi::c_void;
 use std::ptr::null;
 use std::slice;
-use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Devices::Properties::DEVPKEY_Device_FriendlyName;
-use windows::Win32::Foundation::{BOOL, RPC_E_CHANGED_MODE};
-use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
-use windows::Win32::Media::Audio::{
-    eConsole, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
-};
-use windows::Win32::System::Com::StructuredStorage::PropVariantClear;
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL,
-    COINIT_APARTMENTTHREADED, STGM_READ,
-};
-use windows::Win32::System::Variant::VT_LPWSTR;
 
 pub struct OutputVolumeDuckingSession {
     state: DuckingSessionState,
@@ -332,7 +332,7 @@ fn device_friendly_name(device: &IMMDevice) -> Result<String> {
     result
 }
 
-fn property_string(value: &windows::core::PROPVARIANT) -> Result<String> {
+fn property_string(value: &::windows::core::PROPVARIANT) -> Result<String> {
     let raw = unsafe { &value.as_raw().Anonymous.Anonymous };
     if raw.vt != VT_LPWSTR.0 {
         return Err(anyhow!("Windows output device name is not a string"));
