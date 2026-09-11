@@ -4,6 +4,8 @@
 - Version numbers must stay in sync across `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`.
 - Versions must be valid semver. Before packaging or publishing, run `npm run version:check`.
 - Build public macOS packages with `npm run release:macos`; it removes local home paths from Rust artifacts.
+- macOS packaging and verification must not open Finder, installer windows, or output folders unless explicitly requested. The shared `npm run tauri` wrapper forces `CI=true` and `TAURI_BUNDLER_DMG_IGNORE_CI=false` for macOS `build`/`bundle`, including both macOS build scripts. Do not bypass it with `npx tauri` or the CLI binary. DMGs omit custom Finder background/icon positioning. Run `npm run test:packaging` after changing this path.
+- Prefer `hdiutil verify` without mounting for DMG checks. If inspecting mounted contents is necessary, attach with `-readonly -nobrowse -noautoopen`, inspect via filesystem commands, and detach the exact device afterward. Do not run `open`, `open -R`, Finder AppleScript, or launch the app just to show/verify the output.
 - Build local `/Applications` replacements with `APPLE_SIGNING_IDENTITY=... npm run build:macos-local`, always reusing the same stable Apple Development identity from Keychain. Never install an ad-hoc build because changing signing lineage can invalidate macOS privacy grants. Keep certificate metadata and keys out of the repository, and verify the built and installed TeamIdentifier, Apple-anchored designated requirement, strict signature, and executable hash before launch.
 
 ## Development Workflow

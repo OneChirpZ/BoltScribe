@@ -27,7 +27,8 @@
     "test:frontend": "npm run test:frontend:domain && npm run test:frontend:ui",
     "test:frontend:domain": "node --test tests/*.test.ts",
     "test:frontend:ui": "vitest run",
-    "tauri": "tauri",
+    "test:packaging": "node --test scripts/*.test.mjs",
+    "tauri": "node scripts/run-tauri.mjs",
     "version:check": "node scripts/check-version.mjs"
   },
   "dependencies": {
