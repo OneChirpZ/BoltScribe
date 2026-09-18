@@ -22,18 +22,7 @@
   background: rgba(var(--blue-rgb), 0.065);
 }
 
-:root[data-theme="light"] .nav-button.active {
-  border-color: rgba(var(--blue-rgb), 0.54);
-  background: linear-gradient(90deg, rgba(var(--blue-rgb), 0.2), rgba(var(--blue-rgb), 0.06));
-  box-shadow: inset 3px 0 0 var(--blue);
-}
-
-:root[data-theme="light"] .correction-subnav-button.active {
-  color: #2b659c;
-  background: rgba(var(--blue-rgb), 0.12);
-}
-
-:root[data-theme="light"] .nav-toggle input {
+:root[data-theme="light"] .nav-toggle input:not(:checked) {
   background: var(--fill-strong);
 }
 

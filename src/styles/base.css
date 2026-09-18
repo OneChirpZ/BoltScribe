@@ -16,6 +16,7 @@
   --blue-rgb: 36, 152, 255;
   --heatmap-rgb: 74, 178, 102;
   --amber: #f5b84b;
+  --amber-rgb: 245, 184, 75;
   --amber-soft: #322612;
   --accent-top: #ffd56d;
   --accent-hover-top: #ffe092;
@@ -65,6 +66,7 @@
   --blue-rgb: 57, 121, 184;
   --heatmap-rgb: 74, 128, 174;
   --amber: #3979b8;
+  --amber-rgb: 57, 121, 184;
   --amber-soft: #e5eef8;
   --accent-top: #4a8ac7;
   --accent-hover-top: #5895cf;
@@ -106,6 +108,7 @@
     --blue-rgb: 57, 121, 184;
     --heatmap-rgb: 74, 128, 174;
     --amber: #3979b8;
+    --amber-rgb: 57, 121, 184;
     --amber-soft: #e5eef8;
     --accent-top: #4a8ac7;
     --accent-hover-top: #5895cf;
