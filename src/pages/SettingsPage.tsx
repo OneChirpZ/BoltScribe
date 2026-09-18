@@ -50,16 +50,14 @@ export default function SettingsPage(props: SettingsPageProps) {
         text={props.text}
       />
 
-      <div className="settings-overview-grid settings-overview-grid-final">
-        <OverlaySection config={props.config} onChange={props.onChange} text={props.text} />
-        <ConfigPortabilitySection
-          canSave={props.canSave}
-          importReport={props.importReport}
-          onExportConfig={props.onExportConfig}
-          onImportConfig={props.onImportConfig}
-          text={props.text}
-        />
-      </div>
+      <OverlaySection config={props.config} onChange={props.onChange} text={props.text} />
+      <ConfigPortabilitySection
+        canSave={props.canSave}
+        importReport={props.importReport}
+        onExportConfig={props.onExportConfig}
+        onImportConfig={props.onImportConfig}
+        text={props.text}
+      />
 
       <AdvancedSettingsSection
         config={props.config}

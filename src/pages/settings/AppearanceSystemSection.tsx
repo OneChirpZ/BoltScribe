@@ -23,8 +23,8 @@ export default function AppearanceSystemSection({
   }
 
   return (
-    <div className="settings-overview-grid">
-      <div className="settings-section">
+    <div className="settings-section settings-general-section">
+      <div className="settings-appearance-group">
         <div className="section-title">
           <h2>{text.settings.appearance}</h2>
         </div>
@@ -68,7 +68,7 @@ export default function AppearanceSystemSection({
         </div>
       </div>
 
-      <div className="settings-section">
+      <div className="settings-system-group">
         <div className="section-title">
           <h2>{text.settings.system}</h2>
         </div>

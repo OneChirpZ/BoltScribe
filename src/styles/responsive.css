@@ -138,20 +138,11 @@
   }
 
   .form-grid,
-  .shortcut-grid,
   .variable-entry,
   .dictionary-entry,
   .template-grid,
   .permission-guide-grid {
     grid-template-columns: 1fr;
-  }
-
-  .audio-input-subsection {
-    grid-template-columns: 1fr;
-  }
-
-  .audio-input-policy > .settings-help-text {
-    grid-column: auto;
   }
 
   .correction-subpage-header,
@@ -198,14 +189,6 @@
     flex: 0 0 auto;
     overflow: visible;
   }
-
-  .shortcut-modifiers {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .vad-controls-grid {
-    grid-template-columns: repeat(2, minmax(240px, 1fr));
-  }
 }
 
 @media (max-width: 700px) {
@@ -235,26 +218,6 @@
 
   .config-save-bar {
     padding-inline: 14px;
-  }
-
-  .vad-card-header {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .vad-controls-grid {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-    gap: 12px;
-  }
-
-  .vad-test-footer {
-    grid-template-columns: 1fr;
-  }
-
-  .vad-test-footer > button {
-    justify-self: start;
   }
 }
 
@@ -306,45 +269,5 @@
 @container content (max-width: 520px) {
   .summary-grid {
     grid-template-columns: 1fr;
-  }
-}
-
-@container settings-card (max-width: 620px) {
-  .shortcut-controls,
-  .fn-trigger-details,
-  .output-ducking-layout,
-  .recording-cleanup-storage {
-    grid-template-columns: 1fr;
-  }
-
-  .shortcut-modifiers {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .overlay-control-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .overlay-scale-control,
-  .overlay-snap-range-control {
-    grid-column: 1 / -1;
-  }
-}
-
-@container content (max-width: 620px) {
-  .retention-settings-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@container settings-card (max-width: 440px) {
-  .overlay-control-row,
-  .recording-cleanup-controls {
-    grid-template-columns: 1fr;
-  }
-
-  .overlay-scale-control,
-  .overlay-snap-range-control {
-    grid-column: auto;
   }
 }

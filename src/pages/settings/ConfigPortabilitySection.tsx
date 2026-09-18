@@ -26,11 +26,13 @@ export default function ConfigPortabilitySection({
   }
 
   return (
-    <div className="settings-section">
-      <div className="section-title">
-        <h2>{text.settings.configPortability}</h2>
+    <div className="settings-section settings-portability-section">
+      <div className="settings-portability-copy">
+        <div className="section-title">
+          <h2>{text.settings.configPortability}</h2>
+        </div>
+        <p className="settings-help-text">{text.settings.configPortabilityHelp}</p>
       </div>
-      <p className="settings-help-text">{text.settings.configPortabilityHelp}</p>
       <div className="section-actions settings-card-actions">
         <button className="secondary small" type="button" disabled={!canSave} onClick={onExportConfig}>
           {text.settings.exportConfig}

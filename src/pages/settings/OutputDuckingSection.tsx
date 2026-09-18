@@ -135,31 +135,6 @@ export default function OutputDuckingSection({
                     </div>
                   </Field>
                 ) : null}
-                {canUseSoundSourceFallback ? (
-                  <div className="sound-source-fallback">
-                    <div className="toggle-with-help">
-                      <label className="toggle-row">
-                        <input
-                          type="checkbox"
-                          checked={outputDucking.sound_source_hotkey_fallback_enabled}
-                          onChange={(event) => update({ sound_source_hotkey_fallback_enabled: event.target.checked })}
-                        />
-                        <span>{text.settings.outputVolumeDuckingSoundSourceFallback}</span>
-                      </label>
-                      <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
-                    </div>
-                    <ShortcutPicker
-                      label={text.settings.outputVolumeDuckingSoundSourceHotkey}
-                      enabled={outputDucking.sound_source_hotkey_fallback_enabled}
-                      value={outputDucking.sound_source_toggle_mute_hotkey}
-                      onChange={(value) => update({ sound_source_toggle_mute_hotkey: value })}
-                      text={text}
-                      platform="macos"
-                      keyOptions={soundSourceShortcutKeyOptions}
-                      showEnabledToggle={false}
-                    />
-                  </div>
-                ) : null}
               </div>
               <Field label={text.settings.outputVolumeDuckingWhitelist} className="output-device-card" group>
                 <div className="device-checklist output-device-checklist">
@@ -193,6 +168,31 @@ export default function OutputDuckingSection({
                 </div>
               </Field>
             </div>
+            {canUseSoundSourceFallback ? (
+              <div className="sound-source-fallback">
+                <div className="toggle-with-help">
+                  <label className="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={outputDucking.sound_source_hotkey_fallback_enabled}
+                      onChange={(event) => update({ sound_source_hotkey_fallback_enabled: event.target.checked })}
+                    />
+                    <span>{text.settings.outputVolumeDuckingSoundSourceFallback}</span>
+                  </label>
+                  <HelpTip content={text.settings.outputVolumeDuckingSoundSourceHelp} />
+                </div>
+                <ShortcutPicker
+                  label={text.settings.outputVolumeDuckingSoundSourceHotkey}
+                  enabled={outputDucking.sound_source_hotkey_fallback_enabled}
+                  value={outputDucking.sound_source_toggle_mute_hotkey}
+                  onChange={(value) => update({ sound_source_toggle_mute_hotkey: value })}
+                  text={text}
+                  platform="macos"
+                  keyOptions={soundSourceShortcutKeyOptions}
+                  showEnabledToggle={false}
+                />
+              </div>
+            ) : null}
           </div>
         ) : (
           <p className="settings-help-text">

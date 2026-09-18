@@ -6,7 +6,8 @@
 }
 .shortcut-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 650px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
+  align-items: start;
   gap: 14px;
 }
 
@@ -16,14 +17,20 @@
 }
 
 .fn-trigger-details {
-  display: grid;
-  grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
-  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 12px;
+}
+
+.fn-trigger-details > .field {
+  flex: 0 1 180px;
 }
 
 .trigger-permission-row {
   display: flex;
+  flex: 1 1 360px;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
@@ -44,7 +51,7 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .permission-ok {
@@ -77,14 +84,10 @@
 }
 
 .shortcut-picker-header {
-  display: grid;
-  grid-template-columns: minmax(max-content, 1fr) auto minmax(0, max-content);
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-}
-
-.shortcut-picker-header.no-enable {
-  grid-template-columns: minmax(max-content, 1fr) minmax(0, max-content);
+  gap: 8px 12px;
 }
 
 .shortcut-picker-title,
@@ -96,6 +99,7 @@
 }
 
 .shortcut-picker-title {
+  margin-right: auto;
   overflow-wrap: anywhere;
 }
 
@@ -119,15 +123,17 @@
 }
 
 .shortcut-controls {
-  display: grid;
-  grid-template-columns: minmax(300px, 1fr) minmax(136px, 180px);
+  display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: center;
 }
 
 .shortcut-modifiers {
   display: grid;
-  grid-template-columns: repeat(4, minmax(70px, 1fr));
+  flex: 3 1 260px;
+  min-width: 0;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -172,7 +178,8 @@
 }
 
 .shortcut-key-select {
-  min-width: 136px;
+  flex: 1 1 132px;
+  min-width: 0;
 }
 
 .settings-section {
@@ -190,17 +197,6 @@
 .settings-page,
 .config-page {
   gap: 18px;
-}
-
-.settings-overview-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
-  align-items: start;
-  gap: 16px;
-}
-
-.settings-overview-grid.settings-overview-grid-final {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
 }
 
 .settings-page .settings-section,
@@ -221,28 +217,61 @@
 
 .settings-page .section-title,
 .config-page .section-title {
-  align-items: flex-start;
+  align-items: center;
   flex-wrap: wrap;
+}
+
+.settings-page .field,
+.settings-page fieldset,
+.settings-page select,
+.settings-page input:not([type="checkbox"]):not([type="radio"]) {
+  min-width: 0;
+}
+
+.settings-page .settings-general-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 28px;
+}
+
+.settings-appearance-group,
+.settings-system-group {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.settings-appearance-group {
+  flex: 3 1 520px;
+}
+
+.settings-system-group {
+  flex: 1 1 220px;
 }
 
 .settings-toggle-stack {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  align-content: start;
   gap: 14px;
-  padding-block: 4px;
+  padding-block: 2px;
 }
 
 .settings-language-field {
-  padding-block: 4px;
+  flex: 1 1 160px;
+  align-content: start;
 }
 
 .settings-appearance-stack {
-  display: grid;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 16px;
 }
 
 .theme-field {
   display: grid;
+  flex: 2 1 320px;
   gap: 8px;
   min-width: 0;
   margin: 0;
@@ -350,14 +379,10 @@
 
 .audio-input-policy {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
-  align-items: stretch;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  align-items: start;
   gap: 16px;
   min-width: 0;
-}
-
-.audio-input-policy > .settings-help-text {
-  grid-column: 1 / -1;
 }
 
 .vad-protection-card {
@@ -372,6 +397,7 @@
 
 .vad-card-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
@@ -406,7 +432,7 @@
 
 .vad-controls-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: end;
   gap: 12px 18px;
   border-top: 1px solid rgba(255, 255, 255, 0.045);
@@ -429,8 +455,8 @@
   font-size: 11px;
 }
 
-.vad-range-control {
-  grid-template-columns: minmax(120px, 1fr) 88px auto;
+.range-with-value.vad-range-control {
+  grid-template-columns: minmax(0, 1fr) 88px auto;
   width: 100%;
 }
 
@@ -440,8 +466,8 @@
 }
 
 .vad-test-footer {
-  display: grid;
-  grid-template-columns: minmax(220px, 280px) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: start;
   gap: 10px;
@@ -458,6 +484,8 @@
   grid-template-columns: minmax(0, 1fr) 1px 68px;
   align-items: center;
   gap: 10px;
+  flex: 0 1 280px;
+  min-width: 0;
   width: 100%;
   height: 46px;
   border: 1px solid rgba(255, 255, 255, 0.13);
@@ -556,8 +584,8 @@
 }
 
 .input-device-priority-row {
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-height: 42px;
@@ -572,6 +600,7 @@
   place-items: center;
   width: 24px;
   height: 24px;
+  flex: 0 0 auto;
   border: 1px solid var(--line);
   border-radius: 999px;
   color: var(--muted);
@@ -579,17 +608,18 @@
 }
 
 .input-device-name {
+  flex: 1 1 150px;
   min-width: 0;
-  overflow: hidden;
   color: var(--text-soft);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
 }
 
 .input-device-row-actions {
   display: flex;
   align-items: center;
   gap: 6px;
+  margin-left: auto;
 }
 
 .input-device-order-button.small {
@@ -677,6 +707,7 @@
   width: 9px;
   height: 9px;
   flex: 0 0 auto;
+  margin-right: 6px;
   border-right: 2px solid var(--muted);
   border-bottom: 2px solid var(--muted);
   transform: rotate(45deg) translate(-2px, 2px);
@@ -700,12 +731,14 @@
 }
 
 .advanced-settings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
   gap: 16px;
 }
 
 .advanced-retry-field {
+  flex: 1 1 240px;
   min-width: 0;
 }
 
@@ -723,4 +756,10 @@
 
 .advanced-retry-field .number-with-unit {
   grid-template-columns: minmax(0, 1fr) max-content;
+}
+
+@container settings-card (max-width: 640px) {
+  .vad-controls-grid {
+    grid-template-columns: 1fr;
+  }
 }

@@ -138,8 +138,8 @@ export default function InputVadSection({
               : null}
           </div>
         </Field>
-        <p className="settings-help-text">{text.settings.audioInputPolicyHelp}</p>
       </div>
+      <p className="settings-help-text">{text.settings.audioInputPolicyHelp}</p>
     </div>
   );
 }
