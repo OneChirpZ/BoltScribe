@@ -139,6 +139,7 @@ export interface RetentionConfig {
 export interface SystemConfig {
   launch_at_login: boolean;
   hide_dock_icon: boolean;
+  show_menu_bar_icon: boolean;
   tray_left_click_recording_enabled: boolean;
   fn_long_press_enabled: boolean;
   fn_long_press_duration_ms: number;

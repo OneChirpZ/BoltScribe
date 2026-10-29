@@ -269,6 +269,12 @@ fn apply_and_save_config(
             detail: err.to_string(),
         });
     }
+    if let Err(err) = tray::sync_menu_bar_visibility(app, saved.system.show_menu_bar_icon) {
+        warnings.push(ConfigApplyWarning {
+            code: ConfigApplyWarningCode::TraySync,
+            detail: err.to_string(),
+        });
+    }
     let latest_saved = config::ConfigStore::load().map_err(|err| err.to_string())?;
     if let Err(err) = app.emit("config://updated", &latest_saved) {
         warnings.push(ConfigApplyWarning {

@@ -77,7 +77,7 @@ fn main() {
                 .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
             windows::ensure_overlay_snap_guide_window(app.handle())
                 .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
-            tray::setup(app.handle(), |app| {
+            tray::setup(app.handle(), config.system.show_menu_bar_icon, |app| {
                 if let Err(err) = workflow::toggle_recording_from_app(app) {
                     eprintln!("failed to toggle voice input from tray: {err:?}");
                 }

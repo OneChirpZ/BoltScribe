@@ -1,7 +1,7 @@
 import type { AppConfig } from "../../types";
 import { applyLanguageDefaultCorrectionTemplate } from "../../domain/defaultCorrectionTemplates";
 import type { AppLanguage, TextBundle } from "../../domain/i18n";
-import { supportsDockVisibilityControl } from "../../domain/platform";
+import { supportsDockVisibilityControl, supportsMenuBarVisibilityControl } from "../../domain/platform";
 import { normalizeThemePreference, type ThemePreference } from "../../domain/theme";
 
 export default function AppearanceSystemSection({
@@ -95,6 +95,19 @@ export default function AppearanceSystemSection({
                 })}
               />
               <span>{text.settings.hideDockIcon}</span>
+            </label>
+          ) : null}
+          {supportsMenuBarVisibilityControl() ? (
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                checked={config.system.show_menu_bar_icon ?? true}
+                onChange={(event) => onChange({
+                  ...config,
+                  system: { ...config.system, show_menu_bar_icon: event.target.checked },
+                })}
+              />
+              <span>{text.settings.showMenuBarIcon}</span>
             </label>
           ) : null}
         </div>

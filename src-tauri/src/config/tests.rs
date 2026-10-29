@@ -16,6 +16,7 @@ fn default_config_uses_mvp_providers() {
     assert_eq!(config.asr.provider, "volcengine");
     assert_eq!(config.asr.auth_mode, "api_key");
     assert!(config.system.tray_left_click_recording_enabled);
+    assert!(config.system.show_menu_bar_icon);
     assert!(!config.system.fn_long_press_enabled);
     assert_eq!(config.system.fn_long_press_duration_ms, 200);
     assert_eq!(config.llm.endpoint, "https://api.openai.com/v1");
@@ -71,6 +72,30 @@ fn missing_tray_left_click_recording_defaults_to_enabled() {
     let config: AppConfig = serde_json::from_value(value).unwrap();
 
     assert!(config.system.tray_left_click_recording_enabled);
+}
+
+#[test]
+fn missing_menu_bar_icon_visibility_defaults_to_visible() {
+    let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+    value["system"]
+        .as_object_mut()
+        .unwrap()
+        .remove("show_menu_bar_icon");
+
+    let config: AppConfig = serde_json::from_value(value).unwrap();
+
+    assert!(config.system.show_menu_bar_icon);
+}
+
+#[test]
+fn hidden_menu_bar_icon_survives_config_export_and_import() {
+    let mut config = AppConfig::default();
+    config.system.show_menu_bar_icon = false;
+
+    let raw = ConfigStore::export_json(&config).unwrap();
+    let imported = ConfigStore::import_json(&raw).unwrap();
+
+    assert!(!imported.config.system.show_menu_bar_icon);
 }
 
 #[test]

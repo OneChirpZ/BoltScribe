@@ -24,6 +24,10 @@ export function supportsDockVisibilityControl() {
   return runtimePlatform() === "macos";
 }
 
+export function supportsMenuBarVisibilityControl() {
+  return runtimePlatform() === "macos";
+}
+
 export function supportsOutputVolumeDucking() {
   const platform = runtimePlatform();
   return platform === "macos" || platform === "windows";

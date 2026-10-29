@@ -29,6 +29,7 @@ pub(crate) struct TrayState {
 
 pub(crate) fn setup(
     app: &AppHandle<Wry>,
+    show_menu_bar_icon: bool,
     toggle_voice_input: impl Fn(AppHandle<Wry>) + Send + Sync + 'static,
 ) -> tauri::Result<()> {
     let toggle_voice_input: ToggleVoiceInput = Arc::new(toggle_voice_input);
@@ -78,6 +79,16 @@ pub(crate) fn setup(
     builder = builder.icon(tray_template_icon()).icon_as_template(true);
 
     builder.build(app)?;
+    sync_menu_bar_visibility(app, show_menu_bar_icon)
+}
+
+pub(crate) fn sync_menu_bar_visibility(app: &AppHandle<Wry>, visible: bool) -> tauri::Result<()> {
+    #[cfg(target_os = "macos")]
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        tray.set_visible(visible)?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, visible);
     Ok(())
 }
 

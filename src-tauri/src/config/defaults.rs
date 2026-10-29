@@ -46,6 +46,10 @@ pub(super) fn default_tray_left_click_recording_enabled() -> bool {
     true
 }
 
+pub(super) fn default_show_menu_bar_icon() -> bool {
+    true
+}
+
 pub(super) fn default_fn_long_press_enabled() -> bool {
     false
 }

@@ -216,6 +216,8 @@ pub struct SystemConfig {
     pub launch_at_login: bool,
     #[serde(default)]
     pub hide_dock_icon: bool,
+    #[serde(default = "defaults::default_show_menu_bar_icon")]
+    pub show_menu_bar_icon: bool,
     #[serde(default = "defaults::default_tray_left_click_recording_enabled")]
     pub tray_left_click_recording_enabled: bool,
     #[serde(default = "defaults::default_fn_long_press_enabled")]
@@ -398,6 +400,7 @@ impl Default for SystemConfig {
         Self {
             launch_at_login: false,
             hide_dock_icon: false,
+            show_menu_bar_icon: defaults::default_show_menu_bar_icon(),
             tray_left_click_recording_enabled: defaults::default_tray_left_click_recording_enabled(
             ),
             fn_long_press_enabled: defaults::default_fn_long_press_enabled(),

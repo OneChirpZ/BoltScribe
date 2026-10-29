@@ -296,6 +296,7 @@ function previewConfig(language: "zh-CN" | "en-US", overlayScale: number): AppCo
     system: {
       launch_at_login: false,
       hide_dock_icon: false,
+      show_menu_bar_icon: true,
       tray_left_click_recording_enabled: true,
       fn_long_press_enabled: false,
       fn_long_press_duration_ms: 200,
