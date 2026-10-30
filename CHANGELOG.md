@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- 新增默认开启的 OpenAI 与火山方舟 Fast / 低延迟模式，支持手动关闭，并在调用日志中记录请求与实际服务档位。
+- 增加 GPT-6 Luna、Doubao 2.1 Lite / Turbo 模型预设；关闭 Thinking 时，向 GPT-6 Luna 和 GPT-5.4 Mini 显式传入关闭思考参数。
+
 ## 1.6.0 - 2026-09-11
 
 - 新增实时与文件 ASR 竞速，在实时识别重试后启动文件识别，并采用先完成的有效结果；开放连接重试高级设置。

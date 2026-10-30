@@ -81,6 +81,8 @@ After installation:
 
 BoltScribe lets you adjust transcription language, AI models, dictionaries, correction rules, microphone priority, no-speech protection, overlay size and position, output volume behavior, history retention, and launch options from the app.
 
+Fast / low-latency mode is enabled by default for OpenAI and Volcengine Ark and can be turned off in model settings. Fast inference costs more; enable the model's low-latency service in Ark before using it. History call logs record both the requested and actual service tiers.
+
 ## Permissions
 
 BoltScribe needs Microphone permission to record speech. On macOS, it also needs Accessibility permission to insert text into the active app. On Windows, text insertion uses the clipboard and a synthetic paste shortcut.

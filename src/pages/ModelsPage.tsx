@@ -304,6 +304,19 @@ export default function ModelsPage({
             </Field>
           </div>
           <div className="field-wide compact-control-row">
+            {providerKey === "openai" || providerKey === "volc_ark" ? (
+              <>
+                <label className="toggle-row inline-toggle">
+                  <input
+                    type="checkbox"
+                    checked={config.llm.fast_mode_enabled ?? true}
+                    onChange={(event) => onChange({ ...config, llm: { ...config.llm, fast_mode_enabled: event.target.checked } })}
+                  />
+                  <span>{text.models.fastMode}</span>
+                </label>
+                <HelpTip content={text.models.fastModeHelp} />
+              </>
+            ) : null}
             <label className="toggle-row inline-toggle">
               <input
                 type="checkbox"

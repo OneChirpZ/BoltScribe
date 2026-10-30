@@ -94,6 +94,7 @@ export interface LlmConfig {
   system_prompt: string;
   temperature: number;
   timeout_secs: number;
+  fast_mode_enabled: boolean;
   thinking_enabled: boolean;
   thinking_effort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | string;
   max_output_tokens: number | null;
@@ -364,6 +365,8 @@ export interface LlmCallLog {
   duration_ms: number;
   success: boolean;
   request_id: string | null;
+  requested_service_tier?: string | null;
+  service_tier?: string | null;
   finish_reason: string | null;
   usage: LlmUsage | null;
   error: string | null;

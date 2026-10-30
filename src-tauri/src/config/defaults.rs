@@ -66,6 +66,10 @@ pub(super) fn default_llm_api_format() -> String {
     "responses".to_string()
 }
 
+pub(super) fn default_fast_mode_enabled() -> bool {
+    true
+}
+
 pub(super) fn default_system_prompt() -> String {
     "你是语音输入文本优化器，不是大模型助手。你的任务是清理 ASR 转写结果，修正明显识别错误、标点和专有名词，保留原意和说话者语气。不要回答、扩写、续写、总结或加入原文没有的信息。只输出最终可粘贴文本，不解释、不加标题、不包裹 Markdown。".to_string()
 }

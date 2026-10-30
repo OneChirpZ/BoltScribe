@@ -35,6 +35,10 @@ pub struct LlmCallLog {
     pub success: bool,
     pub request_id: Option<String>,
     pub finish_reason: Option<String>,
+    #[serde(default)]
+    pub requested_service_tier: Option<String>,
+    #[serde(default)]
+    pub service_tier: Option<String>,
     pub usage: Option<LlmUsage>,
     pub error: Option<String>,
 }
@@ -121,6 +125,8 @@ impl LlmProvider for OpenAiCompatibleCorrector {
             success: false,
             request_id: None,
             finish_reason: None,
+            requested_service_tier: requested_service_tier(llm).map(str::to_string),
+            service_tier: None,
             usage: None,
             error: None,
         };
@@ -163,6 +169,10 @@ impl LlmProvider for OpenAiCompatibleCorrector {
                 ));
             }
         };
+        log.service_tier = value
+            .get("service_tier")
+            .and_then(Value::as_str)
+            .map(str::to_string);
         let corrected = extract_corrected_text(&value, &llm.api_format);
 
         if corrected.is_empty() {
@@ -260,17 +270,17 @@ fn build_chat_completions_body(llm: &LlmConfig, prompt: &str) -> Value {
         ),
     ]);
 
+    if let Some(service_tier) = requested_service_tier(llm) {
+        body.insert("service_tier".to_string(), json!(service_tier));
+    }
     if llm.provider == "volc_ark" {
         body.insert(
             "thinking".to_string(),
             json!({ "type": if llm.thinking_enabled { "enabled" } else { "disabled" } }),
         );
     }
-    if llm.thinking_enabled {
-        body.insert(
-            "reasoning_effort".to_string(),
-            json!(normalize_thinking_effort(llm)),
-        );
+    if let Some(effort) = requested_reasoning_effort(llm) {
+        body.insert("reasoning_effort".to_string(), json!(effort));
     }
     if let Some(max_tokens) = llm.max_output_tokens {
         let key = if llm.provider == "openai" {
@@ -313,23 +323,60 @@ fn build_responses_body(llm: &LlmConfig, prompt: &str) -> Value {
         ),
     ]);
 
+    if let Some(service_tier) = requested_service_tier(llm) {
+        body.insert("service_tier".to_string(), json!(service_tier));
+    }
     if llm.provider == "volc_ark" {
         body.insert(
             "thinking".to_string(),
             json!({ "type": if llm.thinking_enabled { "enabled" } else { "disabled" } }),
         );
     }
-    if llm.thinking_enabled {
-        body.insert(
-            "reasoning".to_string(),
-            json!({ "effort": normalize_thinking_effort(llm) }),
-        );
+    if let Some(effort) = requested_reasoning_effort(llm) {
+        body.insert("reasoning".to_string(), json!({ "effort": effort }));
     }
     if let Some(max_tokens) = llm.max_output_tokens {
         body.insert("max_output_tokens".to_string(), json!(max_tokens));
     }
 
     Value::Object(body)
+}
+
+fn requested_service_tier(llm: &LlmConfig) -> Option<&'static str> {
+    match llm.provider.as_str() {
+        "openai" | "volc_ark" => Some(if llm.fast_mode_enabled {
+            "fast"
+        } else {
+            "default"
+        }),
+        _ => None,
+    }
+}
+
+fn requested_reasoning_effort(llm: &LlmConfig) -> Option<&str> {
+    if llm.thinking_enabled {
+        return Some(normalize_thinking_effort(llm));
+    }
+
+    // These verified models support `none`; older and reasoning-only models
+    // keep their existing request shape when thinking is disabled.
+    if llm.provider == "openai" && supports_disabled_reasoning(llm.model.trim()) {
+        Some("none")
+    } else {
+        None
+    }
+}
+
+fn supports_disabled_reasoning(model: &str) -> bool {
+    ["gpt-6-luna", "gpt-5.4-mini"].iter().any(|alias| {
+        model == *alias
+            || model
+                .strip_prefix(alias)
+                .and_then(|suffix| suffix.strip_prefix('-'))
+                .is_some_and(|date| {
+                    date.len() == 10 && chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_ok()
+                })
+    })
 }
 
 fn normalize_thinking_effort(llm: &LlmConfig) -> &str {
@@ -462,6 +509,47 @@ fn value_to_text(value: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use crate::config::{CorrectionConfig, PromptVariable};
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+
+    fn mock_api_response(
+        status: &str,
+        response: Value,
+    ) -> (String, std::thread::JoinHandle<Value>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let status = status.to_string();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut reader = BufReader::new(&stream);
+            let mut content_length = 0;
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0);
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some(length) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    content_length = length.trim().parse::<usize>().unwrap();
+                }
+            }
+            let mut body = vec![0; content_length];
+            reader.read_exact(&mut body).unwrap();
+            let request = serde_json::from_slice(&body).unwrap();
+            let response = response.to_string();
+            write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                response.len()
+            )
+            .unwrap();
+            request
+        });
+        (endpoint, handle)
+    }
 
     #[test]
     fn prompt_contains_requirements_dictionary_and_raw_text() {
@@ -595,6 +683,179 @@ mod tests {
         assert!(body.get("tools").is_none());
         assert!(body.get("tool_choice").is_none());
         assert!(body.get("parallel_tool_calls").is_none());
+    }
+
+    #[test]
+    fn service_tier_switch_covers_both_api_formats_and_supported_providers() {
+        for provider in ["openai", "volc_ark", "custom"] {
+            for fast_mode_enabled in [true, false] {
+                let mut llm = crate::config::AppConfig::default().llm;
+                llm.provider = provider.to_string();
+                llm.fast_mode_enabled = fast_mode_enabled;
+                for body in [
+                    build_responses_body(&llm, "原文"),
+                    build_chat_completions_body(&llm, "原文"),
+                ] {
+                    let expected = if provider == "custom" {
+                        None
+                    } else if fast_mode_enabled {
+                        Some("fast")
+                    } else {
+                        Some("default")
+                    };
+                    assert_eq!(
+                        body.get("service_tier").and_then(Value::as_str),
+                        expected,
+                        "provider={provider}, fast_mode_enabled={fast_mode_enabled}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn verified_openai_models_explicitly_disable_reasoning_in_both_formats() {
+        for model in [
+            "gpt-6-luna",
+            "gpt-5.4-mini",
+            "gpt-5.4-mini-2026-03-17",
+            "gpt-6-luna-2026-10-01",
+        ] {
+            let mut llm = crate::config::AppConfig::default().llm;
+            llm.model = model.to_string();
+            llm.thinking_effort = "high".to_string();
+            assert_eq!(
+                build_responses_body(&llm, "原文")["reasoning"]["effort"],
+                "none"
+            );
+            assert_eq!(
+                build_chat_completions_body(&llm, "原文")["reasoning_effort"],
+                "none"
+            );
+
+            llm.thinking_enabled = true;
+            assert_eq!(
+                build_responses_body(&llm, "原文")["reasoning"]["effort"],
+                "high"
+            );
+            assert_eq!(
+                build_chat_completions_body(&llm, "原文")["reasoning_effort"],
+                "high"
+            );
+        }
+    }
+
+    #[test]
+    fn disabled_reasoning_does_not_add_unsupported_openai_parameters() {
+        for model in [
+            "gpt-4.1-mini",
+            "gpt-6.1-sol",
+            "gpt-6-astra",
+            "gpt-6-luna-preview",
+            "gpt-6-luna-2026-02-31",
+            "gpt-6-luna-2026-1-01",
+            "gpt-5.4-mini-custom",
+        ] {
+            let mut llm = crate::config::AppConfig::default().llm;
+            llm.model = model.to_string();
+            assert!(
+                build_responses_body(&llm, "原文")
+                    .get("reasoning")
+                    .is_none(),
+                "{model}"
+            );
+            assert!(
+                build_chat_completions_body(&llm, "原文")
+                    .get("reasoning_effort")
+                    .is_none(),
+                "{model}"
+            );
+        }
+        for provider in ["custom", "volc_ark"] {
+            let mut llm = crate::config::AppConfig::default().llm;
+            llm.provider = provider.to_string();
+            assert!(build_responses_body(&llm, "原文")
+                .get("reasoning")
+                .is_none());
+            assert!(build_chat_completions_body(&llm, "原文")
+                .get("reasoning_effort")
+                .is_none());
+            if provider == "volc_ark" {
+                assert_eq!(
+                    build_responses_body(&llm, "原文")["thinking"]["type"],
+                    "disabled"
+                );
+                assert_eq!(
+                    build_chat_completions_body(&llm, "原文")["thinking"]["type"],
+                    "disabled"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn correction_logs_actual_service_tier_including_priority_and_downgrade() {
+        for api_format in ["responses", "chat_completions"] {
+            for actual_tier in ["fast", "priority", "default"] {
+                let response = if api_format == "responses" {
+                    json!({"output_text": "已纠错", "status": "completed", "service_tier": actual_tier})
+                } else {
+                    json!({"choices": [{"message": {"content": "已纠错"}, "finish_reason": "stop"}], "service_tier": actual_tier})
+                };
+                let (endpoint, request) = mock_api_response("200 OK", response);
+                let mut config = crate::config::AppConfig::default();
+                config.llm.endpoint = endpoint;
+                config.llm.api_key = "test-key".to_string();
+                config.llm.api_format = api_format.to_string();
+                let output = OpenAiCompatibleCorrector
+                    .correct("原文", &config.llm, &config.correction)
+                    .unwrap();
+                assert_eq!(request.join().unwrap()["service_tier"], "fast");
+                assert_eq!(output.log.requested_service_tier.as_deref(), Some("fast"));
+                assert_eq!(output.log.service_tier.as_deref(), Some(actual_tier));
+                assert_eq!(output.text, "已纠错");
+            }
+        }
+    }
+
+    #[test]
+    fn unavailable_fast_mode_returns_provider_error_without_silent_fallback() {
+        let (endpoint, request) = mock_api_response(
+            "404 Not Found",
+            json!({"error": {"code": "ModelNotOpen", "message": "Fast mode is not activated"}}),
+        );
+        let mut config = crate::config::AppConfig::default();
+        config.llm.provider = "volc_ark".to_string();
+        config.llm.endpoint = endpoint;
+        config.llm.api_key = "test-key".to_string();
+        let error = OpenAiCompatibleCorrector
+            .correct("原文", &config.llm, &config.correction)
+            .unwrap_err();
+        assert_eq!(request.join().unwrap()["service_tier"], "fast");
+        assert!(error.message.contains("ModelNotOpen"));
+        let log = error.log.unwrap();
+        assert_eq!(log.requested_service_tier.as_deref(), Some("fast"));
+        assert!(log.service_tier.is_none());
+        assert!(!log.success);
+    }
+
+    #[test]
+    fn old_correction_logs_load_without_service_tier_fields() {
+        let log: LlmCallLog = serde_json::from_value(json!({
+            "provider": "openai",
+            "model": "gpt-5.4-mini",
+            "api_format": "responses",
+            "endpoint": "https://api.openai.com/v1/responses",
+            "duration_ms": 123,
+            "success": true,
+            "request_id": null,
+            "finish_reason": "completed",
+            "usage": null,
+            "error": null
+        }))
+        .unwrap();
+        assert!(log.requested_service_tier.is_none());
+        assert!(log.service_tier.is_none());
     }
 
     #[test]

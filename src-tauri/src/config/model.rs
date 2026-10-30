@@ -162,6 +162,8 @@ pub struct LlmConfig {
     pub system_prompt: String,
     pub temperature: f32,
     pub timeout_secs: u64,
+    #[serde(default = "defaults::default_fast_mode_enabled")]
+    pub fast_mode_enabled: bool,
     #[serde(default)]
     pub thinking_enabled: bool,
     #[serde(default = "defaults::default_thinking_effort")]
@@ -320,6 +322,7 @@ impl Default for AppConfig {
                 system_prompt: defaults::default_system_prompt(),
                 temperature: 0.0,
                 timeout_secs: 30,
+                fast_mode_enabled: defaults::default_fast_mode_enabled(),
                 thinking_enabled: false,
                 thinking_effort: defaults::default_thinking_effort(),
                 max_output_tokens: None,

@@ -263,6 +263,7 @@ function previewConfig(language: "zh-CN" | "en-US", overlayScale: number): AppCo
         : "在不改变原意的前提下整理语音输入文本。",
       temperature: 1,
       timeout_secs: 12,
+      fast_mode_enabled: true,
       thinking_enabled: false,
       thinking_effort: "none",
       max_output_tokens: 4000,

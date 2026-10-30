@@ -24,12 +24,49 @@ fn default_config_uses_mvp_providers() {
     assert!(config.asr.app_key.is_empty());
     assert!(config.asr.access_key.is_empty());
     assert!(config.llm.api_key.is_empty());
+    assert!(config.llm.fast_mode_enabled);
     assert!(!config.llm.race_enabled);
     assert!(config.llm.race_models.is_empty());
     assert!(config.correction.enabled);
     assert!(config.correction.user_requirements.is_empty());
     assert!(config.correction.dictionary.is_empty());
     assert!(config.correction.correction_rules.is_empty());
+}
+
+#[test]
+fn legacy_llm_config_enables_fast_mode_on_load_and_import() {
+    let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+    value["llm"]
+        .as_object_mut()
+        .unwrap()
+        .remove("fast_mode_enabled");
+
+    let mut loaded: AppConfig = serde_json::from_value(value.clone()).unwrap();
+    loaded.normalize();
+    assert!(loaded.llm.fast_mode_enabled);
+
+    let imported = ConfigStore::import_json(&value.to_string()).unwrap();
+    assert!(imported.config.llm.fast_mode_enabled);
+    assert!(imported
+        .report
+        .missing_fields
+        .contains(&"llm.fast_mode_enabled".to_string()));
+}
+
+#[test]
+fn explicitly_disabled_fast_mode_survives_load_export_and_import() {
+    let mut config = AppConfig::default();
+    config.llm.fast_mode_enabled = false;
+
+    let loaded: AppConfig = serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
+    assert!(!loaded.llm.fast_mode_enabled);
+
+    let imported = ConfigStore::import_json(&ConfigStore::export_json(&config).unwrap()).unwrap();
+    assert!(!imported.config.llm.fast_mode_enabled);
+    assert!(!imported
+        .report
+        .missing_fields
+        .contains(&"llm.fast_mode_enabled".to_string()));
 }
 
 #[test]
