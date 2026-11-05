@@ -18,6 +18,9 @@ pub(super) fn set_status_for_task(app: &AppHandle, task_id: &str, status: Workfl
 }
 
 pub(super) fn publish_status(app: &AppHandle, status: &WorkflowStatus) {
+    // The queued update reads the latest activity, so an older publisher cannot
+    // leave Escape registered after a recording has ended.
+    crate::shortcuts::sync_cancel_shortcut(app);
     if !status_is_current(app, status.revision) {
         return;
     }

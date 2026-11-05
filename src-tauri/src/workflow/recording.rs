@@ -513,20 +513,47 @@ fn spawn_vad_monitor(app: AppHandle, task: WorkflowTask, monitor: VadMonitorHand
 }
 
 pub fn cancel_current_workflow(app: AppHandle, state: &AppState) -> Result<WorkflowStatus> {
+    cancel_workflow(app, state, None)
+}
+
+pub(crate) fn cancel_recording_if_current(app: AppHandle, task_id: &str) -> Result<WorkflowStatus> {
+    let state = app.state::<AppState>();
+    cancel_workflow(app.clone(), state.inner(), Some(task_id))
+}
+
+fn cancel_workflow(
+    app: AppHandle,
+    state: &AppState,
+    recording_task_id: Option<&str>,
+) -> Result<WorkflowStatus> {
+    let Some(status) = cancel_workflow_state(state, recording_task_id)? else {
+        return Ok(state.status());
+    };
+    publish_status(&app, &status);
+    Ok(status)
+}
+
+pub(super) fn cancel_workflow_state(
+    state: &AppState,
+    recording_task_id: Option<&str>,
+) -> Result<Option<WorkflowStatus>> {
     let status = {
         let mut runtime = state
             .runtime
             .lock()
             .map_err(|_| anyhow!("Failed to lock workflow state"))?;
+        if recording_task_id.is_some_and(|task_id| !runtime.activity.is_recording_task(task_id)) {
+            return Ok(None);
+        }
         if matches!(&runtime.activity, WorkflowActivity::Starting(_)) {
-            return Ok(runtime.status.clone());
+            return Ok(None);
         }
         if !matches!(
             &runtime.activity,
             WorkflowActivity::Recording(_) | WorkflowActivity::Processing(_)
         ) {
             if runtime.status.mode != WorkflowMode::Error {
-                return Ok(runtime.status.clone());
+                return Ok(None);
             }
             let current_audio_path = runtime.status.current_audio_path.clone();
             let last_record_id = runtime.status.last_record_id.clone();
@@ -605,6 +632,5 @@ pub fn cancel_current_workflow(app: AppHandle, state: &AppState) -> Result<Workf
             })
         }
     };
-    publish_status(&app, &status);
-    Ok(status)
+    Ok(Some(status))
 }

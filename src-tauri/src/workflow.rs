@@ -33,5 +33,6 @@ mod tests;
 
 pub use crate::workflow_status::{WorkflowMode, WorkflowStage, WorkflowStatus, WorkflowStatusCode};
 pub use processing::retry_history_record;
+pub(crate) use recording::cancel_recording_if_current;
 pub use recording::{cancel_current_workflow, toggle_recording, toggle_recording_from_app};
 pub use state::AppState;

@@ -23,6 +23,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "build:macos-local": "node scripts/build-macos-local.mjs",
+    "replace:macos-local": "node scripts/replace-macos-local.mjs",
     "release:macos": "node scripts/build-macos-release.mjs",
     "test:frontend": "npm run test:frontend:domain && npm run test:frontend:ui",
     "test:frontend:domain": "node --test tests/*.test.ts",

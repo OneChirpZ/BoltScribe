@@ -94,6 +94,81 @@ fn test_recording_session(id: &str, meter: AudioLevelMeter) -> RecordingSession 
 }
 
 #[test]
+fn escape_cancellation_reuses_capsule_cancellation_for_waiting_and_recording() {
+    for stage in [WorkflowStage::WaitingForSpeech, WorkflowStage::Recording] {
+        for recording_task_id in [Some("recording"), None] {
+            let state = AppState::default();
+            let meter = AudioLevelMeter::new();
+            let session = test_recording_session("recording", meter.clone());
+            let task = session.task.clone();
+            {
+                let mut runtime = state.runtime.lock().unwrap();
+                runtime.activity = WorkflowActivity::Recording(Box::new(session));
+                runtime.status.mode = WorkflowMode::Recording;
+                runtime.status.stage = stage.clone();
+            }
+
+            assert_eq!(state.recording_task_id().as_deref(), Some("recording"));
+            let status = cancel_workflow_state(&state, recording_task_id)
+                .unwrap()
+                .expect("active recording should be cancelled");
+
+            assert_eq!(status.mode, WorkflowMode::Idle);
+            assert_eq!(status.code, WorkflowStatusCode::Cancelled);
+            assert!(task.cancelled());
+            assert!(!meter.is_active());
+            assert_eq!(state.recording_task_id(), None);
+            assert!(!state.runtime.lock().unwrap().activity.is_active());
+        }
+    }
+}
+
+#[test]
+fn delayed_escape_does_not_cancel_a_new_recording_or_processing_task() {
+    let state = AppState::default();
+    let meter = AudioLevelMeter::new();
+    let session = test_recording_session("new-recording", meter.clone());
+    let task = session.task.clone();
+    state.runtime.lock().unwrap().activity = WorkflowActivity::Recording(Box::new(session));
+
+    assert!(cancel_workflow_state(&state, Some("old-recording"))
+        .unwrap()
+        .is_none());
+    assert_eq!(state.recording_task_id().as_deref(), Some("new-recording"));
+    assert!(!task.cancelled());
+    assert!(meter.is_active());
+
+    state.runtime.lock().unwrap().activity = WorkflowActivity::Processing(task.clone());
+    assert!(cancel_workflow_state(&state, Some("new-recording"))
+        .unwrap()
+        .is_none());
+    assert!(!task.cancelled());
+}
+
+#[test]
+fn escape_is_inactive_outside_recording() {
+    for activity in [
+        WorkflowActivity::Inactive,
+        WorkflowActivity::Starting(test_task("starting")),
+        WorkflowActivity::Processing(test_task("processing")),
+        WorkflowActivity::RetryingHistory {
+            record_id: "history".to_string(),
+        },
+    ] {
+        let state = AppState::default();
+        state.runtime.lock().unwrap().activity = activity;
+        assert_eq!(state.recording_task_id(), None);
+    }
+
+    let state = AppState::default();
+    state.runtime.lock().unwrap().status.mode = WorkflowMode::Error;
+    assert!(cancel_workflow_state(&state, Some("old-recording"))
+        .unwrap()
+        .is_none());
+    assert_eq!(state.status().mode, WorkflowMode::Error);
+}
+
+#[test]
 fn active_workflow_rejects_guarded_action() {
     for activity in [
         WorkflowActivity::Starting(test_task("starting")),

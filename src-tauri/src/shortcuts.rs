@@ -1,7 +1,25 @@
 use crate::{config, mouse_shortcuts, workflow};
 use std::collections::HashSet;
-use tauri::Wry;
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
+use tauri::{Manager, Wry};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut};
+
+// Explicit user bindings keep their idle behavior; the temporary cancellation
+// binding exists only while a recording session is active.
+static ESCAPE_CONFIGURED: AtomicBool = AtomicBool::new(false);
+
+fn escape_shortcut() -> Shortcut {
+    Shortcut::new(None, Code::Escape)
+}
+
+fn has_escape_binding(hotkeys: &[String]) -> bool {
+    hotkeys
+        .iter()
+        .any(|hotkey| hotkey.parse::<Shortcut>().ok() == Some(escape_shortcut()))
+}
 
 #[derive(Debug)]
 struct ValidatedHotkeys {
@@ -27,7 +45,10 @@ pub(crate) fn global_shortcut_plugin() -> tauri::plugin::TauriPlugin<Wry> {
     }
 
     match builder.with_shortcuts(hotkeys.iter().map(String::as_str)) {
-        Ok(builder) => builder.build(),
+        Ok(builder) => {
+            ESCAPE_CONFIGURED.store(has_escape_binding(&hotkeys), Ordering::SeqCst);
+            builder.build()
+        }
         Err(err) => {
             eprintln!("invalid hotkeys {hotkeys:?}, falling back to PageUp: {err}");
             tauri_plugin_global_shortcut::Builder::<Wry>::new()
@@ -44,6 +65,21 @@ pub(crate) fn apply_global_shortcuts(
     config: &config::AppConfig,
 ) -> Result<(), String> {
     let hotkeys = validate_hotkeys(config)?;
+    let (sender, receiver) = mpsc::channel();
+    let app_handle = app.clone();
+    // Keep a settings reload and a workflow-driven Escape update in the same
+    // main-thread queue, including the plugin's registration bookkeeping.
+    app.run_on_main_thread(move || {
+        let _ = sender.send(apply_validated_shortcuts(&app_handle, hotkeys));
+    })
+    .map_err(|err| err.to_string())?;
+    receiver.recv().map_err(|err| err.to_string())?
+}
+
+fn apply_validated_shortcuts(
+    app: &tauri::AppHandle<Wry>,
+    hotkeys: ValidatedHotkeys,
+) -> Result<(), String> {
     app.global_shortcut()
         .unregister_all()
         .map_err(|err| format!("Failed to unregister existing shortcuts: {err}"))?;
@@ -55,7 +91,40 @@ pub(crate) fn apply_global_shortcuts(
             .map_err(|err| format!("Failed to register shortcuts {:?}: {err}", hotkeys.keyboard))?;
     }
 
+    ESCAPE_CONFIGURED.store(has_escape_binding(&hotkeys.keyboard), Ordering::SeqCst);
+    sync_cancel_shortcut_on_main_thread(app)?;
     mouse_shortcuts::apply(app, &hotkeys.mouse)?;
+    Ok(())
+}
+
+pub(crate) fn sync_cancel_shortcut(app: &tauri::AppHandle<Wry>) {
+    let app_handle = app.clone();
+    if let Err(err) = app.run_on_main_thread(move || {
+        if let Err(err) = sync_cancel_shortcut_on_main_thread(&app_handle) {
+            eprintln!("failed to sync Escape cancellation shortcut: {err}");
+        }
+    }) {
+        eprintln!("failed to schedule Escape cancellation shortcut: {err}");
+    }
+}
+
+fn sync_cancel_shortcut_on_main_thread(app: &tauri::AppHandle<Wry>) -> Result<(), String> {
+    let recording = app
+        .try_state::<workflow::AppState>()
+        .and_then(|state| state.recording_task_id())
+        .is_some();
+    let escape = escape_shortcut();
+    let should_register = recording || ESCAPE_CONFIGURED.load(Ordering::SeqCst);
+    let registered = app.global_shortcut().is_registered(escape);
+    if should_register && !registered {
+        app.global_shortcut()
+            .register(escape)
+            .map_err(|err| err.to_string())?;
+    } else if !should_register && registered {
+        app.global_shortcut()
+            .unregister(escape)
+            .map_err(|err| err.to_string())?;
+    }
     Ok(())
 }
 
@@ -129,10 +198,27 @@ fn active_config_hotkeys(config: &config::AppConfig) -> Vec<String> {
 
 fn global_shortcut_handler(
     app: &tauri::AppHandle<Wry>,
-    _shortcut: &tauri_plugin_global_shortcut::Shortcut,
+    shortcut: &tauri_plugin_global_shortcut::Shortcut,
     event: tauri_plugin_global_shortcut::ShortcutEvent,
 ) {
     if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+        if *shortcut == escape_shortcut() {
+            let task_id = app
+                .try_state::<workflow::AppState>()
+                .and_then(|state| state.recording_task_id());
+            if let Some(task_id) = task_id {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(err) = workflow::cancel_recording_if_current(app, &task_id) {
+                        eprintln!("Escape cancellation failed: {err:?}");
+                    }
+                });
+                return;
+            }
+            if !ESCAPE_CONFIGURED.load(Ordering::SeqCst) {
+                return;
+            }
+        }
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             if let Err(err) = workflow::toggle_recording_from_app(app) {
@@ -155,6 +241,13 @@ mod tests {
         };
         config.normalize_hotkeys();
         config
+    }
+
+    #[test]
+    fn only_bare_escape_is_a_cancellation_binding() {
+        assert!(has_escape_binding(&["Escape".to_string()]));
+        assert!(!has_escape_binding(&["Ctrl+Escape".to_string()]));
+        assert!(!has_escape_binding(&["PageUp".to_string()]));
     }
 
     #[test]

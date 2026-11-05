@@ -193,6 +193,16 @@ impl WorkflowRuntime {
 }
 
 impl AppState {
+    pub(crate) fn recording_task_id(&self) -> Option<String> {
+        self.runtime
+            .lock()
+            .ok()
+            .and_then(|runtime| match &runtime.activity {
+                WorkflowActivity::Recording(session) => Some(session.task.id.clone()),
+                _ => None,
+            })
+    }
+
     pub(crate) fn recorder_ref(&self) -> &RecorderController {
         &self.recorder
     }
