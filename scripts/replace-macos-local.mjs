@@ -10,12 +10,17 @@ const repoDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const installedApp = "/Applications/BoltScribe.app";
 const builtApp = join(repoDir, "src-tauri/target/release/bundle/macos/BoltScribe.app");
 
-function command(file, args, options = {}) {
+export function command(file, args, options = {}) {
   const result = spawnSync(file, args, { cwd: repoDir, encoding: "utf8", ...options });
+  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
   if (result.error || result.status !== 0) {
-    throw new Error(`${basename(file)} 执行失败${result.status === null ? "" : `（${result.status}）`}`);
+    const reason = result.error?.message || output;
+    const detail = result.signal ? `信号 ${result.signal}` : `退出码 ${result.status ?? 1}`;
+    const error = new Error(`${basename(file)} 执行失败（${detail}）${reason ? `\n${reason}` : ""}`);
+    error.exitCode = result.status > 0 ? result.status : 1;
+    throw error;
   }
-  return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+  return output;
 }
 
 export function selectSigningIdentity(output, authority) {
@@ -130,7 +135,9 @@ async function main() {
   if (!existsSync(installedApp)) {
     throw new Error("未找到 /Applications/BoltScribe.app，无法确定要沿用的签名身份。");
   }
+  console.log("检查项目版本…");
   command("npm", ["run", "version:check"], { stdio: "inherit" });
+  console.log("校验已安装应用与钥匙串签名身份…");
   const previous = inspectApp(installedApp);
   const config = JSON.parse(readFileSync(join(repoDir, "src-tauri/tauri.conf.json"), "utf8"));
   if (previous.bundleId !== config.identifier) {
@@ -149,6 +156,7 @@ async function main() {
     env: { ...process.env, APPLE_SIGNING_IDENTITY: identity },
     stdio: "inherit",
   });
+  console.log("校验构建产物…");
   const built = inspectApp(builtApp);
   assertCompatibleApp(previous, built);
   if (built.version !== config.version) throw new Error("构建产物版本与项目不一致。");
@@ -156,9 +164,13 @@ async function main() {
   assertInstalledCopy(previous, inspectApp(installedApp));
   console.log("构建与签名校验通过，正在退出并替换旧应用…");
   await stopInstalledApp(previous.executable);
+  console.log("正在将旧应用移入废纸篓并安装新版…");
   const backup = installApp({
     source: builtApp, destination: installedApp, trashDir: join(homedir(), ".Trash"),
-    verify: (appPath) => assertInstalledCopy(built, inspectApp(appPath)),
+    verify: (appPath) => {
+      console.log("校验已安装新版…");
+      assertInstalledCopy(built, inspectApp(appPath));
+    },
   });
   console.log(`BoltScribe ${built.version} 已替换，签名与 SHA-256 校验通过。应用保持关闭。`);
   console.log(`旧应用已移到废纸篓：${backup}`);
@@ -166,8 +178,11 @@ async function main() {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((error) => {
-    console.error(error.message);
-    if (error.cause) console.error(error.cause.message);
-    process.exitCode = 1;
+    let exitCode;
+    for (let cause = error; cause; cause = cause.cause) {
+      console.error(cause.message);
+      exitCode ??= cause.exitCode;
+    }
+    process.exitCode = exitCode ?? 1;
   });
 }

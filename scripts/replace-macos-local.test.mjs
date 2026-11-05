@@ -3,7 +3,24 @@ import test from "node:test";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertCompatibleApp, assertInstalledCopy, installApp, selectSigningIdentity } from "./replace-macos-local.mjs";
+import { assertCompatibleApp, assertInstalledCopy, command, installApp, selectSigningIdentity } from "./replace-macos-local.mjs";
+
+test("failed commands preserve stderr and their original exit code", () => {
+  assert.throws(() => command(process.execPath, ["-e", "console.error('signature check failed'); process.exit(23)"]), (error) => {
+    assert.equal(error.exitCode, 23);
+    assert.match(error.message, /signature check failed/);
+    assert.match(error.message, /退出码 23/);
+    return true;
+  });
+});
+
+test("a missing executable reports the spawn error", () => {
+  assert.throws(() => command("/nonexistent/boltscribe-packaging-tool", []), (error) => {
+    assert.match(error.message, /ENOENT/);
+    assert.equal(error.exitCode, 1);
+    return true;
+  });
+});
 
 const authority = "Apple Development: Packaging Test";
 const identity = "A".repeat(40);
