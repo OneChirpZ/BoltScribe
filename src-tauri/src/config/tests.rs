@@ -8,6 +8,99 @@ use super::import::{CONFIG_EXPORT_FORMAT, CONFIG_EXPORT_VERSION};
 use super::*;
 
 #[test]
+fn legacy_config_leaves_learning_disabled_and_migrates_shared_credentials() {
+    let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+    value.as_object_mut().unwrap().remove("learning");
+    value.as_object_mut().unwrap().remove("model_services");
+    value["llm"]["endpoint"] = serde_json::json!("https://example.test/v1");
+    value["llm"]["api_key"] = serde_json::json!("live-only-placeholder");
+    value["llm"]["model"] = serde_json::json!("latency-sensitive-model");
+    let mut loaded: AppConfig = serde_json::from_value(value.clone()).unwrap();
+    loaded.migrate_legacy_model_services();
+    assert!(!loaded.learning.enabled);
+    assert!(!loaded.learning.can_observe());
+    assert!(loaded.validate().is_ok());
+    assert!(loaded.learning.llm.api_key.is_empty());
+    assert!(loaded.learning.llm.model.is_empty());
+    let imported = ConfigStore::import_json(&value.to_string()).unwrap();
+    assert_eq!(imported.config.learning, loaded.learning);
+    assert_eq!(
+        imported.config.resolve_llm(&imported.config.llm).api_key,
+        "live-only-placeholder"
+    );
+    assert_eq!(
+        imported.config.learning.llm.service_id,
+        imported.config.llm.service_id
+    );
+    assert!(imported.config.llm.api_key.is_empty());
+}
+
+#[test]
+fn independent_learning_model_survives_export_and_import() {
+    let mut config = AppConfig::default();
+    let original_live = config.llm.clone();
+    config.learning.enabled = true;
+    config.learning.llm.service_id = "custom".into();
+    config.model_services[2].endpoint = "https://models.example.test/v1".into();
+    config.model_services[2].api_key = "learning-only-placeholder".into();
+    config.learning.llm.model = "quality-model".into();
+    config.model_services[2].api_format = "responses".into();
+    config.learning.llm.thinking_effort = "high".into();
+    config.learning.llm.timeout_secs = 90;
+    config.validate().unwrap();
+    let imported = ConfigStore::import_json(&ConfigStore::export_json(&config).unwrap()).unwrap();
+    assert_eq!(imported.config.learning, config.learning);
+    assert_eq!(imported.config.llm, original_live);
+    assert_eq!(imported.config.model_services, config.model_services);
+    assert_eq!(
+        imported.config.learning_model().llm.api_key,
+        "learning-only-placeholder"
+    );
+    assert!(imported.report.unknown_fields.is_empty());
+    assert!(imported.report.invalid_fields.is_empty());
+}
+
+#[test]
+fn learning_requires_opt_in_and_a_configured_model() {
+    let mut config = AppConfig::default();
+    assert!(!config.learning.enabled);
+    assert!(config.validate().is_ok());
+    config.model_services[0].api_key = "shared-placeholder".into();
+    config.learning.llm.model = "quality-model".into();
+    assert!(!config.learning_model().can_observe());
+    config.learning.enabled = true;
+    assert!(config.learning_model().can_observe());
+
+    let mut partial = serde_json::to_value(&config).unwrap();
+    partial["learning"]
+        .as_object_mut()
+        .unwrap()
+        .remove("enabled");
+    let loaded: AppConfig = serde_json::from_value(partial.clone()).unwrap();
+    assert!(!loaded.learning.enabled);
+    let imported = ConfigStore::import_json(&partial.to_string()).unwrap();
+    assert!(!imported.config.learning.enabled);
+
+    config.learning.llm.model.clear();
+    assert!(config.validate().is_ok());
+    assert!(!config.learning_model().can_observe());
+}
+
+#[test]
+fn explicit_learning_setting_survives_load_export_and_import() {
+    for enabled in [false, true] {
+        let mut config = AppConfig::default();
+        config.learning.enabled = enabled;
+        let loaded: AppConfig =
+            serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
+        assert_eq!(loaded.learning.enabled, enabled);
+        let imported =
+            ConfigStore::import_json(&ConfigStore::export_json(&config).unwrap()).unwrap();
+        assert_eq!(imported.config.learning.enabled, enabled);
+    }
+}
+
+#[test]
 fn default_config_uses_mvp_providers() {
     let config = AppConfig::default();
     assert_eq!(config.hotkey, "PageUp");
@@ -19,8 +112,11 @@ fn default_config_uses_mvp_providers() {
     assert!(config.system.show_menu_bar_icon);
     assert!(!config.system.fn_long_press_enabled);
     assert_eq!(config.system.fn_long_press_duration_ms, 200);
-    assert_eq!(config.llm.endpoint, "https://api.openai.com/v1");
-    assert_eq!(config.llm.api_format, "responses");
+    assert_eq!(
+        config.resolve_llm(&config.llm).endpoint,
+        "https://api.openai.com/v1"
+    );
+    assert_eq!(config.resolve_llm(&config.llm).api_format, "responses");
     assert!(config.asr.app_key.is_empty());
     assert!(config.asr.access_key.is_empty());
     assert!(config.llm.api_key.is_empty());
@@ -704,15 +800,15 @@ fn llm_race_targets_and_removed_volc_models_are_normalized() {
     ];
     config.llm.race_targets = vec![
         RaceModelTarget {
-            provider: "volc_ark".to_string(),
+            service_id: "volc_ark".to_string(),
             model: "doubao-seed-1-6-251015".to_string(),
         },
         RaceModelTarget {
-            provider: "volc_ark".to_string(),
+            service_id: "volc_ark".to_string(),
             model: "doubao-seed-2-0-mini-260428".to_string(),
         },
         RaceModelTarget {
-            provider: "volc_ark".to_string(),
+            service_id: "volc_ark".to_string(),
             model: "doubao-seed-2-0-mini-260428".to_string(),
         },
     ];
@@ -729,7 +825,7 @@ fn llm_race_targets_and_removed_volc_models_are_normalized() {
     assert_eq!(
         config.llm.race_targets,
         vec![RaceModelTarget {
-            provider: "volc_ark".to_string(),
+            service_id: "volc_ark".to_string(),
             model: "doubao-seed-2-0-mini-260428".to_string(),
         }]
     );
@@ -894,6 +990,10 @@ fn config_export_uses_versioned_envelope() {
 #[test]
 fn config_import_fills_missing_fields_and_reports_unknown_fields() {
     let mut config_value = serde_json::to_value(AppConfig::default()).unwrap();
+    config_value
+        .as_object_mut()
+        .unwrap()
+        .remove("model_services");
     config_value.as_object_mut().unwrap().remove("hotkeys");
     config_value["llm"]
         .as_object_mut()
@@ -967,8 +1067,14 @@ fn config_import_fills_missing_fields_and_reports_unknown_fields() {
         result.config.asr.connection_retry,
         AsrConnectionRetryConfig::default()
     );
-    assert_eq!(result.config.llm.provider_settings.len(), 1);
-    assert_eq!(result.config.llm.provider_settings[0].provider, "custom");
+    let custom = result
+        .config
+        .model_services
+        .iter()
+        .find(|s| s.provider == "custom")
+        .unwrap();
+    assert_eq!(custom.api_key, "secret");
+    assert!(result.config.llm.provider_settings.is_empty());
 }
 
 #[test]

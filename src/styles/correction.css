@@ -45,10 +45,6 @@
   min-height: 0;
 }
 
-.correction-requirements-editor {
-  height: 100%;
-}
-
 textarea.correction-fill-editor {
   width: 100%;
   height: 100%;
@@ -114,31 +110,6 @@ textarea.correction-bulk-editor {
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-}
-
-.dictionary-items-panel {
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.dictionary-items-panel > .dictionary-term-section {
-  grid-template-rows: auto auto;
-  flex: 0 0 auto;
-}
-
-.dictionary-items-panel > .disabled-dictionary-section {
-  max-height: none;
-  min-height: 0;
-}
-
-.dictionary-items-panel .dictionary-chip-list {
-  flex: 0 0 auto;
-  overflow: visible;
-}
-
-.dictionary-items-panel .dictionary-empty-state {
-  min-height: 88px;
 }
 
 .correction-format-help,
@@ -207,10 +178,8 @@ textarea.correction-bulk-editor {
 
 .dictionary-term-section {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
-  min-height: 0;
 }
 
 .dictionary-term-section-heading {
@@ -231,10 +200,6 @@ textarea.correction-bulk-editor {
 }
 
 .disabled-dictionary-section {
-  grid-template-rows: auto auto minmax(0, 1fr);
-  flex: 0 1 auto;
-  max-height: 42%;
-  min-height: 104px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px;
@@ -245,21 +210,13 @@ textarea.correction-bulk-editor {
   display: flex;
   align-content: flex-start;
   align-items: flex-start;
-  flex: 1 1 auto;
   flex-wrap: wrap;
   gap: 8px;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: 2px 4px 2px 0;
+  padding-block: 2px;
 }
 
 .dictionary-chip-list > .structured-empty {
   flex: 1 0 100%;
-}
-
-.disabled-dictionary-list.empty {
-  overflow-y: hidden;
 }
 
 .dictionary-empty-state {
@@ -274,7 +231,7 @@ textarea.correction-bulk-editor {
   max-width: min(100%, 460px);
   min-height: 30px;
   border: 1px solid rgba(36, 152, 255, 0.3);
-  border-radius: 999px;
+  border-radius: 15px;
   padding: 3px 4px 3px 10px;
   color: var(--text-soft);
   background: rgba(36, 152, 255, 0.065);
@@ -292,9 +249,8 @@ textarea.correction-bulk-editor {
 }
 
 .dictionary-chip-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .dictionary-chip-toggle {
@@ -613,3 +569,52 @@ textarea.prompt-workspace-textarea {
 .correction-variable-entry .structured-row-warning {
   grid-column: 1 / -1;
 }
+
+.correction-subpage-body-dictionary {
+  overflow: visible;
+}
+.correction-page-dictionary {
+  grid-template: auto auto / minmax(0, 1fr);
+  overflow: visible;
+}
+.dictionary-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.dictionary-source-card {
+  min-width: 0;
+  background: var(--surface-input);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.dictionary-source-card h2 { font-size: 16px; margin: 0; }
+.dictionary-source-card .correction-line-editor { height: auto; grid-template: auto auto / minmax(0, 1fr); }
+.dictionary-source-card .correction-editor-toolbar { flex-wrap: wrap; }
+.dictionary-source-card .correction-mode-switch { margin-left: auto; }
+.dictionary-source-card .dictionary-add-form { width: 100%; border: 0; padding: 0; background: transparent; }
+.dictionary-source-card .correction-bulk-panel,
+.dictionary-source-card .correction-fill-field { grid-template: auto auto / minmax(0, 1fr); }
+/* Mirror soft wraps and the last empty line so the outer page also scrolls
+   in bulk mode, including in WebViews without field-sizing: content. */
+[data-dictionary-text]::after,
+[data-dictionary-text] > textarea.correction-bulk-editor {
+  grid-area: 2 / 1;
+  min-width: 0;
+  min-height: 9rem;
+  padding: 11px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[data-dictionary-text]::after {
+  content: attr(data-dictionary-text) " ";
+  visibility: hidden;
+  border: 1px solid transparent;
+}
+[data-dictionary-text] > textarea.correction-bulk-editor { height: auto; overflow: hidden; }
+.dictionary-source-card .dictionary-items-panel .dictionary-empty-state { min-height: 44px; }
+.prompt-tabs { flex-wrap: wrap; }
+.prompt-template-fields { display: flex; flex-direction: column; height: 100%; gap: 12px; overflow: auto; }
+.prompt-template-fields > .correction-fill-field { flex: 1; min-height: 8rem; }
+.prompt-requirements-field { display: grid; gap: 6px; }
+.prompt-requirements-field textarea { min-height: 3.5rem; resize: vertical; }
+.prompt-template-fields > button { align-self: start; }

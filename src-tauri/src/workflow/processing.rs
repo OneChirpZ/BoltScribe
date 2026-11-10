@@ -19,6 +19,7 @@ pub fn retry_history_record(state: &AppState, record_id: &str) -> Result<History
         TranscriptionOutcome::NoSpeech => return Err(anyhow!("ASR returned empty text")),
     };
     let asr_duration_ms = asr_started_at.elapsed().as_millis() as u64;
+    let config = with_learned_corrections(config, &asr_output.text);
     let mut updated = build_retried_record(record, asr_output, &config, asr_duration_ms)?;
     updated.total_duration_ms = total_started_at.elapsed().as_millis();
     HistoryStore::replace(&updated)?;
@@ -215,6 +216,7 @@ fn process_recording(
         return Ok(ProcessingOutcome::Cancelled);
     }
 
+    let config = with_learned_corrections(config, &raw_text);
     let correction_started_at = Instant::now();
     let (corrected_text, correction_error, correction_logs) =
         correct_recording_text(&raw_text, &config);
@@ -244,9 +246,22 @@ fn process_recording(
     }
 
     let injection_started_at = Instant::now();
+    // Capture before our own keyboard events, then verify after injection.
+    // Observation owns its native worker and never keeps the workflow busy.
+    // The capture service uses the current setting, not the recording's config
+    // snapshot: switching learning off during transcription must take effect now.
+    let learning_app = app.clone();
+    let observation = crate::learning::observation::prepare(
+        recorded.id.clone(),
+        pasted_text.clone(),
+        move |sample| crate::learning::submit(learning_app, sample),
+    );
     let injection_error = injector::paste_text(&pasted_text)
         .err()
         .map(|err| err.to_string());
+    if let Some(observation) = observation {
+        observation.injected(injection_error.is_none() && !task.cancelled());
+    }
     log_timing("text injection", injection_started_at, total_started_at);
     if task.cancelled() {
         recorded.discard()?;

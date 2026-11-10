@@ -11,6 +11,10 @@ import type {
   DeleteHistoryResult,
   HistoryRecord,
   InputStats,
+  LearnedEntry,
+  LearningActivity,
+  LearningActivityPage,
+  LearningStatus,
   RecordingCleanupPreview,
   RecordingCleanupResult,
   RecordingCleanupUnit,
@@ -22,7 +26,22 @@ import type {
 import type { AppApi } from "./contracts";
 
 export const nativeAppApi = {
+  learning: {
+    loadActivity: (limit: number, offset = 0, recordId?: string) =>
+      invoke<LearningActivityPage>("load_learning_activity", { limit, offset, recordId: recordId ?? null }),
+    loadSource: (recordId: string, activityId?: string) =>
+      invoke<LearningActivity | null>("load_learning_activity_source", { recordId, activityId: activityId ?? null }),
+    loadEntries: () => invoke<LearnedEntry[]>("load_learned_corrections"),
+    deleteEntry: (id: string) => invoke<LearnedEntry[]>("delete_learned_correction", { id }),
+    setEntryEnabled: (id: string, enabled: boolean) =>
+      invoke<LearnedEntry[]>("set_learned_correction_enabled", { id, enabled }),
+    getStatus: () => invoke<LearningStatus>("get_learning_status"),
+    listenUpdated: (handler: () => void) => listen("learning://updated", handler),
+    listenOpenRequested: (handler: () => void) => listen("learning://open", handler),
+    takeOpenRequest: () => invoke<boolean>("take_learning_open_request"),
+  },
   config: {
+    listServiceModels: (serviceId: string) => invoke<string[]>("list_service_models", { serviceId }),
     loadConfig: () => invoke<AppConfig>("load_config"),
     saveConfig: (
       config: AppConfig,
@@ -50,6 +69,7 @@ export const nativeAppApi = {
       listen<WorkflowStatus>("workflow://status", (event) => handler(event.payload)),
   },
   history: {
+    loadRecord: (id: string) => invoke<HistoryRecord | null>("load_history_record", { id }),
     loadHistory: (limit: number, offset = 0) => invoke<HistoryRecord[]>("load_history", { limit, offset }),
     deleteHistoryRecord: (id: string) => invoke<DeleteHistoryResult>("delete_history_record", { id }),
     retryHistoryRecord: (id: string) => invoke<HistoryRecord>("retry_history_record", { id }),

@@ -13,6 +13,8 @@ export default function HistoryRecordsPage({
   onCopyHistory,
   onRetryHistory,
   onDeleteHistory,
+  onOpenLearning,
+  language,
   canRetryHistory,
   canDeleteHistory,
   text,
@@ -27,6 +29,8 @@ export default function HistoryRecordsPage({
   onCopyHistory: (text: string, label: string) => void;
   onRetryHistory: (record: HistoryRecord) => Promise<void>;
   onDeleteHistory: (record: HistoryRecord) => Promise<void>;
+  onOpenLearning?: (id: string) => void;
+  language?: string;
   canRetryHistory: boolean;
   canDeleteHistory: boolean;
   text: TextBundle;
@@ -40,6 +44,8 @@ export default function HistoryRecordsPage({
         onCopy={onCopyHistory}
         onRetry={onRetryHistory}
         onDelete={onDeleteHistory}
+        onOpenLearning={onOpenLearning}
+        language={language}
         canRetry={canRetryHistory}
         canDelete={canDeleteHistory}
         text={text}

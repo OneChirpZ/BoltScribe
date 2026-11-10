@@ -180,3 +180,27 @@ pub(super) fn history_read_paths() -> Result<Vec<PathBuf>> {
 
     Ok(paths)
 }
+
+/// Resolve a source record by identifier without loading all history into memory.
+pub(super) fn find_from_paths(paths: &[PathBuf], record_id: &str) -> Result<Option<HistoryRecord>> {
+    for path in paths {
+        let file = match fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error).context("Cannot open source history"),
+        };
+        let mut found = None;
+        for line in BufReader::new(file).lines() {
+            let line = line?;
+            if let Ok(record) = serde_json::from_str::<HistoryRecord>(&line) {
+                if record.id == record_id && !should_hide_history_record(&record) {
+                    found = Some(record);
+                }
+            }
+        }
+        if found.is_some() {
+            return Ok(found);
+        }
+    }
+    Ok(None)
+}

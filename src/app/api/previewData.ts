@@ -5,10 +5,14 @@ import type {
   DataDirInfo,
   HistoryRecord,
   InputStats,
+  LearnedEntry,
+  LearningActivity,
   VadTestStatus,
   WorkflowStatus,
 } from "../../types";
 import { defaultAsrConnectionRetry } from "../../domain/asrConnectionRetry";
+import { defaultModelServices } from "../../domain/modelServices";
+import { defaultLearningConfig } from "../../domain/learning";
 
 export interface BrowserPreviewState {
   status: WorkflowStatus;
@@ -21,6 +25,8 @@ export interface BrowserPreviewState {
   history: HistoryRecord[];
   stats: InputStats;
   recordingBytes: number;
+  learnedEntries: LearnedEntry[];
+  learningActivity: LearningActivity[];
 }
 
 export function clonePreview<T>(value: T): T {
@@ -41,10 +47,17 @@ export function createBrowserPreviewState(locationHref = browserLocationHref()):
     is_default: true,
     cleanup_warning: null,
   };
+  const config = previewConfig(language, overlayScale);
+  const activeLearning = location.searchParams.get("preview-learning") === "active";
+  if (activeLearning) {
+    config.learning.enabled = true;
+    config.learning.llm.model = "learning-model";
+    config.model_services[0].api_key = "preview-key";
+  }
 
   return {
     status: initialBrowserPreviewStatus(location),
-    config: previewConfig(language, overlayScale),
+    config,
     vadTestStatus: {
       mode: "idle",
       raw_voice_active: false,
@@ -77,7 +90,32 @@ export function createBrowserPreviewState(locationHref = browserLocationHref()):
     history: previewHistory(language),
     stats: previewStats(),
     recordingBytes: 256 * 1024,
+    learnedEntries: [
+      { id: "preview-learning-1", term: "Kubernetes", from: "库伯内特斯", created_at: "2026-11-05T08:30:00Z", record_id: "1", enabled: true },
+      { id: "preview-learning-2", term: "DemoTerm", from: "Demo Term", created_at: "2026-11-05T07:10:00Z", record_id: "2", enabled: false },
+    ],
+    learningActivity: previewLearningActivity(activeLearning),
   };
+}
+
+function previewLearningActivity(active: boolean): LearningActivity[] {
+  const base: LearningActivity = {
+    id: "preview-activity-1", record_id: "1", started_at: "2026-11-05T08:29:30Z", updated_at: "2026-11-05T08:30:00Z",
+    finished_at: "2026-11-05T08:30:00Z", state: "learned", reason: null, model: "learning-model", service_id: "openai", error: null,
+    entries: [{ id: "preview-learning-1", term: "Kubernetes", from: "库伯内特斯", created_at: "2026-11-05T08:30:00Z", record_id: "1", enabled: true }],
+  };
+  const history: LearningActivity[] = [
+    { ...base, edited_text: "用 Kubernetes 管理服务。", model_output: '{"terms":[{"term":"Kubernetes","term_common":false,"from":"库伯内特斯","from_common":false}]}' },
+    { ...base, id: "preview-activity-2", record_id: "2", started_at: "2026-11-05T07:09:30Z", updated_at: "2026-11-05T07:10:00Z", finished_at: "2026-11-05T07:10:00Z", state: "no_terms", reason: "no_candidates", entries: [], model_output: '{"terms":[]}' },
+    { ...base, id: "preview-activity-3", record_id: "3", started_at: "2026-11-05T07:05:30Z", updated_at: "2026-11-05T07:06:00Z", finished_at: "2026-11-05T07:06:00Z", state: "failed", reason: "analysis_failed", error: "Learning model request timed out", entries: [] },
+    { ...base, id: "preview-activity-4", record_id: "3", started_at: "2026-11-05T07:03:30Z", updated_at: "2026-11-05T07:04:00Z", finished_at: "2026-11-05T07:04:00Z", state: "no_change", reason: "no_change", entries: [] },
+  ];
+  if (!active) return history;
+  return [
+    { ...base, id: "preview-activity-observing", started_at: new Date().toISOString(), updated_at: new Date().toISOString(), finished_at: null, state: "observing", entries: [] },
+    { ...base, id: "preview-activity-analyzing", record_id: "2", started_at: new Date(Date.now() - 8_000).toISOString(), updated_at: new Date(Date.now() - 6_000).toISOString(), finished_at: null, state: "analyzing", entries: [] },
+    ...history,
+  ];
 }
 
 function browserLocationHref() {
@@ -245,18 +283,15 @@ function previewConfig(language: "zh-CN" | "en-US", overlayScale: number): AppCo
       language,
       connection_retry: { ...defaultAsrConnectionRetry },
     },
+    model_services: defaultModelServices().map((service) => service.id === "openai" ? { ...service, api_key: "preview-api-key", api_format: "chat_completions" } : service),
     llm: {
-      provider: "openai",
-      api_format: "chat_completions",
-      endpoint: "https://api.openai.com/v1",
-      api_key: "preview-api-key",
+      service_id: "openai",
       model: "gpt-5.4-mini",
-      provider_settings: [],
       race_enabled: true,
       race_models: ["gpt-5.4-mini", "doubao-seed-2-0-lite-260428"],
       race_targets: [
-        { provider: "openai", model: "gpt-5.4-mini" },
-        { provider: "volc_ark", model: "doubao-seed-2-0-lite-260428" },
+        { service_id: "openai", model: "gpt-5.4-mini" },
+        { service_id: "volc_ark", model: "doubao-seed-2-0-lite-260428" },
       ],
       system_prompt: language === "en-US"
         ? "Polish the dictated text without changing its meaning."
@@ -267,7 +302,6 @@ function previewConfig(language: "zh-CN" | "en-US", overlayScale: number): AppCo
       thinking_enabled: false,
       thinking_effort: "none",
       max_output_tokens: 4000,
-      model_presets: [],
     },
     correction: {
       enabled: true,
@@ -282,6 +316,7 @@ function previewConfig(language: "zh-CN" | "en-US", overlayScale: number): AppCo
       correction_rules: [],
       dictionary: [],
     },
+    learning: defaultLearningConfig(),
     ui: {
       app_language: language,
       theme: "system",

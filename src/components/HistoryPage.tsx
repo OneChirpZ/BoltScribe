@@ -14,6 +14,8 @@ export default function HistoryPage({
   canRetry,
   canDelete,
   onOpenFullHistory,
+  onOpenLearning,
+  language = "zh-CN",
   footer,
   text,
 }: {
@@ -26,6 +28,8 @@ export default function HistoryPage({
   canRetry: boolean;
   canDelete: boolean;
   onOpenFullHistory?: () => void;
+  onOpenLearning?: (id: string) => void;
+  language?: string;
   footer?: ReactNode;
   text: TextBundle;
 }) {
@@ -92,6 +96,7 @@ export default function HistoryPage({
                   {!record.audio_path ? <span className="history-audio-cleared">{text.history.audioCleared}</span> : null}
                 </div>
                 <div className="history-actions">
+                  {onOpenLearning ? <button className="secondary small" type="button" onClick={() => onOpenLearning(record.id)}>{language === "en-US" ? "Learning activity" : "学习记录"}</button> : null}
                   <button className="secondary small history-action-log" type="button" onClick={() => setLogRecord(record)}>{text.history.viewLog}</button>
                   {retryable ? (
                     <button className="secondary small history-action-retry" type="button" disabled={!canRetry || mutating} onClick={() => { void requestRetry(record); }}>

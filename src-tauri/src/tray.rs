@@ -2,14 +2,17 @@ use crate::{
     config, windows,
     workflow_status::{WorkflowMode, WorkflowStatus},
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, Wry};
 #[cfg(target_os = "windows")]
 use {
-    std::sync::atomic::{AtomicBool, AtomicU64, Ordering},
+    std::sync::atomic::AtomicU64,
     std::time::Duration,
     tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent},
 };
@@ -17,14 +20,48 @@ use {
 const MENU_SHOW_MAIN: &str = "show_main_window";
 const MENU_TOGGLE_VOICE_INPUT: &str = "toggle_voice_input";
 const MENU_TOGGLE_LLM_CORRECTION: &str = "toggle_llm_correction";
+const MENU_SHOW_LEARNING: &str = "show_learning";
 const MENU_QUIT: &str = "quit_app";
 const TRAY_ID: &str = "main";
+static LEARNING_OPEN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 type ToggleVoiceInput = Arc<dyn Fn(AppHandle<Wry>) + Send + Sync>;
 
 #[derive(Default)]
 pub(crate) struct TrayState {
     voice_input_mode: Mutex<WorkflowMode>,
+    learning: Mutex<LearningMenuState>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct LearningMenuState {
+    observing: usize,
+    queued: usize,
+    analyzing: usize,
+}
+
+impl LearningMenuState {
+    fn active(self) -> bool {
+        self.observing + self.queued + self.analyzing > 0
+    }
+
+    fn label(self) -> String {
+        let mut stages = Vec::new();
+        if self.observing > 0 {
+            stages.push(format!("观察中 {}", self.observing));
+        }
+        if self.analyzing > 0 {
+            stages.push(format!("分析中 {}", self.analyzing));
+        }
+        if self.queued > 0 {
+            stages.push(format!("等待分析 {}", self.queued));
+        }
+        if stages.is_empty() {
+            "自学习".to_string()
+        } else {
+            format!("自学习 · {}", stages.join(" · "))
+        }
+    }
 }
 
 pub(crate) fn setup(
@@ -58,6 +95,13 @@ pub(crate) fn setup(
                     eprintln!("failed to toggle LLM correction from tray: {err}");
                 }
             }
+            MENU_SHOW_LEARNING => {
+                LEARNING_OPEN_REQUESTED.store(true, Ordering::Release);
+                if let Err(err) = windows::show_main_window(app) {
+                    eprintln!("failed to show learning window from tray: {err:?}");
+                }
+                let _ = app.emit("learning://open", ());
+            }
             MENU_QUIT => app.exit(0),
             _ => {}
         });
@@ -76,10 +120,16 @@ pub(crate) fn setup(
         });
     }
 
-    builder = builder.icon(tray_template_icon()).icon_as_template(true);
+    builder = builder
+        .icon(tray_template_icon(false))
+        .icon_as_template(true);
 
     builder.build(app)?;
     sync_menu_bar_visibility(app, show_menu_bar_icon)
+}
+
+pub(crate) fn take_learning_open_request() -> bool {
+    LEARNING_OPEN_REQUESTED.swap(false, Ordering::AcqRel)
 }
 
 pub(crate) fn sync_menu_bar_visibility(app: &AppHandle<Wry>, visible: bool) -> tauri::Result<()> {
@@ -135,6 +185,40 @@ pub(crate) fn sync_voice_input_label(
     Ok(())
 }
 
+pub(crate) fn sync_learning_status(
+    app: &AppHandle<Wry>,
+    observing: usize,
+    queued: usize,
+    analyzing: usize,
+) -> tauri::Result<()> {
+    let learning = LearningMenuState {
+        observing,
+        queued,
+        analyzing,
+    };
+    if let Some(state) = app.try_state::<TrayState>() {
+        if let Ok(mut current) = state.learning.lock() {
+            *current = learning;
+        }
+    }
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        tray.set_icon(Some(tray_template_icon(learning.active())))?;
+        tray.set_tooltip(Some(format!("BoltScribe · {}", learning.label())))?;
+        tray.set_menu(Some(build_menu(
+            app,
+            current_llm_correction_enabled(),
+            current_voice_input_menu_state(app),
+        )?))?;
+    }
+    Ok(())
+}
+
+fn current_learning_menu_state(app: &AppHandle<Wry>) -> LearningMenuState {
+    app.try_state::<TrayState>()
+        .and_then(|state| state.learning.lock().ok().map(|learning| *learning))
+        .unwrap_or_default()
+}
+
 fn build_menu(
     app: &tauri::AppHandle<Wry>,
     llm_correction_enabled: bool,
@@ -155,6 +239,13 @@ fn build_menu(
         true,
         None::<&str>,
     )?;
+    let learning = MenuItem::with_id(
+        app,
+        MENU_SHOW_LEARNING,
+        current_learning_menu_state(app).label(),
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     Menu::with_items(
@@ -163,6 +254,7 @@ fn build_menu(
             &show_main,
             &toggle_voice_input,
             &toggle_llm,
+            &learning,
             &separator,
             &quit,
         ],
@@ -343,7 +435,7 @@ fn windows_single_click_delay() -> Duration {
     Duration::from_millis(u64::from(double_click_ms) + 50)
 }
 
-fn tray_template_icon() -> Image<'static> {
+fn tray_template_icon(learning_active: bool) -> Image<'static> {
     const SIZE: usize = 64;
     const SUPERSAMPLE: usize = 4;
     const BOLT: [(f64, f64); 6] = [
@@ -363,7 +455,9 @@ fn tray_template_icon() -> Image<'static> {
                 for sx in 0..SUPERSAMPLE {
                     let px = x as f64 + (sx as f64 + 0.5) / SUPERSAMPLE as f64;
                     let py = y as f64 + (sy as f64 + 0.5) / SUPERSAMPLE as f64;
-                    if point_in_polygon(px, py, &BOLT) {
+                    let marker = learning_active
+                        && (px - 53.0).powi(2) + (py - 52.0).powi(2) <= 6.0_f64.powi(2);
+                    if point_in_polygon(px, py, &BOLT) || marker {
                         hits += 1;
                     }
                 }

@@ -19,6 +19,7 @@ impl AppConfig {
         self.normalize_hotkeys();
         self.asr.normalize();
         self.audio.normalize();
+        super::model_services::normalize_services(&mut self.model_services);
         self.ui.recording_overlay_scale = self.ui.recording_overlay_scale.clamp(0.25, 1.0);
         self.ui.recording_overlay_snap_range_percent =
             self.ui.recording_overlay_snap_range_percent.clamp(50, 500);
@@ -32,7 +33,9 @@ impl AppConfig {
         self.llm.provider_settings = normalize_provider_settings(&self.llm.provider_settings);
         self.llm.race_models = normalize_string_list(&self.llm.race_models);
         self.llm.race_targets = normalize_race_targets(&self.llm.race_targets);
-        if self.llm.provider == "volc_ark" && is_removed_volc_model(&self.llm.model) {
+        if self.resolve_llm(&self.llm).provider == "volc_ark"
+            && is_removed_volc_model(&self.llm.model)
+        {
             self.llm.model = "doubao-seed-2-0-lite-260428".to_string();
         }
         if self.correction.prompt_template == previous_default_prompt_template()
@@ -52,7 +55,15 @@ impl AppConfig {
     }
 
     pub fn validate(&self) -> Result<()> {
-        self.audio.output_volume_ducking.validate()
+        self.audio.output_volume_ducking.validate()?;
+        let mut ids = std::collections::HashSet::new();
+        for service in &self.model_services {
+            anyhow::ensure!(
+                !service.id.is_empty() && ids.insert(&service.id),
+                "Model service IDs must be unique and nonempty"
+            );
+        }
+        self.learning_model().validate()
     }
 
     pub fn hotkey_slots(&self) -> Vec<String> {
@@ -298,7 +309,7 @@ pub(super) fn normalize_provider_settings(
 pub(super) fn normalize_race_targets(targets: &[RaceModelTarget]) -> Vec<RaceModelTarget> {
     let mut normalized = Vec::new();
     for target in targets {
-        let provider = target.provider.trim();
+        let provider = target.service_id.trim();
         let model = target.model.trim();
         if provider.is_empty()
             || model.is_empty()
@@ -308,12 +319,12 @@ pub(super) fn normalize_race_targets(targets: &[RaceModelTarget]) -> Vec<RaceMod
         }
         if normalized
             .iter()
-            .any(|item: &RaceModelTarget| item.provider == provider && item.model == model)
+            .any(|item: &RaceModelTarget| item.service_id == provider && item.model == model)
         {
             continue;
         }
         normalized.push(RaceModelTarget {
-            provider: provider.to_string(),
+            service_id: provider.to_string(),
             model: model.to_string(),
         });
     }

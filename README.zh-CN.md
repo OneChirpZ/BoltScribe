@@ -11,7 +11,7 @@
 <p align="center">
   <a href="README.md">English README</a>
   ·
-  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.6.0">最新发布</a>
+  <a href="https://github.com/OneChirpZ/BoltScribe/releases/latest">最新发布</a>
   ·
   <a href="#功能亮点">功能亮点</a>
   ·
@@ -55,12 +55,10 @@ BoltScribe 可以在桌面任意位置把语音变成可直接使用的文本。
 
 ### 下载
 
-最新公开版本是 [BoltScribe v1.6.0](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.6.0)。
-
 当前可下载版本：
 
-- macOS Apple Silicon：`BoltScribe_1.6.0_aarch64.dmg`
-- Windows x64：`BoltScribe_1.6.0_x64-setup.exe`
+- macOS Apple Silicon：[BoltScribe v1.7.0](https://github.com/OneChirpZ/BoltScribe/releases/download/v1.7.0/BoltScribe_1.7.0_aarch64.dmg)
+- Windows x64：[BoltScribe v1.6.0](https://github.com/OneChirpZ/BoltScribe/releases/download/v1.6.0/BoltScribe_1.6.0_x64-setup.exe)
 
 macOS 安装包使用 ad-hoc 签名且未经 Apple 公证；Windows 安装包未进行代码签名。首次打开时，系统可能显示安全提示。
 
@@ -81,6 +79,8 @@ macOS 安装包使用 ad-hoc 签名且未经 Apple 公证；Windows 安装包未
 
 可以直接在应用中调整转写语言、AI 模型、词典、易错词规则、麦克风优先级、无人声保护、浮窗大小与位置、输出音量行为、历史保留和启动选项。
 
+自学习是 macOS Beta 功能，默认关闭。选好学习模型后，可在「LLM 纠错 → 自学习」开启。BoltScribe 会对照本轮语音上屏后的文字和你的修改，提取下次可能用到的纠错词。
+
 OpenAI 和火山方舟的 Fast / 低延迟模式默认开启，可在模型设置中关闭。高速档位费用更高，火山方舟需要先为所用模型开通低延迟服务。历史记录的调用日志会记录请求档位与实际响应档位。
 
 ## 权限
@@ -89,7 +89,7 @@ BoltScribe 需要麦克风权限来录音。在 macOS 上，它还需要辅助�
 
 ## 隐私与本地数据
 
-历史、录音、设置和输入统计保存在本机。可以在设置中移动数据目录并控制保留范围。语音和文本只会发送给你配置的转写与文本整理服务；本地麦克风灵敏度测试不会调用这些服务。
+历史、录音、设置和输入统计保存在本机。可以在设置中移动数据目录并控制保留范围。转写和文本整理使用你配置的服务。启用自学习后，BoltScribe 会将本轮上屏文字和手动修改后的版本发给你配置的学习模型。本地麦克风灵敏度测试不调用这些服务。
 
 ## 许可证
 

@@ -10,6 +10,7 @@ describe("browser preview AppApi", () => {
     const domains = Object.keys(nativeAppApi) as Array<keyof AppApi>;
 
     expect(domains).toEqual([
+      "learning",
       "config",
       "overlay",
       "workflow",
@@ -36,6 +37,23 @@ describe("browser preview AppApi", () => {
     saved.config.ui.app_language = "zh-CN";
     expect(saved.warnings).toEqual([]);
     expect((await api.config.loadConfig()).ui.app_language).toBe("en-US");
+  });
+
+  it("paginates learning history while keeping active tasks and source lookup available", async () => {
+    const api = createBrowserPreviewAppApi({ appVersion: "test-version", locationHref: "http://localhost/?preview-learning=active" });
+    const first = await api.learning.loadActivity(1);
+    expect(first.active.map((item) => item.state)).toEqual(["observing", "analyzing"]);
+    expect(first.history).toHaveLength(1);
+    expect(first.has_more).toBe(true);
+    first.history[0].entries[0].term = "modified";
+    expect((await api.learning.loadActivity(1)).history[0].entries[0].term).toBe("Kubernetes");
+    const second = await api.learning.loadActivity(1, 1);
+    expect(second.active).toHaveLength(2);
+    expect(second.history[0].state).toBe("no_terms");
+    const filtered = await api.learning.loadActivity(30, 0, "1");
+    expect([...filtered.active, ...filtered.history].every((item) => item.record_id === "1")).toBe(true);
+    expect((await api.history.loadRecord("1"))?.id).toBe("1");
+    expect(await api.history.loadRecord("missing")).toBeNull();
   });
 
   it("shares workflow state across workflow and audio domains", async () => {

@@ -7,12 +7,21 @@ import { useNoticeController } from "./useNoticeController";
 import { usePermissionsController } from "./usePermissionsController";
 import { useSystemSettingsController } from "./useSystemSettingsController";
 import { useWorkflowController } from "./useWorkflowController";
+import { useLearningActivityController } from "./useLearningActivityController";
 
 export function useMainAppController() {
   const notice = useNoticeController();
   const [busy, setBusy] = useState(false);
   const workflow = useWorkflowController({ api: appApi, setBusy, setNotice: notice.show });
   const config = useConfigController({ api: appApi, busy, setBusy, setNotice: notice.show });
+  const [learningRecordId, setLearningRecordId] = useState<string | undefined>();
+  const requestCorrectionSection = config.actions.requestCorrectionSection;
+  const openLearning = useCallback((recordId?: string) => {
+    setLearningRecordId(recordId);
+    requestCorrectionSection("learning");
+  }, [requestCorrectionSection]);
+  const openLearningFromTray = useCallback(() => openLearning(), [openLearning]);
+  const learning = useLearningActivityController(appApi.learning, openLearningFromTray);
   const history = useHistoryController({
     api: appApi,
     page: config.state.page,
@@ -111,6 +120,7 @@ export function useMainAppController() {
     audio,
     config,
     history,
+    learning: { ...learning, recordId: learningRecordId },
     notice,
     permissions,
     system,
@@ -128,6 +138,6 @@ export function useMainAppController() {
         || config.state.page === "settings"
       ),
     },
-    actions: { openHistoryPage },
+    actions: { openHistoryPage, openLearning },
   };
 }

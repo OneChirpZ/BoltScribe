@@ -461,15 +461,45 @@ fn active_race_targets_require_enabled_and_are_deduplicated() {
         active_race_targets(&llm),
         vec![
             RaceModelTarget {
-                provider: "openai".to_string(),
+                service_id: "openai".to_string(),
                 model: "gpt-5.4-mini".to_string(),
             },
             RaceModelTarget {
-                provider: "openai".to_string(),
+                service_id: "openai".to_string(),
                 model: "gpt-5.4".to_string(),
             },
         ]
     );
+}
+
+#[test]
+fn race_targets_resolve_distinct_services_of_the_same_provider_without_reusing_keys() {
+    let mut config = AppConfig::default();
+    config.model_services[0].api_key = "primary-placeholder".into();
+    let mut second = config.model_services[0].clone();
+    second.id = "openai-secondary".into();
+    second.endpoint = "https://secondary.example.test/v1".into();
+    second.api_key = "secondary-placeholder".into();
+    config.model_services.push(second);
+    let base = config.resolve_llm(&config.llm);
+    let target = RaceModelTarget {
+        service_id: "openai-secondary".into(),
+        model: "second-model".into(),
+    };
+    let resolved = llm_for_race_target(&base, &target);
+    assert_eq!(resolved.provider, "openai");
+    assert_eq!(resolved.api_key, "secondary-placeholder");
+    assert_eq!(resolved.endpoint, "https://secondary.example.test/v1");
+    assert_eq!(resolved.fast_mode_enabled, base.fast_mode_enabled);
+    let missing = llm_for_race_target(
+        &base,
+        &RaceModelTarget {
+            service_id: "removed-service".into(),
+            model: "second-model".into(),
+        },
+    );
+    assert!(missing.api_key.is_empty());
+    assert!(missing.endpoint.is_empty());
 }
 
 #[test]

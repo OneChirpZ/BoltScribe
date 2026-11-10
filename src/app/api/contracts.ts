@@ -8,6 +8,10 @@ import type {
   DeleteHistoryResult,
   HistoryRecord,
   InputStats,
+  LearnedEntry,
+  LearningActivity,
+  LearningActivityPage,
+  LearningStatus,
   RecordingCleanupPreview,
   RecordingCleanupResult,
   RecordingCleanupUnit,
@@ -20,6 +24,7 @@ import type {
 export type Unlisten = () => void;
 
 export interface ConfigApi {
+  listServiceModels(serviceId: string): Promise<string[]>;
   loadConfig(): Promise<AppConfig>;
   saveConfig(
     config: AppConfig,
@@ -29,6 +34,18 @@ export interface ConfigApi {
   importConfig(raw: string): Promise<ConfigImportResult>;
   listenConfigUpdated(handler: (config: AppConfig) => void): Promise<Unlisten>;
   listenConfigCloseRequested(handler: () => void): Promise<Unlisten>;
+}
+
+export interface LearningApi {
+  loadActivity(limit: number, offset?: number, recordId?: string): Promise<LearningActivityPage>;
+  loadSource(recordId: string, activityId?: string): Promise<LearningActivity | null>;
+  loadEntries(): Promise<LearnedEntry[]>;
+  deleteEntry(id: string): Promise<LearnedEntry[]>;
+  setEntryEnabled(id: string, enabled: boolean): Promise<LearnedEntry[]>;
+  getStatus(): Promise<LearningStatus>;
+  listenUpdated(handler: () => void): Promise<Unlisten>;
+  listenOpenRequested(handler: () => void): Promise<Unlisten>;
+  takeOpenRequest(): Promise<boolean>;
 }
 
 export interface WorkflowApi {
@@ -46,6 +63,7 @@ export interface OverlayApi {
 }
 
 export interface HistoryApi {
+  loadRecord(id: string): Promise<HistoryRecord | null>;
   loadHistory(limit: number, offset?: number): Promise<HistoryRecord[]>;
   deleteHistoryRecord(id: string): Promise<DeleteHistoryResult>;
   retryHistoryRecord(id: string): Promise<HistoryRecord>;
@@ -92,6 +110,7 @@ export interface SystemApi {
 
 export interface AppApi {
   config: ConfigApi;
+  learning: LearningApi;
   overlay: OverlayApi;
   workflow: WorkflowApi;
   history: HistoryApi;

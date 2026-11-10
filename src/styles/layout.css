@@ -108,6 +108,12 @@
   min-width: 0;
 }
 
+.learning-nav-status {
+  color: var(--amber);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .correction-nav-primary {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -186,6 +192,11 @@
 }
 
 .correction-subnav-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
   min-height: 30px;
   border: 0;
   border-radius: 7px;
@@ -201,6 +212,18 @@
 .correction-subnav-button:hover {
   color: var(--text-soft);
   background: var(--fill-soft);
+}
+
+.correction-subnav-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.correction-subnav-label .beta-badge {
+  min-height: 16px;
+  padding: 1px 6px;
+  font-size: 10px;
 }
 
 .correction-subnav-button.active {

@@ -12,7 +12,7 @@ use std::fs;
 use std::path::PathBuf;
 
 pub(super) const CONFIG_EXPORT_FORMAT: &str = "boltscribe.config";
-pub(super) const CONFIG_EXPORT_VERSION: u32 = 1;
+pub(super) const CONFIG_EXPORT_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize)]
 struct ConfigExportEnvelope {
@@ -52,11 +52,19 @@ impl ConfigStore {
         let value: serde_json::Value =
             serde_json::from_str(raw).context("Failed to parse imported config JSON")?;
         let mut report = ConfigImportReport::default();
-        let imported_config = extract_imported_config(value, &mut report)?;
+        let mut imported_config = extract_imported_config(value, &mut report)?;
         let correction_text_presence = correction_text_field_presence(&imported_config);
         let asr_auth_mode_present = asr_auth_mode_field_present(&imported_config);
-        let default_config = serde_json::to_value(AppConfig::default())?;
-        let schema = config_schema_value()?;
+        let legacy_models = imported_config.get("model_services").is_none();
+        let mut default_config = serde_json::to_value(AppConfig::default())?;
+        let mut schema = config_schema_value()?;
+        if legacy_models {
+            super::model_services::legacy_import_defaults(
+                &mut default_config,
+                &mut schema,
+                &mut imported_config,
+            );
+        }
 
         collect_missing_fields(
             &imported_config,
@@ -79,6 +87,9 @@ impl ConfigStore {
             .context("Failed to apply imported configuration")?;
         if !asr_auth_mode_present {
             config.asr.auth_mode.clear();
+        }
+        if legacy_models {
+            config.migrate_legacy_model_services();
         }
         config.normalize();
         fill_missing_correction_text_fields(&mut config, correction_text_presence);
@@ -152,6 +163,9 @@ pub(super) fn extract_imported_config(
 
 pub(super) fn config_schema_value() -> Result<serde_json::Value> {
     let mut schema = serde_json::to_value(AppConfig::default())?;
+    let mut service = serde_json::to_value(super::model_services::default_services().remove(0))?;
+    service["models"] = serde_json::json!([""]);
+    set_schema_array(&mut schema, &["model_services"], service);
     set_schema_array(&mut schema, &["hotkeys"], serde_json::json!(""));
     set_schema_array(&mut schema, &["hotkey_enabled"], serde_json::json!(false));
     set_schema_array(
@@ -190,7 +204,7 @@ pub(super) fn config_schema_value() -> Result<serde_json::Value> {
         &mut schema,
         &["llm", "race_targets"],
         serde_json::json!({
-            "provider": "",
+            "service_id": "",
             "model": ""
         }),
     );
@@ -202,6 +216,9 @@ pub(super) fn config_schema_value() -> Result<serde_json::Value> {
             "model": ""
         }),
     );
+    // The independent learning model has the same provider schema, including
+    // array item types, while its defaults remain separate from live correction.
+    schema["learning"]["llm"] = schema["llm"].clone();
     set_schema_array(
         &mut schema,
         &["correction", "variables"],
@@ -431,7 +448,10 @@ pub(super) fn value_matches_schema(
         | (serde_json::Value::Object(_), serde_json::Value::Object(_)) => true,
         (serde_json::Value::Number(_), serde_json::Value::Null)
         | (serde_json::Value::Null, serde_json::Value::Number(_)) => {
-            path == "llm.max_output_tokens"
+            matches!(
+                path,
+                "llm.max_output_tokens" | "learning.llm.max_output_tokens"
+            )
         }
         _ => false,
     }

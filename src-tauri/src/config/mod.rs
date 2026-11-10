@@ -1,6 +1,7 @@
 mod defaults;
 mod import;
 mod model;
+mod model_services;
 mod normalize;
 mod store;
 

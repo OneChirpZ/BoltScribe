@@ -19,12 +19,14 @@ type EditorMode = "items" | "text";
 
 export default function CorrectionLineEditor({
   kind,
+  heading,
   value,
   disabledDictionaryTerms = [],
   onChange,
   onDisabledDictionaryTermsChange,
   text,
 }: {
+  heading?: string;
   kind: "dictionary" | "rules";
   value: string;
   disabledDictionaryTerms?: string[];
@@ -68,10 +70,11 @@ export default function CorrectionLineEditor({
   return (
     <div className="correction-line-editor">
       <div className="correction-editor-toolbar">
-        <ModeSwitch idPrefix={modeTabsId} mode={mode} onChange={setMode} text={text} />
+        {heading ? <h2>{heading}</h2> : null}
         <span className="correction-item-count">
           {text.correction.itemCount(kind === "dictionary" ? dictionaryEntries.length : rules.length)}
         </span>
+        <ModeSwitch idPrefix={modeTabsId} mode={mode} onChange={setMode} text={text} />
       </div>
 
       {mode === "text" ? (
@@ -82,7 +85,7 @@ export default function CorrectionLineEditor({
           aria-labelledby={`${modeTabsId}-text-tab`}
         >
           <div className="correction-bulk-panel">
-            <label className="correction-fill-field">
+            <label className="correction-fill-field" data-dictionary-text={kind === "dictionary" ? value : undefined}>
               <span className="field-label">
                 {kind === "dictionary" ? text.correction.dictionaryTextLabel : text.correction.rulesTextLabel}
               </span>
@@ -263,7 +266,6 @@ function DictionaryItems({
         <button className="primary small" type="submit">{text.correction.addTerm}</button>
         {addError ? <span className="field-error">{addError}</span> : null}
       </form>
-      <p className="correction-format-help">{text.correction.dictionaryItemHelp}</p>
       <section className="dictionary-term-section">
         <div className="dictionary-term-section-heading">
           <strong>{text.correction.enabledDictionaryTerms}</strong>
@@ -318,6 +320,7 @@ function DisabledDictionarySection({
   onDisabledTermsChange?: (terms: string[]) => void;
   text: TextBundle;
 }) {
+  if (!entries.length) return null;
   return (
     <section className="dictionary-term-section disabled-dictionary-section">
       <div className="dictionary-term-section-heading">

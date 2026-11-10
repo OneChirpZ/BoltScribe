@@ -242,7 +242,7 @@ fn is_builtin_variable(name: &str) -> bool {
     )
 }
 
-fn endpoint_url(endpoint: &str, suffix: &str) -> String {
+pub(crate) fn endpoint_url(endpoint: &str, suffix: &str) -> String {
     let endpoint = endpoint.trim().trim_end_matches('/');
     if endpoint.ends_with(suffix) {
         endpoint.to_string()
@@ -251,7 +251,7 @@ fn endpoint_url(endpoint: &str, suffix: &str) -> String {
     }
 }
 
-fn build_chat_completions_body(llm: &LlmConfig, prompt: &str) -> Value {
+pub(crate) fn build_chat_completions_body(llm: &LlmConfig, prompt: &str) -> Value {
     let mut body = Map::from_iter([
         ("model".to_string(), json!(llm.model)),
         ("temperature".to_string(), json!(llm.temperature)),
@@ -294,7 +294,7 @@ fn build_chat_completions_body(llm: &LlmConfig, prompt: &str) -> Value {
     Value::Object(body)
 }
 
-fn build_responses_body(llm: &LlmConfig, prompt: &str) -> Value {
+pub(crate) fn build_responses_body(llm: &LlmConfig, prompt: &str) -> Value {
     let mut body = Map::from_iter([
         ("model".to_string(), json!(llm.model)),
         ("temperature".to_string(), json!(llm.temperature)),
@@ -401,7 +401,7 @@ fn extract_chat_completions_text(value: &Value) -> String {
         .to_string()
 }
 
-fn extract_corrected_text(value: &Value, api_format: &str) -> String {
+pub(crate) fn extract_corrected_text(value: &Value, api_format: &str) -> String {
     match api_format.trim() {
         "responses" => {
             let text = extract_responses_text(value);

@@ -1,3 +1,4 @@
+import { providerPresets } from "../../domain/providers";
 import { cleanupCutoffTimestamp } from "../../domain/historyMaintenance";
 import {
   defaultVadConfirmationMs,
@@ -10,6 +11,7 @@ import {
 import type { AppConfig, AudioLevelSample, HistoryRecord, RecordingCleanupPreview, RecordingCleanupUnit, WorkflowStatusCode } from "../../types";
 import type { AppApi } from "./contracts";
 import { clonePreview, createBrowserPreviewState, type BrowserPreviewState } from "./previewData";
+import { defaultLearningConfig, emptyLearningStatus } from "../../domain/learning";
 
 interface BrowserPreviewAppApiOptions {
   appVersion: string;
@@ -18,9 +20,56 @@ interface BrowserPreviewAppApiOptions {
 
 export function createBrowserPreviewAppApi({ appVersion, locationHref }: BrowserPreviewAppApiOptions): AppApi {
   const state = createBrowserPreviewState(locationHref);
+  const learningListeners = new Set<() => void>();
 
   return {
+    learning: {
+      loadActivity: (limit, offset = 0, recordId) => {
+        const matching = state.learningActivity
+          .filter((item) => !recordId || item.record_id === recordId)
+          .map(({ edited_text: _editedText, model_output: _modelOutput, ...item }) => item);
+        const active = matching.filter((item) => item.finished_at === null);
+        const history = matching.filter((item) => item.finished_at !== null);
+        const pageSize = Math.max(1, Math.min(100, limit));
+        return Promise.resolve(clonePreview({ active, history: history.slice(offset, offset + pageSize), has_more: history.length > offset + pageSize }));
+      },
+      loadSource: (recordId, activityId) => {
+        const matching = state.learningActivity.filter((item) => item.record_id === recordId);
+        const source = activityId ? matching.find((item) => item.id === activityId)
+          : matching.find((item) => item.state === "learned") ?? matching[0];
+        return Promise.resolve(clonePreview(source ?? null));
+      },
+      loadEntries: () => Promise.resolve(clonePreview(state.learnedEntries)),
+      deleteEntry: (id) => {
+        state.learnedEntries = state.learnedEntries.filter((entry) => entry.id !== id);
+        learningListeners.forEach((handler) => handler());
+        return Promise.resolve(clonePreview(state.learnedEntries));
+      },
+      setEntryEnabled: (id, enabled) => {
+        state.learnedEntries = state.learnedEntries.map((entry) => entry.id === id ? { ...entry, enabled } : entry);
+        learningListeners.forEach((handler) => handler());
+        return Promise.resolve(clonePreview(state.learnedEntries));
+      },
+      getStatus: () => {
+        const status = emptyLearningStatus();
+        status.observation.active = state.learningActivity.some((item) => item.state === "observing");
+        status.processing = state.learningActivity.some((item) => item.state === "analyzing");
+        status.pending = state.learningActivity.some((item) => item.state === "queued");
+        return Promise.resolve(status);
+      },
+      listenUpdated: (handler) => {
+        learningListeners.add(handler);
+        return Promise.resolve(() => { learningListeners.delete(handler); });
+      },
+      listenOpenRequested: () => Promise.resolve(() => undefined),
+      takeOpenRequest: () => Promise.resolve(false),
+    },
     config: {
+      listServiceModels: async (id) => {
+        const service = state.config.model_services.find((item) => item.id === id);
+        if (!service) throw new Error("Unknown model service");
+        return [...(providerPresets[service.provider as keyof typeof providerPresets]?.models ?? [])];
+      },
       loadConfig: () => Promise.resolve(clonePreview(state.config)),
       saveConfig: (config) => {
         state.config = clonePreview(config);
@@ -29,6 +78,7 @@ export function createBrowserPreviewAppApi({ appVersion, locationHref }: Browser
       exportConfig: (config) => Promise.resolve(`browser-preview-config-${config.ui.app_language}.json`),
       importConfig: (raw) => {
         state.config = clonePreview(JSON.parse(raw) as AppConfig);
+        state.config.learning ??= defaultLearningConfig();
         return Promise.resolve({
           config: clonePreview(state.config),
           report: {
@@ -77,6 +127,7 @@ export function createBrowserPreviewAppApi({ appVersion, locationHref }: Browser
       },
     },
     history: {
+      loadRecord: (id) => Promise.resolve(clonePreview(state.history.find((record) => record.id === id) ?? null)),
       loadHistory: (limit, offset = 0) => Promise.resolve(clonePreview(state.history.slice(offset, offset + limit))),
       deleteHistoryRecord: (id) => {
         const index = state.history.findIndex((record) => record.id === id);

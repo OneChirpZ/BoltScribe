@@ -38,10 +38,14 @@ impl ConfigStore {
             .with_context(|| format!("Failed to parse config {}", path.display()))?;
         let correction_text_presence = correction_text_field_presence(&raw_value);
         let asr_auth_mode_present = asr_auth_mode_field_present(&raw_value);
+        let legacy_models = raw_value.get("model_services").is_none();
         let mut config: AppConfig = serde_json::from_value(raw_value)
             .with_context(|| format!("Failed to parse config {}", path.display()))?;
         if !asr_auth_mode_present {
             config.asr.auth_mode.clear();
+        }
+        if legacy_models {
+            config.migrate_legacy_model_services();
         }
         config.normalize();
         fill_missing_correction_text_fields(&mut config, correction_text_presence);
@@ -63,10 +67,14 @@ impl ConfigStore {
             .with_context(|| format!("Failed to parse legacy config {}", legacy_path.display()))?;
         let correction_text_presence = correction_text_field_presence(&raw_value);
         let asr_auth_mode_present = asr_auth_mode_field_present(&raw_value);
+        let legacy_models = raw_value.get("model_services").is_none();
         let mut config: AppConfig = serde_json::from_value(raw_value)
             .with_context(|| format!("Failed to parse legacy config {}", legacy_path.display()))?;
         if !asr_auth_mode_present {
             config.asr.auth_mode.clear();
+        }
+        if legacy_models {
+            config.migrate_legacy_model_services();
         }
         config.normalize();
         fill_missing_correction_text_fields(&mut config, correction_text_presence);

@@ -67,6 +67,10 @@ impl HistoryStore {
         load_from_paths(&history_read_paths()?, limit, offset)
     }
 
+    pub fn find(record_id: &str) -> Result<Option<HistoryRecord>> {
+        read::find_from_paths(&history_read_paths()?, record_id)
+    }
+
     pub fn load_retryable(record_id: &str) -> Result<HistoryRecord> {
         let _guard = history_mutation_guard()?;
         load_retryable_from_paths(

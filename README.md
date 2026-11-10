@@ -11,7 +11,7 @@
 <p align="center">
   <a href="README.zh-CN.md">中文 README</a>
   ·
-  <a href="https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.6.0">Latest Release</a>
+  <a href="https://github.com/OneChirpZ/BoltScribe/releases/latest">Latest Release</a>
   ·
   <a href="#features">Features</a>
   ·
@@ -55,12 +55,10 @@ It stays quietly in the menu bar or system tray, provides clear recording feedba
 
 ### Download
 
-The latest public release is [BoltScribe v1.6.0](https://github.com/OneChirpZ/BoltScribe/releases/tag/v1.6.0).
-
 Available downloads:
 
-- macOS Apple Silicon: `BoltScribe_1.6.0_aarch64.dmg`
-- Windows x64: `BoltScribe_1.6.0_x64-setup.exe`
+- macOS Apple Silicon: [BoltScribe v1.7.0](https://github.com/OneChirpZ/BoltScribe/releases/download/v1.7.0/BoltScribe_1.7.0_aarch64.dmg)
+- Windows x64: [BoltScribe v1.6.0](https://github.com/OneChirpZ/BoltScribe/releases/download/v1.6.0/BoltScribe_1.6.0_x64-setup.exe)
 
 The macOS package is ad-hoc signed and not notarized by Apple. The Windows installer is unsigned. Your operating system may display a security warning on first launch.
 
@@ -81,6 +79,8 @@ After installation:
 
 BoltScribe lets you adjust transcription language, AI models, dictionaries, correction rules, microphone priority, no-speech protection, overlay size and position, output volume behavior, history retention, and launch options from the app.
 
+Self-learning is a macOS beta and is off by default. To try it, choose a learning model, then turn it on under LLM Correction → Self-learning. BoltScribe compares a dictation with the edits you make to it and looks for terms it can recognize next time.
+
 Fast / low-latency mode is enabled by default for OpenAI and Volcengine Ark and can be turned off in model settings. Fast inference costs more; enable the model's low-latency service in Ark before using it. History call logs record both the requested and actual service tiers.
 
 ## Permissions
@@ -89,7 +89,7 @@ BoltScribe needs Microphone permission to record speech. On macOS, it also needs
 
 ## Privacy and Local Data
 
-History, recordings, settings, and input statistics remain on your device. You can move the data folder and control retention from Settings. Speech and text are sent only to the transcription and text-cleanup services you configure; the local microphone sensitivity test does not use either service.
+History, recordings, settings, and input statistics are stored on your device. You can move the data folder and control retention from Settings. Transcription and text cleanup use the services you configure. If you enable self-learning, BoltScribe sends the dictation as inserted and your edited version to your configured learning model. The local microphone sensitivity test does not call these services.
 
 ## License
 

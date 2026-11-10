@@ -93,7 +93,7 @@ export function useConfigController({
 }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [page, setPage] = useState<Page>("home");
-  const [correctionSection, setCorrectionSection] = useState<CorrectionSection>("requirements");
+  const [correctionSection, setCorrectionSection] = useState<CorrectionSection>("prompt");
   const draftRef = useRef<AppConfig | null>(null);
   const savedRef = useRef<AppConfig | null>(null);
   const savingRef = useRef(false);

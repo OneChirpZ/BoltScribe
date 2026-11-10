@@ -3,7 +3,7 @@ import HistoryPage from "../components/HistoryPage";
 import { activeHotkeys, displayShortcut } from "../domain/hotkeys";
 import type { AppLanguage, TextBundle } from "../domain/i18n";
 import { translateWorkflowMessage, workflowModeLabel } from "../domain/i18n";
-import { providerLabel } from "../domain/providers";
+import { modelService } from "../domain/modelServices";
 import type { CorrectionSection } from "../domain/navigation";
 import { parseCorrectionRulesText, parseDictionaryText } from "../domain/correctionText";
 
@@ -26,6 +26,7 @@ export default function HomePage({
   onCopyHistory,
   onRetryHistory,
   onDeleteHistory,
+  onOpenLearning,
   canRetryHistory,
   canDeleteHistory,
   language,
@@ -49,6 +50,7 @@ export default function HomePage({
   onCopyHistory: (text: string, label: string) => void;
   onRetryHistory: (record: HistoryRecord) => Promise<void>;
   onDeleteHistory: (record: HistoryRecord) => Promise<void>;
+  onOpenLearning?: (id: string) => void;
   canRetryHistory: boolean;
   canDeleteHistory: boolean;
   language: AppLanguage;
@@ -105,7 +107,7 @@ export default function HomePage({
           <Summary label={text.home.asr} value={language === "zh-CN" ? "火山引擎 WebSocket" : "Volcengine WebSocket"} onClick={onOpenModels} />
           <Summary
             label={text.home.llm}
-            value={`${providerLabel(config.llm.provider)} / ${config.llm.model || text.home.unconfigured}`}
+            value={`${modelService(config, config.llm.service_id)?.name ?? text.home.unconfigured} / ${config.llm.model || text.home.unconfigured}`}
             detail={text.home.raceModeStatus(config.llm.race_enabled ?? false)}
             onClick={onOpenModels}
           />
@@ -121,7 +123,7 @@ export default function HomePage({
           />
         </div>
       </section>
-      <HistoryPage title={text.home.latestHistory} history={history} onRefresh={onRefreshHistory} onOpenFullHistory={onOpenHistoryPage} onCopy={onCopyHistory} onRetry={onRetryHistory} onDelete={onDeleteHistory} canRetry={canRetryHistory} canDelete={canDeleteHistory} text={text} />
+      <HistoryPage title={text.home.latestHistory} history={history} onRefresh={onRefreshHistory} onOpenFullHistory={onOpenHistoryPage} onCopy={onCopyHistory} onRetry={onRetryHistory} onDelete={onDeleteHistory} onOpenLearning={onOpenLearning} language={language} canRetry={canRetryHistory} canDelete={canDeleteHistory} text={text} />
     </div>
   );
 }

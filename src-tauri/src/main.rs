@@ -14,6 +14,8 @@ mod fn_trigger;
 mod history;
 mod injector;
 mod keyboard_shortcut;
+mod learning;
+mod model_catalog;
 mod mouse_shortcuts;
 mod output_volume;
 mod paths;
@@ -33,14 +35,17 @@ mod workflow_status;
 use commands::{
     accessibility_permission_granted, apply_fn_trigger, cancel_current_workflow, choose_data_dir,
     cleanup_recording_files, close_main_window, copy_text_to_clipboard, delete_history_record,
-    export_config, get_data_dir, get_status, get_vad_test_status, import_config,
-    input_monitoring_permission_granted, load_audio_input_devices, load_audio_output_devices,
-    load_config, load_history, load_stats, open_accessibility_settings, open_app_dir,
+    delete_learned_correction, export_config, get_data_dir, get_learning_status, get_status,
+    get_vad_test_status, import_config, input_monitoring_permission_granted,
+    load_audio_input_devices, load_audio_output_devices, load_config, load_history,
+    load_history_record, load_learned_corrections, load_learning_activity,
+    load_learning_activity_source, load_stats, open_accessibility_settings, open_app_dir,
     open_github_repository, open_input_monitoring_settings, preview_recording_cleanup,
     request_accessibility_permission, request_input_monitoring_permission,
     request_microphone_permission, reset_data_dir, restart_system_audio_service,
-    retry_history_record, save_config, set_data_dir, start_recording_overlay_drag, start_vad_test,
-    stop_vad_test, toggle_recording, update_vad_test_settings,
+    retry_history_record, save_config, set_data_dir, set_learned_correction_enabled,
+    start_recording_overlay_drag, start_vad_test, stop_vad_test, take_learning_open_request,
+    toggle_recording, update_vad_test_settings,
 };
 use tauri::{Emitter, Manager, RunEvent};
 
@@ -70,6 +75,8 @@ fn main() {
         .manage(tray::TrayState::default())
         .setup(|app| {
             let config = config::ConfigStore::load().unwrap_or_default();
+            learning::activity::initialize(app.handle().clone());
+            learning::observation::set_enabled(config.learning_model().can_observe());
             windows::sync_app_theme(app.handle(), &config.ui.theme);
             windows::ensure_main_window(app.handle())
                 .map_err(|err| Box::new(err) as Box<dyn std::error::Error>)?;
@@ -122,6 +129,15 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             load_config,
+            model_catalog::list_service_models,
+            load_learned_corrections,
+            delete_learned_correction,
+            set_learned_correction_enabled,
+            get_learning_status,
+            load_learning_activity,
+            load_learning_activity_source,
+            load_history_record,
+            take_learning_open_request,
             save_config,
             start_recording_overlay_drag,
             export_config,
@@ -163,6 +179,13 @@ fn main() {
         .expect("error while running tauri application");
 
     app.run(|app, event| match event {
+        RunEvent::Exit => {
+            learning::observation::set_enabled(false);
+            learning::cancel();
+            if let Err(error) = learning::activity::flush() {
+                eprintln!("[Learning] {error}");
+            }
+        }
         RunEvent::Ready => {
             if let Err(err) = windows::ensure_main_window(app) {
                 eprintln!("failed to prepare main window: {err:?}");

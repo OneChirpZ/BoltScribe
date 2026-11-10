@@ -35,7 +35,11 @@ pub struct AppConfig {
     pub audio: AudioConfig,
     pub asr: AsrConfig,
     pub llm: LlmConfig,
+    #[serde(default)]
+    pub model_services: Vec<ModelService>,
     pub correction: CorrectionConfig,
+    #[serde(default)]
+    pub learning: crate::learning::LearningConfig,
     #[serde(default)]
     pub ui: UiConfig,
     #[serde(default)]
@@ -143,15 +147,23 @@ pub struct AsrConnectionRetryConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LlmConfig {
-    #[serde(default = "defaults::default_llm_provider")]
+    #[serde(default)]
+    pub service_id: String,
+    // Legacy input and resolved transport only. Persisted task profiles reference
+    // model_services, so credentials have one authoritative location.
+    #[serde(default = "defaults::default_llm_provider", skip_serializing)]
     pub provider: String,
-    #[serde(default = "defaults::default_llm_api_format")]
+    #[serde(default = "defaults::default_llm_api_format", skip_serializing)]
     pub api_format: String,
+    #[serde(default, skip_serializing)]
     pub endpoint: String,
+    #[serde(default, skip_serializing)]
     pub api_key: String,
     pub model: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub provider_settings: Vec<LlmProviderSettings>,
+    #[serde(skip)]
+    pub resolved_services: Vec<ModelService>,
     #[serde(default)]
     pub race_enabled: bool,
     #[serde(default)]
@@ -170,8 +182,20 @@ pub struct LlmConfig {
     pub thinking_effort: String,
     #[serde(default)]
     pub max_output_tokens: Option<u32>,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub model_presets: Vec<ModelPreset>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModelService {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub endpoint: String,
+    pub api_format: String,
+    pub api_key: String,
+    #[serde(default)]
+    pub models: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -184,7 +208,8 @@ pub struct LlmProviderSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RaceModelTarget {
-    pub provider: String,
+    #[serde(alias = "provider")]
+    pub service_id: String,
     pub model: String,
 }
 
@@ -309,25 +334,8 @@ impl Default for AppConfig {
                 language: "zh-CN".to_string(),
                 connection_retry: AsrConnectionRetryConfig::default(),
             },
-            llm: LlmConfig {
-                provider: defaults::default_llm_provider(),
-                api_format: defaults::default_llm_api_format(),
-                endpoint: "https://api.openai.com/v1".to_string(),
-                api_key: String::new(),
-                model: "gpt-5.4-mini".to_string(),
-                provider_settings: Vec::new(),
-                race_enabled: false,
-                race_models: Vec::new(),
-                race_targets: Vec::new(),
-                system_prompt: defaults::default_system_prompt(),
-                temperature: 0.0,
-                timeout_secs: 30,
-                fast_mode_enabled: defaults::default_fast_mode_enabled(),
-                thinking_enabled: false,
-                thinking_effort: defaults::default_thinking_effort(),
-                max_output_tokens: None,
-                model_presets: Vec::new(),
-            },
+            llm: LlmConfig::default(),
+            model_services: super::model_services::default_services(),
             correction: CorrectionConfig {
                 enabled: true,
                 user_requirements: String::new(),
@@ -339,9 +347,36 @@ impl Default for AppConfig {
                 correction_rules: Vec::new(),
                 dictionary: Vec::new(),
             },
+            learning: crate::learning::LearningConfig::default(),
             ui: UiConfig::default(),
             retention: RetentionConfig::default(),
             system: SystemConfig::default(),
+        }
+    }
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            service_id: "openai".into(),
+            provider: defaults::default_llm_provider(),
+            api_format: defaults::default_llm_api_format(),
+            endpoint: String::new(),
+            api_key: String::new(),
+            model: "gpt-5.4-mini".to_string(),
+            provider_settings: Vec::new(),
+            resolved_services: Vec::new(),
+            race_enabled: false,
+            race_models: Vec::new(),
+            race_targets: Vec::new(),
+            system_prompt: defaults::default_system_prompt(),
+            temperature: 0.0,
+            timeout_secs: 30,
+            fast_mode_enabled: defaults::default_fast_mode_enabled(),
+            thinking_enabled: false,
+            thinking_effort: defaults::default_thinking_effort(),
+            max_output_tokens: None,
+            model_presets: Vec::new(),
         }
     }
 }

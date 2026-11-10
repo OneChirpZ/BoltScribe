@@ -6,6 +6,11 @@ import HistoryRecordsPage from "../pages/HistoryRecordsPage";
 import ModelsPage from "../pages/ModelsPage";
 import CorrectionPage from "../pages/CorrectionPage";
 import SettingsPage from "../pages/SettingsPage";
+import { useEffect, useRef, useState } from "react";
+import { appApi } from "./api";
+import type { HistoryRecord, LearningActivity } from "../types";
+import LearningActivityPage from "../pages/LearningActivityPage";
+import LearningSourceDialog from "../components/LearningSourceDialog";
 import { historyPageSize } from "./controllers/useHistoryController";
 import { useMainAppController } from "./controllers/useMainAppController";
 
@@ -19,9 +24,65 @@ export default function MainApp() {
   const { state: permissionState, actions: permissionActions } = app.permissions;
   const { state: systemState, actions: systemActions } = app.system;
   const { config, correctionSection, dirty, language, page, pending, text } = configState;
+  const [source, setSource] = useState<{ record: HistoryRecord; activity: LearningActivity | null } | null>(null);
+  const sourceRequest = useRef(0);
+  const learningActive = app.learning.active;
+  const learningStatus = learningActive.length ? [
+    learningActive.some((item) => item.state === "analyzing") ? (language === "en-US" ? "Analyzing" : "分析中") : "",
+    learningActive.some((item) => item.state === "observing") ? (language === "en-US" ? "Observing" : "观察中") : "",
+    learningActive.some((item) => item.state === "queued") ? (language === "en-US" ? "Queued" : "等待中") : "",
+  ].filter(Boolean).join(" · ") : "";
+  const learningLabel = language === "en-US" ? "Self-learning" : "自学习";
+  const correctionWorkspace = page === "correction" && (correctionSection === "rules" || correctionSection === "prompt");
+
+  useEffect(() => {
+    sourceRequest.current += 1;
+    setSource(null);
+  }, [page, correctionSection, systemState.dataDir]);
+
+  const activeSourceId = source?.activity?.finished_at === null ? source.activity.id : undefined;
+  const sourceRecordId = source?.record.id;
+  useEffect(() => {
+    if (!activeSourceId || !sourceRecordId) return;
+    let stopped = false;
+    let revision = 0;
+    let unlisten: (() => void) | undefined;
+    const refresh = async () => {
+      const request = ++revision;
+      const activity = await appApi.learning.loadSource(sourceRecordId, activeSourceId).catch(() => null);
+      if (!activity || stopped || revision !== request) return;
+      setSource((current) => current?.activity?.id === activeSourceId ? { ...current, activity } : current);
+    };
+    void appApi.learning.listenUpdated(() => { void refresh(); }).then((stop) => {
+      if (stopped) stop();
+      else {
+        unlisten = stop;
+        void refresh();
+      }
+    }).catch(() => undefined);
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
+  }, [activeSourceId, sourceRecordId]);
+
+  async function openSourceRecord(id: string, activityId?: string) {
+    const request = ++sourceRequest.current;
+    try {
+      const [record, activity] = await Promise.all([
+        appApi.history.loadRecord(id),
+        appApi.learning.loadSource(id, activityId).catch(() => null),
+      ]);
+      if (request !== sourceRequest.current) return;
+      if (record) setSource({ record, activity });
+      else app.notice.show(language === "en-US" ? "The source dictation is no longer available." : "来源语音记录已清理。");
+    } catch (failure) {
+      if (request === sourceRequest.current) app.notice.show(String(failure));
+    }
+  }
   const correctionNavItems = [
-    { section: "requirements" as const, label: text.correction.requirementsNav },
     { section: "dictionary" as const, label: text.correction.dictionaryNav },
+    { section: "learning" as const, label: learningLabel },
     { section: "rules" as const, label: text.correction.rulesNav },
     { section: "prompt" as const, label: text.correction.promptNav },
   ];
@@ -87,9 +148,17 @@ export default function MainApp() {
                     className={active ? "correction-subnav-button active" : "correction-subnav-button"}
                     type="button"
                     aria-current={active ? "page" : undefined}
-                    onClick={() => configActions.requestCorrectionSection(item.section)}
+                    onClick={() => item.section === "learning" ? app.actions.openLearning() : configActions.requestCorrectionSection(item.section)}
                   >
-                    {item.label}
+                    <span className="correction-subnav-label">
+                      {item.label}
+                      {item.section === "learning" ? <span className="beta-badge">Beta</span> : null}
+                    </span>
+                    {item.section === "learning" && (learningStatus || app.learning.error) ? (
+                      <span className="learning-nav-status" title={app.learning.error ?? learningStatus} role="status">
+                        {app.learning.error ? (language === "en-US" ? "Unavailable" : "读取失败") : learningStatus}
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -107,7 +176,7 @@ export default function MainApp() {
 
       <main className="content">
         <div
-          className={page === "correction" ? "content-scroll correction-content" : "content-scroll"}
+          className={correctionWorkspace ? "content-scroll correction-content" : "content-scroll"}
           ref={configRefs.contentScrollRef}
         >
           {permissionState.needsAccessibility && permissionState.accessibilityGranted === false ? (
@@ -153,6 +222,7 @@ export default function MainApp() {
               onCopyHistory={historyActions.copyText}
               onRetryHistory={historyActions.retryRecord}
               onDeleteHistory={historyActions.deleteRecord}
+              onOpenLearning={app.actions.openLearning}
               canRetryHistory={app.view.canMutateHistory}
               canDeleteHistory={app.view.canMutateHistory}
               language={language}
@@ -161,6 +231,7 @@ export default function MainApp() {
           ) : null}
           {config && page === "history" ? (
             <HistoryRecordsPage
+              language={language}
               history={historyState.records}
               pageIndex={historyState.pageIndex}
               pageSize={historyPageSize}
@@ -180,6 +251,7 @@ export default function MainApp() {
               onCopyHistory={historyActions.copyText}
               onRetryHistory={historyActions.retryRecord}
               onDeleteHistory={historyActions.deleteRecord}
+              onOpenLearning={app.actions.openLearning}
               canRetryHistory={app.view.canMutateHistory}
               canDeleteHistory={app.view.canMutateHistory}
               text={text}
@@ -187,19 +259,31 @@ export default function MainApp() {
           ) : null}
           {config && page === "models" ? (
             <ModelsPage
+              savedServices={configState.savedConfig?.model_services}
               config={config}
               onChange={configActions.change}
-              onSaveConfig={configActions.save}
-              onNotice={app.notice.show}
-              canSave={app.view.canSave}
               text={text}
             />
           ) : null}
-          {config && page === "correction" ? (
+          {config && page === "correction" && correctionSection === "learning" ? (
+            <LearningActivityPage
+              config={config}
+              savedConfig={configState.savedConfig ?? config}
+              onChange={configActions.change}
+              onOpenModels={() => configActions.requestPageChange("models")}
+              onOpenRecord={(id, activityId) => { void openSourceRecord(id, activityId); }}
+              recordId={app.learning.recordId}
+              onClearRecordFilter={() => app.actions.openLearning()}
+            />
+          ) : null}
+          {config && page === "correction" && correctionSection !== "learning" ? (
             <CorrectionPage
               config={config}
               onChange={configActions.change}
               section={correctionSection}
+              onOpenModels={() => configActions.requestPageChange("models")}
+              onOpenLearning={app.actions.openLearning}
+              onOpenRecord={(id) => { void openSourceRecord(id); }}
               text={text}
             />
           ) : null}
@@ -293,6 +377,10 @@ export default function MainApp() {
           text={text}
         />
       ) : null}
+      {source ? <LearningSourceDialog record={source.record} activity={source.activity ?? undefined} language={language} onClose={() => {
+        sourceRequest.current += 1;
+        setSource(null);
+      }} /> : null}
       {app.notice.current ? (
         <div className="toast" key={app.notice.current.id} role="status" aria-live="polite" aria-atomic="true">
           <span>{app.notice.current.message}</span>

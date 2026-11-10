@@ -1,6 +1,6 @@
 use crate::{
-    audio_devices, autostart, config, data_dir, fn_trigger, history, injector, output_volume,
-    paths, recorder, shortcuts, system_audio, tray, vad_test, windows, workflow,
+    audio_devices, autostart, config, data_dir, fn_trigger, history, injector, learning,
+    output_volume, paths, recorder, shortcuts, system_audio, tray, vad_test, windows, workflow,
 };
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -43,9 +43,91 @@ const GITHUB_REPOSITORY_URL: &str = "https://github.com/OneChirpZ/BoltScribe";
 static AUDIO_INPUT_DEVICE_REFRESH_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static AUDIO_OUTPUT_DEVICE_REFRESH_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
+struct LearningCapturePause {
+    restore_enabled: bool,
+}
+
+impl LearningCapturePause {
+    fn new(restore_enabled: bool) -> Self {
+        learning::observation::set_enabled(false);
+        learning::cancel();
+        Self { restore_enabled }
+    }
+}
+
+impl Drop for LearningCapturePause {
+    fn drop(&mut self) {
+        learning::observation::set_enabled(self.restore_enabled);
+    }
+}
+
 #[tauri::command]
 pub(crate) fn load_config() -> Result<config::AppConfig, String> {
     config::ConfigStore::load().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn load_learned_corrections() -> Result<Vec<learning::LearnedEntry>, String> {
+    learning::list_entries().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn delete_learned_correction(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<Vec<learning::LearnedEntry>, String> {
+    let entries = learning::delete_entry(&id).map_err(|err| err.to_string())?;
+    let _ = app.emit("learning://updated", ());
+    Ok(entries)
+}
+
+#[tauri::command]
+pub(crate) fn set_learned_correction_enabled(
+    app: tauri::AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<Vec<learning::LearnedEntry>, String> {
+    let entries = learning::set_entry_enabled(&id, enabled).map_err(|err| err.to_string())?;
+    let _ = app.emit("learning://updated", ());
+    Ok(entries)
+}
+
+#[tauri::command]
+pub(crate) fn load_learning_activity(
+    limit: Option<usize>,
+    offset: Option<usize>,
+    record_id: Option<String>,
+) -> Result<learning::activity::ActivityPage, String> {
+    learning::activity::list(
+        limit.unwrap_or(50),
+        offset.unwrap_or(0),
+        record_id.as_deref(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn load_learning_activity_source(
+    record_id: String,
+    activity_id: Option<String>,
+) -> Result<Option<learning::activity::LearningActivity>, String> {
+    learning::activity::find_source(&record_id, activity_id.as_deref())
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn take_learning_open_request() -> bool {
+    tray::take_learning_open_request()
+}
+
+#[tauri::command]
+pub(crate) fn load_history_record(id: String) -> Result<Option<history::HistoryRecord>, String> {
+    history::HistoryStore::find(&id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn get_learning_status() -> learning::LearningStatus {
+    learning::status()
 }
 
 #[tauri::command]
@@ -205,6 +287,8 @@ fn apply_and_save_config(
     let mut next = config;
     next.normalize();
     next.validate().map_err(|err| err.to_string())?;
+    let mut learning_pause = (next.learning_model() != previous.learning_model())
+        .then(|| LearningCapturePause::new(previous.learning_model().can_observe()));
 
     shortcuts::apply_global_shortcuts(app, &next).inspect_err(|_| {
         if let Err(err) = shortcuts::apply_global_shortcuts(app, &previous) {
@@ -238,6 +322,10 @@ fn apply_and_save_config(
         }
         err.to_string()
     })?;
+    if let Some(pause) = learning_pause.as_mut() {
+        pause.restore_enabled = saved.learning_model().can_observe();
+    }
+    learning::activity::notify();
     windows::sync_app_theme(app, &saved.ui.theme);
     windows::sync_overlay_layout_cache(&saved.ui);
     let mut warnings = Vec::new();
@@ -340,7 +428,13 @@ pub(crate) fn delete_history_record(
     id: String,
 ) -> Result<history::DeleteHistoryResult, String> {
     let result = state
-        .run_while_inactive(|| history::HistoryStore::delete(&id))
+        .run_while_inactive(|| {
+            let result = history::HistoryStore::delete(&id)?;
+            if let Err(error) = learning::activity::clear_source_details(&id) {
+                eprintln!("[Learning] cannot clear source details: {error}");
+            }
+            Ok(result)
+        })
         .map_err(|err| err.to_string())?;
     let _ = app.emit("history://updated", ());
     Ok(result)
@@ -468,7 +562,15 @@ pub(crate) fn set_data_dir(
     state: State<'_, workflow::AppState>,
 ) -> Result<data_dir::DataDirInfo, String> {
     state
-        .run_while_inactive(|| data_dir::set_data_dir(PathBuf::from(path.trim())))
+        .run_while_inactive(|| {
+            learning::observation::cancel();
+            learning::cancel();
+            let result = learning::activity::with_directory_change(|| {
+                learning::with_store_lock(|| data_dir::set_data_dir(PathBuf::from(path.trim())))
+            });
+            learning::activity::notify();
+            result
+        })
         .map_err(|err| err.to_string())
 }
 
@@ -477,7 +579,15 @@ pub(crate) fn reset_data_dir(
     state: State<'_, workflow::AppState>,
 ) -> Result<data_dir::DataDirInfo, String> {
     state
-        .run_while_inactive(data_dir::reset_data_dir)
+        .run_while_inactive(|| {
+            learning::observation::cancel();
+            learning::cancel();
+            let result = learning::activity::with_directory_change(|| {
+                learning::with_store_lock(data_dir::reset_data_dir)
+            });
+            learning::activity::notify();
+            result
+        })
         .map_err(|err| err.to_string())
 }
 

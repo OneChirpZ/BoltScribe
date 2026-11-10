@@ -6,19 +6,26 @@ import type { TextBundle } from "../domain/i18n";
 import type { CorrectionSection } from "../domain/navigation";
 import { buildPromptPreview, isBuiltinVariable, normalizeVariableName, variableToken } from "../domain/promptTemplate";
 import { enabledDictionaryText, reconcileDisabledDictionaryTerms } from "../domain/correctionText";
+import LearningSection from "./LearningSection";
 
-const promptEditors = ["system", "template", "variables"] as const;
+const promptEditors = ["template", "system", "variables"] as const;
 type PromptEditor = (typeof promptEditors)[number];
 
 export default function CorrectionPage({
   config,
   onChange,
+  onOpenModels,
+  onOpenLearning,
+  onOpenRecord,
   section,
   text,
 }: {
   config: AppConfig;
   onChange: (config: AppConfig) => void;
-  section: CorrectionSection;
+  onOpenModels?: () => void;
+  section: Exclude<CorrectionSection, "learning">;
+  onOpenLearning?: () => void;
+  onOpenRecord?: (id: string) => void;
   text: TextBundle;
 }) {
   const dictionaryText = config.correction.dictionary_text ?? "";
@@ -43,12 +50,15 @@ export default function CorrectionPage({
   const [promptEditor, setPromptEditor] = useState<PromptEditor>("template");
 
   const variables = config.correction.variables ?? [];
-  const sectionDetails = {
-    requirements: { title: text.correction.requirementsNav, description: text.correction.requirementsDescription },
-    dictionary: { title: text.correction.dictionaryNav, description: text.correction.dictionaryDescription },
-    rules: { title: text.correction.rulesNav, description: text.correction.rulesDescription },
-    prompt: { title: text.correction.promptNav, description: text.correction.promptDescription },
+  const sectionTitle = {
+    dictionary: text.correction.dictionaryNav,
+    rules: text.correction.rulesNav,
+    prompt: text.correction.promptNav,
   }[section];
+  const editorLabels = {
+    template: text.correction.template,
+    system: text.correction.systemPrompt, variables: text.correction.variablesNav,
+  };
 
   function updateDictionaryLines(value: string) {
     onChange({
@@ -150,34 +160,26 @@ export default function CorrectionPage({
   return (
     <section className={`panel correction-page correction-page-${section}`}>
       <header className="correction-subpage-header">
-        <div>
-          <div className="eyebrow">{text.correction.title}</div>
-          <h1>{sectionDetails.title}</h1>
-        </div>
-        <p>{sectionDetails.description}</p>
+        <h1>{sectionTitle}</h1>
+        {section === "rules" ? <p>{text.correction.rulesDescription}</p> : null}
       </header>
 
       <div className={`correction-subpage-body correction-subpage-body-${section}`}>
-        {section === "requirements" ? (
-          <label className="correction-fill-field correction-requirements-editor">
-            <span className="field-label">{text.correction.requirementText}</span>
-            <textarea
-              className="correction-fill-editor"
-              value={config.correction.user_requirements}
-              onChange={(event) => onChange({ ...config, correction: { ...config.correction, user_requirements: event.target.value } })}
-            />
-          </label>
-        ) : null}
-
         {section === "dictionary" ? (
-          <CorrectionLineEditor
-            kind="dictionary"
-            value={dictionaryText}
-            disabledDictionaryTerms={disabledDictionaryTerms}
-            onChange={updateDictionaryLines}
-            onDisabledDictionaryTermsChange={updateDisabledDictionaryTerms}
-            text={text}
-          />
+          <div className="dictionary-workspace">
+            <section className="dictionary-source-card">
+              <CorrectionLineEditor
+                heading={config.ui.app_language === "en-US" ? "Manual entries" : "手动词条"}
+                kind="dictionary"
+                value={dictionaryText}
+                disabledDictionaryTerms={disabledDictionaryTerms}
+                onChange={updateDictionaryLines}
+                onDisabledDictionaryTermsChange={updateDisabledDictionaryTerms}
+                text={text}
+              />
+            </section>
+            <LearningSection config={config} onChange={onChange} onOpenModels={onOpenModels} onOpenLearning={onOpenLearning} onOpenRecord={onOpenRecord} />
+          </div>
         ) : null}
 
         {section === "rules" ? (
@@ -202,11 +204,7 @@ export default function CorrectionPage({
                       onClick={() => setPromptEditor(tab)}
                       onKeyDown={(event) => handlePromptTabKeyDown(event, tab)}
                     >
-                      {tab === "system"
-                        ? text.correction.systemPrompt
-                        : tab === "template"
-                          ? text.correction.template
-                          : text.correction.variablesNav}
+                      {editorLabels[tab]}
                     </button>
                   ))}
                 </div>
@@ -228,7 +226,27 @@ export default function CorrectionPage({
                 role="tabpanel"
                 aria-labelledby={`${promptTabsId}-${promptEditor}-tab`}
               >
-                {promptEditor === "variables" ? (
+                {promptEditor === "template" ? (
+                  <div className="prompt-template-fields">
+                    <label className="prompt-requirements-field">
+                      <span className="field-label">{text.correction.requirementsNav}</span>
+                      <textarea rows={2}
+                        value={config.correction.user_requirements}
+                        onChange={(event) => onChange({ ...config, correction: { ...config.correction, user_requirements: event.target.value } })} />
+                    </label>
+                    {config.correction.user_requirements && !config.correction.prompt_template.includes("{{user_requirements}}") ? (
+                      <button type="button" className="secondary small" onClick={() => updatePromptTemplate(config.correction.prompt_template + "\n{{user_requirements}}")}>
+                        {config.ui.app_language === "en-US" ? "Include requirements in template" : "将纠错要求加入模板"}
+                      </button>
+                    ) : null}
+                    <label className="correction-fill-field">
+                      <span className="field-label">{config.ui.app_language === "en-US" ? "Template body" : "模板正文"}</span>
+                      <textarea ref={templateRef} className="correction-fill-editor prompt-workspace-textarea"
+                        value={config.correction.prompt_template} spellCheck={false}
+                        onChange={(event) => updatePromptTemplate(event.target.value)} />
+                    </label>
+                  </div>
+                ) : promptEditor === "variables" ? (
                   <PromptVariablesEditor
                     variables={variables}
                     onAdd={addVariable}
@@ -238,24 +256,12 @@ export default function CorrectionPage({
                   />
                 ) : (
                   <label className="correction-fill-field">
-                    <span className="visually-hidden">
-                      {promptEditor === "system" ? text.correction.systemPrompt : text.correction.template}
-                    </span>
-                    {promptEditor === "system" ? (
-                      <textarea
-                        className="correction-fill-editor prompt-workspace-textarea"
-                        value={config.llm.system_prompt}
-                        onChange={(event) => onChange({ ...config, llm: { ...config.llm, system_prompt: event.target.value } })}
-                      />
-                    ) : (
-                      <textarea
-                        ref={templateRef}
-                        className="correction-fill-editor prompt-workspace-textarea"
-                        value={config.correction.prompt_template}
-                        spellCheck={false}
-                        onChange={(event) => updatePromptTemplate(event.target.value)}
-                      />
-                    )}
+                    <span className="visually-hidden">{text.correction.systemPrompt}</span>
+                    <textarea
+                      className="correction-fill-editor prompt-workspace-textarea"
+                      value={config.llm.system_prompt}
+                      onChange={(event) => onChange({ ...config, llm: { ...config.llm, system_prompt: event.target.value } })}
+                    />
                   </label>
                 )}
               </div>

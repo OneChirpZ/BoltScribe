@@ -38,3 +38,78 @@
 .race-model-option:has(input:disabled) {
   opacity: 0.58;
 }
+
+.models-page .settings-section { gap: 12px; padding: 14px; }
+.model-service-list { display: grid; gap: 4px; }
+.model-service-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  border-radius: var(--radius);
+  padding: 5px 8px;
+}
+.model-service-row.selected { background: var(--fill-soft); }
+.model-service-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 1 auto;
+  min-width: 8rem;
+  max-width: 100%;
+  border: 0;
+  padding: 4px 0;
+  color: var(--text);
+  background: transparent;
+  text-align: start;
+  font-weight: 650;
+}
+.model-service-select span { overflow-wrap: anywhere; }
+.model-service-select::before {
+  content: "";
+  flex: 0 0 8px;
+  height: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 100%;
+}
+.model-service-select[aria-pressed="true"]::before { border-color: var(--amber); background: var(--amber); }
+.model-service-count, .model-service-error { color: var(--muted); font-size: 12px; }
+.model-service-count { min-width: 5.5em; font-variant-numeric: tabular-nums; }
+.model-service-error { flex-basis: 100%; overflow-wrap: anywhere; }
+.model-service-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.model-service-actions button.small { min-height: 28px; padding: 3px 9px; }
+.models-page .model-service-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+.model-service-endpoint { grid-column: span 2; }
+.model-service-destructive { display: flex; justify-content: flex-end; }
+.model-task-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 14px;
+}
+.model-task-card .model-primary-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.model-task-parameters > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.model-task-parameters[open] > summary { margin-bottom: 12px; }
+.model-task-parameters .compact-number-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr)); }
+.model-task-parameters .compact-control-row { gap: 8px; }
+@container settings-card (min-width: 480px) {
+  .model-task-card .model-primary-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
+}
+@container settings-card (max-width: 560px) {
+  .models-page .model-service-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .model-service-endpoint { grid-column: auto; }
+}
+@container settings-card (max-width: 360px) {
+  .models-page .model-service-grid { grid-template-columns: minmax(0, 1fr); }
+  .model-service-select { min-width: 0; }
+}
+@container content (max-width: 760px) {
+  .model-task-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+.race-model-list { max-height: 18rem; overflow-y: auto; }

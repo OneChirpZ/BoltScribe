@@ -5,7 +5,9 @@ export interface AppConfig {
   audio: AudioConfig;
   asr: AsrConfig;
   llm: LlmConfig;
+  model_services: ModelService[];
   correction: CorrectionConfig;
+  learning: LearningConfig;
   ui: UiConfig;
   retention: RetentionConfig;
   system: SystemConfig;
@@ -82,12 +84,8 @@ export interface AsrConnectionRetryConfig {
 }
 
 export interface LlmConfig {
-  provider: "openai" | "volc_ark" | "custom" | string;
-  api_format: "chat_completions" | "responses" | string;
-  endpoint: string;
-  api_key: string;
+  service_id: string;
   model: string;
-  provider_settings: LlmProviderSettings[];
   race_enabled: boolean;
   race_models: string[];
   race_targets: RaceModelTarget[];
@@ -98,23 +96,88 @@ export interface LlmConfig {
   thinking_enabled: boolean;
   thinking_effort: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | string;
   max_output_tokens: number | null;
-  model_presets: ModelPreset[];
 }
 
-export interface ModelPreset {
-  provider: string;
-  model: string;
-}
-
-export interface LlmProviderSettings {
-  provider: string;
+export interface ModelService {
+  id: string;
+  name: string;
+  provider: "openai" | "volc_ark" | "custom" | string;
+  api_format: "chat_completions" | "responses" | string;
   endpoint: string;
-  api_format: string;
   api_key: string;
+  models: string[];
 }
+
+
+export interface LearningConfig {
+  enabled: boolean;
+  llm: LlmConfig;
+}
+
+export interface LearnedEntry {
+  id: string;
+  term: string;
+  from: string | null;
+  created_at: string;
+  record_id: string;
+  enabled: boolean;
+}
+
+export type LearningActivityState =
+  | "observing"
+  | "queued"
+  | "analyzing"
+  | "learned"
+  | "no_change"
+  | "no_terms"
+  | "skipped"
+  | "failed"
+  | "interrupted";
+
+export interface LearningActivity {
+  id: string;
+  record_id: string;
+  started_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  state: LearningActivityState;
+  reason: string | null;
+  model: string | null;
+  service_id: string | null;
+  entries: LearnedEntry[];
+  error: string | null;
+  edited_text?: string | null;
+  model_output?: string | null;
+}
+
+export interface LearningActivityPage {
+  active: LearningActivity[];
+  history: LearningActivity[];
+  has_more: boolean;
+}
+
+export interface LearningStatus {
+  observation: {
+    supported: boolean;
+    active: boolean;
+    notifications: number;
+    text_reads: number;
+    completed: number;
+    skipped: number;
+  };
+  processing: boolean;
+  pending: boolean;
+  submitted: number;
+  analyzed: number;
+  accepted: number;
+  rejected: number;
+  skipped: number;
+  last_error: string | null;
+}
+
 
 export interface RaceModelTarget {
-  provider: string;
+  service_id: string;
   model: string;
 }
 

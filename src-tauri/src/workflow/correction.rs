@@ -1,6 +1,23 @@
 use super::state::*;
 use super::*;
 
+pub(super) fn with_learned_corrections(mut config: AppConfig, raw_text: &str) -> AppConfig {
+    if !config.correction.enabled {
+        return config;
+    }
+    match crate::learning::list_entries() {
+        Ok(entries) => {
+            config.correction = crate::learning::augment_correction_for_text(
+                &config.correction,
+                &entries,
+                raw_text,
+            );
+        }
+        Err(_) => eprintln!("[Learning] saved corrections unavailable; using manual dictionary"),
+    }
+    config
+}
+
 pub(super) fn correct_recording_text(
     raw_text: &str,
     config: &AppConfig,
@@ -9,7 +26,8 @@ pub(super) fn correct_recording_text(
         return (raw_text.to_string(), None, Vec::new());
     }
 
-    match correct_with_config(raw_text, &config.llm, &config.correction) {
+    let llm = config.resolve_llm(&config.llm);
+    match correct_with_config(raw_text, &llm, &config.correction) {
         Ok(outcome) => (outcome.text, None, outcome.logs),
         Err(err) => (raw_text.to_string(), Some(err.message), err.logs),
     }
@@ -76,7 +94,7 @@ pub(super) fn active_race_targets(llm: &LlmConfig) -> Vec<RaceModelTarget> {
         llm.race_models
             .iter()
             .map(|model| RaceModelTarget {
-                provider: llm.provider.clone(),
+                service_id: llm.service_id.clone(),
                 model: model.clone(),
             })
             .collect::<Vec<_>>()
@@ -86,18 +104,18 @@ pub(super) fn active_race_targets(llm: &LlmConfig) -> Vec<RaceModelTarget> {
 
     let mut targets = Vec::new();
     for target in source_targets {
-        let provider = target.provider.trim();
+        let provider = target.service_id.trim();
         let model = target.model.trim();
         if provider.is_empty()
             || model.is_empty()
             || targets.iter().any(|existing: &RaceModelTarget| {
-                existing.provider == provider && existing.model == model
+                existing.service_id == provider && existing.model == model
             })
         {
             continue;
         }
         targets.push(RaceModelTarget {
-            provider: provider.to_string(),
+            service_id: provider.to_string(),
             model: model.to_string(),
         });
     }
@@ -147,7 +165,7 @@ fn correct_with_race(
                 }
                 errors.push(format!(
                     "{} / {}: {}",
-                    target.provider, target.model, err.message
+                    target.service_id, target.model, err.message
                 ));
             }
         }
@@ -160,40 +178,29 @@ fn correct_with_race(
     })
 }
 
-fn llm_for_race_target(base: &LlmConfig, target: &RaceModelTarget) -> LlmConfig {
+pub(super) fn llm_for_race_target(base: &LlmConfig, target: &RaceModelTarget) -> LlmConfig {
     let mut llm = base.clone();
-    llm.provider = target.provider.clone();
+    llm.service_id = target.service_id.clone();
     llm.model = target.model.clone();
-    if target.provider == base.provider {
+    if target.service_id == base.service_id {
         return llm;
     }
 
     if let Some(settings) = base
-        .provider_settings
+        .resolved_services
         .iter()
-        .find(|settings| settings.provider == target.provider)
+        .find(|settings| settings.id == target.service_id)
     {
+        llm.provider = settings.provider.clone();
         llm.endpoint = settings.endpoint.clone();
         llm.api_format = settings.api_format.clone();
         llm.api_key = settings.api_key.clone();
         return llm;
     }
 
-    if let Some((endpoint, api_format)) = provider_defaults(&target.provider) {
-        llm.endpoint = endpoint.to_string();
-        llm.api_format = api_format.to_string();
-    }
+    llm.endpoint.clear();
     llm.api_key.clear();
     llm
-}
-
-fn provider_defaults(provider: &str) -> Option<(&'static str, &'static str)> {
-    match provider {
-        "openai" => Some(("https://api.openai.com/v1", "responses")),
-        "volc_ark" => Some(("https://ark.cn-beijing.volces.com/api/v3", "responses")),
-        "custom" => Some(("", "chat_completions")),
-        _ => None,
-    }
 }
 
 pub(super) fn append_failed_history(
