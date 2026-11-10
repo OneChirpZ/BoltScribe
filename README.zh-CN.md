@@ -31,12 +31,10 @@ BoltScribe 可以在桌面任意位置把语音变成可直接使用的文本。
 ![BoltScribe 中文界面截图](docs/assets/screenshots/app-overview-zh.jpg)
 
 <p align="center">
-  <img src="docs/assets/screenshots/capsule-listening.jpg" width="31%" alt="BoltScribe 正在听取胶囊">
-  <img src="docs/assets/screenshots/capsule-correcting.jpg" width="31%" alt="BoltScribe 文本整理胶囊">
-  <img src="docs/assets/screenshots/capsule-completed.jpg" width="31%" alt="BoltScribe 完成胶囊">
+  <img src="docs/assets/screenshots/capsule-states.gif" width="420" alt="录音胶囊依次显示正在听取、文本整理和粘贴完成">
 </p>
 
-<p align="center"><sub>正在听取 · 文本整理 · 粘贴完成</sub></p>
+<p align="center"><sub><a href="docs/assets/screenshots/capsule-listening.jpg">正在听取</a> → <a href="docs/assets/screenshots/capsule-correcting.jpg">文本整理</a> → <a href="docs/assets/screenshots/capsule-completed.jpg">粘贴完成</a>。截图和动图均使用示例数据。</sub></p>
 
 ## 功能亮点
 
@@ -79,7 +77,9 @@ macOS 安装包使用 ad-hoc 签名且未经 Apple 公证；Windows 安装包未
 
 可以直接在应用中调整转写语言、AI 模型、词典、易错词规则、麦克风优先级、无人声保护、浮窗大小与位置、输出音量行为、历史保留和启动选项。
 
-自学习是 macOS Beta 功能，默认关闭。选好学习模型后，可在「LLM 纠错 → 自学习」开启。BoltScribe 会对照本轮语音上屏后的文字和你的修改，提取下次可能用到的纠错词。
+自学习是 macOS Beta 功能，默认关闭。选好学习模型后，可在「LLM 纠错 → 自学习」开启。BoltScribe 会对照本轮语音上屏后的文字和你的修改，提取下次可能用到的纠错词。点击「功能说明」，可以查看哪些文本会发给学习模型，以及哪些记录保存在本机。
+
+![自学习功能说明窗口](docs/assets/screenshots/self-learning-help-zh.png)
 
 OpenAI 和火山方舟的 Fast / 低延迟模式默认开启，可在模型设置中关闭。高速档位费用更高，火山方舟需要先为所用模型开通低延迟服务。历史记录的调用日志会记录请求档位与实际响应档位。
 

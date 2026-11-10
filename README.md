@@ -31,12 +31,10 @@ It stays quietly in the menu bar or system tray, provides clear recording feedba
 ![BoltScribe interface in English](docs/assets/screenshots/app-overview-en.jpg)
 
 <p align="center">
-  <img src="docs/assets/screenshots/capsule-listening.jpg" width="31%" alt="BoltScribe listening capsule">
-  <img src="docs/assets/screenshots/capsule-correcting.jpg" width="31%" alt="BoltScribe correction capsule">
-  <img src="docs/assets/screenshots/capsule-completed.jpg" width="31%" alt="BoltScribe completion capsule">
+  <img src="docs/assets/screenshots/capsule-states-en.gif" width="420" alt="The recording capsule switches from listening to text cleanup and paste complete">
 </p>
 
-<p align="center"><sub>Listening · Text cleanup · Completed</sub></p>
+<p align="center"><sub>Listening → Text cleanup → Paste complete. All screenshots and animations use sample data.</sub></p>
 
 ## Features
 
@@ -79,7 +77,9 @@ After installation:
 
 BoltScribe lets you adjust transcription language, AI models, dictionaries, correction rules, microphone priority, no-speech protection, overlay size and position, output volume behavior, history retention, and launch options from the app.
 
-Self-learning is a macOS beta and is off by default. To try it, choose a learning model, then turn it on under LLM Correction → Self-learning. BoltScribe compares a dictation with the edits you make to it and looks for terms it can recognize next time.
+Self-learning is a macOS beta and is off by default. To try it, choose a learning model, then turn it on under LLM Correction → Self-learning. BoltScribe compares a dictation with the edits you make to it and looks for terms it can recognize next time. Select **About self-learning** to see what the app sends to the learning model and what it stores locally.
+
+![About self-learning dialog](docs/assets/screenshots/self-learning-help-en.png)
 
 Fast / low-latency mode is enabled by default for OpenAI and Volcengine Ark and can be turned off in model settings. Fast inference costs more; enable the model's low-latency service in Ark before using it. History call logs record both the requested and actual service tiers.
 
