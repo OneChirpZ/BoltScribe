@@ -152,6 +152,8 @@ impl ActivityState {
 pub struct LearningActivity {
     pub id: String,
     pub record_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_record_ids: Vec<String>,
     pub started_at: String,
     pub updated_at: String,
     pub finished_at: Option<String>,
@@ -162,14 +164,21 @@ pub struct LearningActivity {
     pub entries: Vec<LearnedEntry>,
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_output: Option<String>,
 }
 
 impl LearningActivity {
+    fn has_source(&self, record_id: &str) -> bool {
+        self.record_id == record_id || self.additional_record_ids.iter().any(|id| id == record_id)
+    }
+
     fn summary(&self) -> Self {
         Self {
+            original_text: None,
             edited_text: None,
             model_output: None,
             ..self.clone()
@@ -313,7 +322,7 @@ impl Journal {
 
     fn page(&self, limit: usize, offset: usize, record_id: Option<&str>) -> ActivityPage {
         let matching =
-            |entry: &&LearningActivity| record_id.map_or(true, |id| entry.record_id == id);
+            |entry: &&LearningActivity| record_id.map_or(true, |id| entry.has_source(id));
         let active = self
             .entries
             .iter()
@@ -346,7 +355,7 @@ impl Journal {
             .entries
             .iter()
             .rev()
-            .filter(|entry| entry.record_id == record_id);
+            .filter(|entry| entry.has_source(record_id));
         if let Some(activity_id) = activity_id {
             return matching.find(|entry| entry.id == activity_id);
         }
@@ -356,14 +365,41 @@ impl Journal {
             .or_else(|| matching.next())
     }
 
+    #[cfg(any(target_os = "macos", test))]
+    fn merge_source(&mut self, active_id: &str, next_id: &str) -> bool {
+        if active_id == next_id {
+            return false;
+        }
+        let find_observation = |id| {
+            self.entries
+                .iter()
+                .position(|entry| entry.id == id && entry.state == ActivityState::Observing)
+        };
+        let (Some(active), Some(next)) = (find_observation(active_id), find_observation(next_id))
+        else {
+            return false;
+        };
+        let source = self.entries[next].clone();
+        let entry = &mut self.entries[active];
+        for id in std::iter::once(source.record_id).chain(source.additional_record_ids) {
+            if !entry.has_source(&id) {
+                entry.additional_record_ids.push(id);
+            }
+        }
+        entry.updated_at = Utc::now().to_rfc3339();
+        self.entries.remove(next);
+        true
+    }
+
     fn clear_source_details(&mut self, record_id: &str) -> bool {
         let mut changed = false;
         let now = Utc::now().to_rfc3339();
         for entry in self
             .entries
             .iter_mut()
-            .filter(|entry| entry.record_id == record_id)
+            .filter(|entry| entry.has_source(record_id))
         {
+            changed |= entry.original_text.take().is_some();
             changed |= entry.edited_text.take().is_some();
             changed |= entry.model_output.take().is_some();
             if entry.state.active() {
@@ -416,6 +452,7 @@ pub fn begin(record_id: &str, config: Option<&LearningConfig>) -> Option<Activit
         let entry = LearningActivity {
             id: id.clone(),
             record_id: record_id.into(),
+            additional_record_ids: Vec::new(),
             started_at: now.clone(),
             updated_at: now,
             finished_at: None,
@@ -425,6 +462,7 @@ pub fn begin(record_id: &str, config: Option<&LearningConfig>) -> Option<Activit
             service_id: config.map(|config| config.llm.service_id.clone()),
             entries: Vec::new(),
             error: None,
+            original_text: None,
             edited_text: None,
             model_output: None,
         };
@@ -453,6 +491,39 @@ pub fn begin(record_id: &str, config: Option<&LearningConfig>) -> Option<Activit
 }
 
 impl ActivityHandle {
+    pub(super) fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn merge_source(&self, next: &Self) -> bool {
+        if self.path != next.path {
+            return false;
+        }
+        match with_current_journal(|path, journal| {
+            if self.path != path {
+                return Ok(false);
+            }
+            let mut merged = journal.clone();
+            if !merged.merge_source(&self.id, &next.id) {
+                return Ok(false);
+            }
+            schedule_save(path, &merged)?;
+            *journal = merged;
+            Ok(true)
+        }) {
+            Ok(true) => {
+                notify();
+                true
+            }
+            Ok(false) => false,
+            Err(error) => {
+                eprintln!("[Learning] cannot merge activity sources: {error}");
+                false
+            }
+        }
+    }
+
     pub fn is_current_active(&self) -> bool {
         // Worker cancellation takes the worker lock before migration freezes JOURNALS.
         // Enqueue calls this while holding that worker lock, keeping both checks atomic.
@@ -484,21 +555,28 @@ impl ActivityHandle {
         });
     }
 
-    pub(super) fn set_details(&self, edited_text: Option<&str>, model_output: Option<&str>) {
-        let edited_text = edited_text.filter(|text| {
-            !text.trim().is_empty()
-                && text.encode_utf16().count() <= MAX_TEXT_UNITS
-                && !sensitive(text)
-        });
+    pub(super) fn set_details(
+        &self,
+        original_text: Option<&str>,
+        edited_text: Option<&str>,
+        model_output: Option<&str>,
+    ) {
+        let original_text = original_text.filter(|text| can_save_sample_text(text));
+        let edited_text = edited_text.filter(|text| can_save_sample_text(text));
         let model_output = model_output.filter(|text| {
             text.len() <= MAX_RESPONSE_BYTES
                 && serde_json::from_str::<serde_json::Value>(text)
                     .is_ok_and(|value| !sensitive(&value.to_string()))
         });
-        if edited_text.is_none() && model_output.is_none() {
+        if original_text.is_none() && edited_text.is_none() && model_output.is_none() {
             return;
         }
         self.mutate_active(|entry| {
+            if !entry.additional_record_ids.is_empty() {
+                if let Some(text) = original_text {
+                    entry.original_text = Some(text.to_owned());
+                }
+            }
             if let Some(text) = edited_text {
                 entry.edited_text = Some(text.to_owned());
             }
@@ -528,6 +606,10 @@ impl ActivityHandle {
         }
         notify();
     }
+}
+
+fn can_save_sample_text(text: &str) -> bool {
+    !text.trim().is_empty() && text.encode_utf16().count() <= MAX_TEXT_UNITS && !sensitive(text)
 }
 
 pub fn notify() {
@@ -626,6 +708,7 @@ mod tests {
         LearningActivity {
             id: id.to_string(),
             record_id: format!("record-{}", id % 2),
+            additional_record_ids: vec![],
             started_at: String::new(),
             updated_at: String::new(),
             finished_at: None,
@@ -635,6 +718,7 @@ mod tests {
             service_id: None,
             entries: vec![],
             error: None,
+            original_text: None,
             edited_text: None,
             model_output: None,
         }
@@ -677,10 +761,50 @@ mod tests {
 
         let page = journal.page(10, 0, None);
         let summary = serde_json::to_value(&page.history[1]).unwrap();
+        assert!(summary.get("original_text").is_none());
         assert!(summary.get("edited_text").is_none());
         assert!(summary.get("model_output").is_none());
         let old: LearningActivity = serde_json::from_value(summary).unwrap();
         assert!(old.edited_text.is_none() && old.model_output.is_none());
+        assert!(old.original_text.is_none() && old.additional_record_ids.is_empty());
+    }
+
+    #[test]
+    fn consecutive_sources_share_one_activity_and_lookup_from_each_record() {
+        let mut third = entry(2, ActivityState::Observing);
+        third.record_id = "record-2".into();
+        let mut journal = Journal {
+            entries: vec![
+                entry(0, ActivityState::Observing),
+                entry(1, ActivityState::Observing),
+                third,
+            ],
+        };
+        assert!(journal.merge_source("0", "1"));
+        assert!(journal.merge_source("0", "2"));
+        assert!(!journal.merge_source("0", "0"));
+        assert!(!journal.merge_source("0", "1"));
+        assert_eq!(journal.page(10, 0, None).active.len(), 1);
+        let activity = &mut journal.entries[0];
+        assert_eq!(activity.additional_record_ids, ["record-1", "record-2"]);
+        activity.original_text = Some("合并后的语音".into());
+        activity.edited_text = Some("修正后的语音".into());
+        activity.model_output = Some(r#"{"terms":[]}"#.into());
+        for record in ["record-0", "record-1", "record-2"] {
+            let page = journal.page(10, 0, Some(record));
+            assert_eq!(page.active.len(), 1);
+            assert_eq!(page.active[0].id, "0");
+            assert!(page.active[0].original_text.is_none());
+            let source = journal.find_source(record, Some("0")).unwrap();
+            assert_eq!(source.original_text.as_deref(), Some("合并后的语音"));
+        }
+        assert!(journal.clear_source_details("record-1"));
+        let source = journal.find_source("record-0", Some("0")).unwrap();
+        assert_eq!(source.state, ActivityState::Skipped);
+        assert_eq!(source.reason.as_deref(), Some("source_removed"));
+        assert!(source.original_text.is_none() && source.edited_text.is_none());
+        assert!(source.model_output.is_none());
+        assert!(!journal.merge_source("0", "1"));
     }
 
     #[test]
@@ -689,7 +813,8 @@ mod tests {
         let base =
             std::env::temp_dir().join(format!("boltscribe-activity-details-{}", Uuid::new_v4()));
         let path = base.join("learning-activity.json");
-        let active = entry(0, ActivityState::Analyzing);
+        let mut active = entry(0, ActivityState::Analyzing);
+        active.additional_record_ids.push("record-1".into());
         let handle = ActivityHandle {
             path: path.clone(),
             id: active.id.clone(),
@@ -701,25 +826,33 @@ mod tests {
         .unwrap();
 
         let edited = "改为 BoltScribe。\n第二行照原样保留。";
+        let original = "改为波特斯考。\n第二行照原样保留。";
         let output = " {\n  \"terms\": []\n}\n";
-        handle.set_details(Some(edited), Some(output));
+        handle.set_details(Some(original), Some(edited), Some(output));
         handle.set_details(
+            Some("包含 api_key 的内容"),
             Some("包含 api_key 的修改"),
             Some(r#"{"terms":[{"term":"\u0070assword"}]}"#),
         );
         handle.set_details(
+            Some(&"字".repeat(MAX_TEXT_UNITS + 1)),
             Some(&"字".repeat(MAX_TEXT_UNITS + 1)),
             Some(&format!(
                 "{}{{\"terms\":[]}}",
                 " ".repeat(MAX_RESPONSE_BYTES)
             )),
         );
-        handle.set_details(None, Some("不是 JSON 的模型响应"));
+        handle.set_details(None, None, Some("不是 JSON 的模型响应"));
         handle.update(ActivityState::NoTerms, Some("no_terms"), vec![], None);
-        handle.set_details(Some("过时的修改"), Some(r#"{"terms":[{}]}"#));
+        handle.set_details(
+            Some("过时的语音"),
+            Some("过时的修改"),
+            Some(r#"{"terms":[{}]}"#),
+        );
         flush().unwrap();
 
         let stored = load(&path).unwrap();
+        assert_eq!(stored.entries[0].original_text.as_deref(), Some(original));
         assert_eq!(stored.entries[0].edited_text.as_deref(), Some(edited));
         assert_eq!(stored.entries[0].model_output.as_deref(), Some(output));
         assert_eq!(stored.entries[0].state, ActivityState::NoTerms);
@@ -732,6 +865,7 @@ mod tests {
         learned.edited_text = Some("修正后的语音".into());
         learned.model_output = Some(r#"{"terms":[]}"#.into());
         learned.entries.push(LearnedEntry {
+            kind: super::super::EntryKind::Legacy,
             id: "term-1".into(),
             term: "BoltScribe".into(),
             from: Some("波特思考".into()),

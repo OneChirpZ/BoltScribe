@@ -570,14 +570,15 @@ textarea.prompt-workspace-textarea {
   grid-column: 1 / -1;
 }
 
-.correction-subpage-body-dictionary {
+.correction-subpage-body-dictionary, .correction-subpage-body-rules {
   overflow: visible;
 }
-.correction-page-dictionary {
+.correction-page-dictionary, .correction-page-rules {
   grid-template: auto auto / minmax(0, 1fr);
   overflow: visible;
 }
-.dictionary-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.dictionary-workspace, .rules-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.rules-workspace textarea.correction-bulk-editor { min-height: 10rem; resize: vertical; }
 .dictionary-source-card {
   min-width: 0;
   background: var(--surface-input);

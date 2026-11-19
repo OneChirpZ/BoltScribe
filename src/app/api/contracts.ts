@@ -11,6 +11,8 @@ import type {
   LearnedEntry,
   LearningActivity,
   LearningActivityPage,
+  LearningChange,
+  LearningChangeAction,
   LearningStatus,
   RecordingCleanupPreview,
   RecordingCleanupResult,
@@ -40,6 +42,8 @@ export interface LearningApi {
   loadActivity(limit: number, offset?: number, recordId?: string): Promise<LearningActivityPage>;
   loadSource(recordId: string, activityId?: string): Promise<LearningActivity | null>;
   loadEntries(): Promise<LearnedEntry[]>;
+  loadChanges(): Promise<LearningChange[]>;
+  resolveChange(id: string, action: LearningChangeAction): Promise<LearningChange[]>;
   deleteEntry(id: string): Promise<LearnedEntry[]>;
   setEntryEnabled(id: string, enabled: boolean): Promise<LearnedEntry[]>;
   getStatus(): Promise<LearningStatus>;

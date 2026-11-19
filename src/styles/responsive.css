@@ -164,8 +164,7 @@
     grid-template-columns: 1fr;
   }
 
-  .correction-subpage-body-prompt,
-  .correction-subpage-body-rules {
+  .correction-subpage-body-prompt {
     overflow-x: hidden;
     overflow-y: auto;
   }
@@ -175,20 +174,6 @@
     height: auto;
   }
 
-  .correction-subpage-body-rules .correction-items-panel {
-    min-height: 100%;
-    height: auto;
-  }
-
-  .correction-subpage-body-rules .correction-line-editor {
-    min-height: 100%;
-    height: auto;
-  }
-
-  .correction-subpage-body-rules .structured-item-list {
-    flex: 0 0 auto;
-    overflow: visible;
-  }
 }
 
 @media (max-width: 700px) {

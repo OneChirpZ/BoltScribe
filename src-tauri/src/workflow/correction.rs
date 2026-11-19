@@ -5,14 +5,8 @@ pub(super) fn with_learned_corrections(mut config: AppConfig, raw_text: &str) ->
     if !config.correction.enabled {
         return config;
     }
-    match crate::learning::list_entries() {
-        Ok(entries) => {
-            config.correction = crate::learning::augment_correction_for_text(
-                &config.correction,
-                &entries,
-                raw_text,
-            );
-        }
+    match crate::learning::correction_for_text(&config.correction, raw_text) {
+        Ok(effective) => config.correction = effective,
         Err(_) => eprintln!("[Learning] saved corrections unavailable; using manual dictionary"),
     }
     config

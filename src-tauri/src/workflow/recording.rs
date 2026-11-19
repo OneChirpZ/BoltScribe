@@ -41,7 +41,6 @@ pub fn toggle_recording(app: AppHandle, state: &AppState) -> Result<WorkflowStat
             }
         }
         ToggleAction::Start(task) => {
-            crate::learning::observation::finish();
             let recorder = state.recorder.clone();
             std::thread::spawn(move || start_recording_attempt(app, task, recorder));
         }
@@ -164,6 +163,7 @@ pub(super) fn prepare_toggle(runtime: &mut WorkflowRuntime) -> Result<TogglePlan
     let task = WorkflowTask {
         id: Uuid::new_v4().to_string(),
         cancel_token: Arc::new(AtomicBool::new(false)),
+        _learning_hold: crate::learning::observation::recording_started(),
     };
     runtime.activity = WorkflowActivity::Starting(task.clone());
     let status = runtime.update_status(WorkflowStatus {

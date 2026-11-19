@@ -55,8 +55,8 @@ BoltScribe 可以在桌面任意位置把语音变成可直接使用的文本。
 
 当前可下载版本：
 
-- macOS Apple Silicon：[BoltScribe v1.7.0](https://github.com/OneChirpZ/BoltScribe/releases/download/v1.7.0/BoltScribe_1.7.0_aarch64.dmg)
-- Windows x64：[BoltScribe v1.6.0](https://github.com/OneChirpZ/BoltScribe/releases/download/v1.6.0/BoltScribe_1.6.0_x64-setup.exe)
+- macOS Apple Silicon：[BoltScribe v1.8.0](https://github.com/OneChirpZ/BoltScribe/releases/download/v1.8.0/BoltScribe_1.8.0_aarch64.dmg)
+- Windows x64：[BoltScribe v1.8.0](https://github.com/OneChirpZ/BoltScribe/releases/download/v1.8.0/BoltScribe_1.8.0_x64-setup.exe)
 
 macOS 安装包使用 ad-hoc 签名且未经 Apple 公证；Windows 安装包未进行代码签名。首次打开时，系统可能显示安全提示。
 
@@ -77,7 +77,7 @@ macOS 安装包使用 ad-hoc 签名且未经 Apple 公证；Windows 安装包未
 
 可以直接在应用中调整转写语言、AI 模型、词典、易错词规则、麦克风优先级、无人声保护、浮窗大小与位置、输出音量行为、历史保留和启动选项。
 
-自学习是 macOS Beta 功能，默认关闭。选好学习模型后，可在「LLM 纠错 → 自学习」开启。BoltScribe 会对照本轮语音上屏后的文字和你的修改，提取下次可能用到的纠错词。点击「功能说明」，可以查看哪些文本会发给学习模型，以及哪些记录保存在本机。
+自学习是 macOS Beta 功能，默认关闭。选好学习模型后，可在「LLM 纠错 → 自学习」开启。BoltScribe 会从你的手动修改中学习专有名词的标准写法，以及反复出现的「错听写法 → 正确写法」。修改或停用手动条目需要你确认。你可以在学习历史中查看和撤销变更。点击「功能说明」，可以查看哪些文本会发给学习模型，以及哪些记录保存在本机。
 
 ![自学习功能说明窗口](docs/assets/screenshots/self-learning-help-zh.png)
 
@@ -89,7 +89,7 @@ BoltScribe 需要麦克风权限来录音。在 macOS 上，它还需要辅助�
 
 ## 隐私与本地数据
 
-历史、录音、设置和输入统计保存在本机。可以在设置中移动数据目录并控制保留范围。转写和文本整理使用你配置的服务。启用自学习后，BoltScribe 会将本轮上屏文字和手动修改后的版本发给你配置的学习模型。本地麦克风灵敏度测试不调用这些服务。
+历史、录音、设置和输入统计保存在本机。可以在设置中移动数据目录并控制保留范围。转写和文本整理使用你配置的服务。启用自学习后，BoltScribe 会将本轮上屏文字、手动修改、可关联的原始转写、纠错状态及相关词典和规则条目发给你配置的学习模型。本地麦克风灵敏度测试不调用这些服务。
 
 ## 许可证
 

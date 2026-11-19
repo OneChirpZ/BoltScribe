@@ -82,4 +82,23 @@ describe("LearningSourceDialog", () => {
     expect(dialog.getAllByText("Not recorded")).toHaveLength(2);
     expect(dialog.getByText("Kubernetes", { selector: "strong" })).toBeTruthy();
   });
+
+  it("compares the combined inserted text with the edits for all source dictations", () => {
+    const preview = createBrowserPreviewState();
+    const record = { ...preview.history[0], raw_text: "先看博客科", corrected_text: "先看博客科。" };
+    const activity = {
+      ...preview.learningActivity[0],
+      additional_record_ids: ["next-record"],
+      original_text: "先看博客科。然后检查科德克斯。",
+      edited_text: "先看 BoltScribe。然后检查 Codex。",
+    };
+    render(<LearningSourceDialog record={record} activity={activity} language="zh-CN" onClose={vi.fn()} />);
+
+    const dialog = within(screen.getByRole("dialog", { name: "来源语音（合并 2 段）" }));
+    expect(dialog.getByRole("heading", { name: "合并后的上屏文本" })).toBeTruthy();
+    expect(dialog.getByText(activity.original_text)).toBeTruthy();
+    expect(dialog.getByText(activity.edited_text)).toBeTruthy();
+    expect(dialog.getByText(record.raw_text)).toBeTruthy();
+    expect(dialog.queryByText(record.corrected_text)).toBeNull();
+  });
 });

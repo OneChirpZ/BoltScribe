@@ -16,15 +16,15 @@ export function activityReasonLabel(reason: string | null, language: string): st
 const chinese = {
   title: "自学习", current: "当前任务", history: "学习历史", enabled: "自动学习纠错词",
   help: "功能说明", helpTitle: "自学习如何工作", closeHelp: "关闭",
-  helpObserve: "自动学习目前在 macOS 上提供 Beta 体验，默认关闭。开启并配置模型后，BoltScribe 会短暂观察本轮语音上屏的文字及其后续修改。周围的草稿只用于在本机核对插入范围。",
-  helpSend: "修改符合学习条件时，BoltScribe 将本轮上屏的文字和手动修改后的版本发送给你配置的学习模型，提取可复用的词条。",
-  helpStore: "学习历史可在本机查看修改后的文字和模型结果。通过校验的词条保存在本机词典中，可以停用或删除。",
+  helpObserve: "自动学习目前在 macOS 上提供 Beta 体验，默认关闭。开启并配置模型后，BoltScribe 会短暂观察语音上屏后的修改。同一输入框里的连续语音可以合并学习。周围的草稿只用于在本机核对插入范围。",
+  helpSend: "修改符合学习条件时，BoltScribe 会将相关的原始转写、上屏文字和手动修改、本轮纠错情况及现有的用户词典和易错规则条目发送给你配置的学习模型。",
+  helpStore: "学习结果保存在本机。手动条目的修改和停用需要你确认。你也可以在学习历史查看理由、来源并撤销已生效的变更。",
   idle: "当前没有学习任务", waiting: "等待上屏后的手动修改", running: "自学习运行中", disabled: "自学习已关闭",
   unconfigured: "待配置学习模型", unsupported: "当前平台暂不支持自动观察输入",
   configure: "管理模型", model: "学习模型", refresh: "刷新", loading: "正在加载学习记录…",
   empty: "还没有学习记录。", allRecords: "查看全部学习记录", filtered: "这条语音的学习记录",
   previous: "上一页", next: "下一页", details: "详情", elapsed: (seconds: number) => `已用 ${seconds} 秒`,
-  learned: (count: number) => `学到 ${count} 个词`, page: (page: number) => `第 ${page} 页`,
+  learned: (count: number) => `学到 ${count} 条`, updated: "已更新词库", covered: "词库无需变更", page: (page: number) => `第 ${page} 页`,
   finished: "结束时间", started: "开始时间", otherReason: "本次学习未新增词条",
   observing: "正在观察上屏后的修改", queued: "等待模型分析", analyzing: "正在分析修改",
 };
@@ -32,15 +32,15 @@ const chinese = {
 const english: typeof chinese = {
   title: "Self-learning", current: "Current tasks", history: "Learning history", enabled: "Automatically learn corrections",
   help: "About self-learning", helpTitle: "How self-learning works", closeHelp: "Close",
-  helpObserve: "Automatic learning is in beta on macOS and is off by default. Once enabled with a model configured, BoltScribe briefly watches for edits to the text it inserted from this dictation. It uses surrounding draft text locally to verify the insertion boundaries.",
-  helpSend: "When an edit qualifies for learning, BoltScribe sends the inserted text and the edited version to your configured learning model to find reusable spelling corrections.",
-  helpStore: "You can review the edited text and model result in your local learning history. Accepted corrections are stored in the local dictionary, where you can disable or delete them.",
+  helpObserve: "Automatic learning is in beta on macOS and is off by default. Once enabled with a model configured, BoltScribe briefly watches for edits to inserted dictation. Consecutive dictations in the same field can be learned together. It uses surrounding draft text locally to verify the insertion boundaries.",
+  helpSend: "When an edit qualifies for learning, BoltScribe sends the relevant raw and inserted transcripts, your edits, the correction status, and existing dictionary entries and misrecognition rules to your configured learning model.",
+  helpStore: "Learning results are stored on this device. Updates to manual entries and requests to disable them need your approval. Learning history shows the source and reason for each change and lets you undo applied changes.",
   idle: "No learning tasks in progress", waiting: "Waiting for edits after dictation", running: "Self-learning is active", disabled: "Self-learning is off",
   unconfigured: "Configure a learning model", unsupported: "Automatic observation is unavailable on this platform",
   configure: "Manage models", model: "Learning model", refresh: "Refresh", loading: "Loading learning history…",
   empty: "No learning history yet.", allRecords: "Show all learning history", filtered: "Learning for this dictation",
   previous: "Previous", next: "Next", details: "Details", elapsed: (seconds: number) => `${seconds}s elapsed`,
-  learned: (count: number) => `Learned ${count} ${count === 1 ? "correction" : "corrections"}`, page: (page: number) => `Page ${page}`,
+  learned: (count: number) => `Learned ${count} ${count === 1 ? "entry" : "entries"}`, updated: "Vocabulary updated", covered: "No vocabulary changes", page: (page: number) => `Page ${page}`,
   finished: "Finished", started: "Started", otherReason: "No corrections were added",
   observing: "Observing edits after dictation", queued: "Waiting for model analysis", analyzing: "Analyzing edits",
 };
@@ -67,6 +67,9 @@ const chineseReasons: Record<string, string> = {
   observer_busy: "上一条语音仍在观察中", observation_interrupted: "本轮观察已中断",
   data_dir_changed: "数据目录已切换，本次学习已结束",
   source_removed: "来源语音已删除",
+  waiting_for_evidence: "已记录本次修正，等待更多独立证据",
+  already_covered: "本次修改涉及已有条目，词库无需变更",
+  awaiting_review: "手动条目的变更待确认",
 };
 
 const englishReasons: Record<string, string> = {
@@ -81,4 +84,31 @@ const englishReasons: Record<string, string> = {
   observer_busy: "The previous dictation is still being observed", observation_interrupted: "Observation was interrupted",
   data_dir_changed: "This learning attempt ended when the data directory changed",
   source_removed: "The source dictation was deleted",
+  waiting_for_evidence: "Correction recorded. Waiting for more independent examples.",
+  already_covered: "An existing entry covers this correction. No changes needed.",
+  awaiting_review: "Changes to manual entries are awaiting your approval.",
+};
+
+export function learningChangeText(language: string) {
+  return language === "en-US" ? englishChanges : chineseChanges;
+}
+
+const chineseChanges = {
+  title: "词库变更", source: "来源", manual: "手动条目", learned: "自学习条目",
+  before: "变更前", after: "变更后", paused: "已停用", inactive: "已失效", inactiveReason: "原条目已变更。",
+  approve: "确认", dismiss: "忽略", undo: "撤销", more: "查看更多变更",
+  kinds: { legacy: "旧版词条", dictionary: "用户词典", rule: "易错词纠正" },
+  operations: { add: "新增", update: "修改", disable: "停用" },
+  states: { pending: "待确认", applied: "已生效", dismissed: "已忽略", undone: "已撤销" },
+  appliedManual: "已确认的自学习变更",
+};
+
+const englishChanges: typeof chineseChanges = {
+  title: "Vocabulary changes", source: "Source", manual: "Manual entry", learned: "Learned entry",
+  before: "Before", after: "After", paused: "Disabled", inactive: "Inactive", inactiveReason: "The original entry changed.",
+  approve: "Approve", dismiss: "Dismiss", undo: "Undo", more: "Show more changes",
+  kinds: { legacy: "Legacy entry", dictionary: "User dictionary", rule: "Common misrecognitions" },
+  operations: { add: "Add", update: "Update", disable: "Disable" },
+  states: { pending: "Needs review", applied: "Applied", dismissed: "Dismissed", undone: "Undone" },
+  appliedManual: "Approved learning changes",
 };

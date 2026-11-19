@@ -1,23 +1,33 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appApi, type LearningApi } from "../app/api";
+import { LearningChangeValues } from "../components/LearningChangeValues";
 import { defaultLearningConfig, learningText } from "../domain/learning";
+import { learningChangeText } from "../domain/learningActivity";
 import { modelManagerText, modelService } from "../domain/modelServices";
-import type { AppConfig, LearnedEntry, LearningStatus } from "../types";
+import type { AppConfig, LearnedEntry, LearningChange, LearningStatus } from "../types";
 
-export default function LearningSection({ config, onChange, onOpenModels, onOpenLearning, onOpenRecord, api = appApi.learning }: {
+export default function LearningSection({ config, onChange, onOpenModels, onOpenLearning, onOpenRecord, kind = "dictionary", api = appApi.learning }: {
   config: AppConfig;
   onChange: (config: AppConfig) => void;
   api?: LearningApi;
   onOpenModels?: () => void;
   onOpenLearning?: () => void;
   onOpenRecord?: (id: string) => void;
+  kind?: "dictionary" | "rule";
 }) {
-  const text = learningText(config.ui.app_language);
+  const language = config.ui.app_language;
+  const text = learningText(language);
+  const changeText = learningChangeText(language);
+  const showSettings = kind === "dictionary";
+  const heading = showSettings ? text.terms : text.rules;
+  const searchLabel = showSettings ? text.search : text.searchRules;
+  const emptyLabel = showSettings ? text.empty : text.emptyRules;
   const learning = config.learning ?? defaultLearningConfig();
   const model = learning.llm;
   const service = modelService(config, model.service_id);
-  const modelText = modelManagerText(config.ui.app_language);
+  const modelText = modelManagerText(language);
   const [entries, setEntries] = useState<LearnedEntry[]>([]);
+  const [changes, setChanges] = useState<LearningChange[]>([]);
   const [status, setStatus] = useState<LearningStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [mutating, setMutating] = useState(false);
@@ -30,17 +40,20 @@ export default function LearningSection({ config, onChange, onOpenModels, onOpen
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     try {
-      const [nextEntries, nextStatus] = await Promise.all([api.loadEntries(), api.getStatus()]);
+      const [nextEntries, nextStatus, nextChanges] = await Promise.all([
+        api.loadEntries(), showSettings ? api.getStatus() : Promise.resolve(null), api.loadChanges(),
+      ]);
       if (!live.current || request !== generation.current) return;
       setEntries(nextEntries);
       setStatus(nextStatus);
+      setChanges(nextChanges);
       setError(null);
     } catch (failure) {
       if (live.current && request === generation.current) setError(String(failure));
     } finally {
       if (live.current && request === generation.current) setLoading(false);
     }
-  }, [api]);
+  }, [api, showSettings]);
 
   useEffect(() => {
     live.current = true;
@@ -82,32 +95,38 @@ export default function LearningSection({ config, onChange, onOpenModels, onOpen
     }
   }
 
+  const entriesForKind = useMemo(() => entries.filter((entry) => {
+    if (!entry.kind || entry.kind === "legacy") return kind === "dictionary" || Boolean(entry.from);
+    return entry.kind === kind;
+  }), [entries, kind]);
   const filtered = useMemo(() => {
     const key = query.trim().toLocaleLowerCase();
-    return entries.filter((entry) => `${entry.term}\n${entry.from ?? ""}`.toLocaleLowerCase().includes(key));
-  }, [entries, query]);
+    return entriesForKind.filter((entry) => `${entry.term}\n${entry.from ?? ""}`.toLocaleLowerCase().includes(key));
+  }, [entriesForKind, query]);
+  const appliedManual = changes.filter((change) => change.kind === kind && change.origin === "manual"
+    && change.status === "applied" && change.effective === true);
 
   return (
-    <section className="dictionary-source-card learning-section" aria-label={text.terms}>
+    <section className="dictionary-source-card learning-section" aria-label={heading}>
       <header className="learning-entries-heading">
-        <h2>{text.terms} <span className="learning-count">{text.count(entries.length)}</span></h2>
-        <label className="checkbox-row">
+        <h2>{heading} <span className="learning-count">{text.count(entriesForKind.length)}</span></h2>
+        {showSettings ? <label className="checkbox-row">
           <input type="checkbox" checked={learning.enabled} disabled={status?.observation.supported !== true && !learning.enabled} onChange={(event) => {
             onChange({ ...config, learning: { ...learning, enabled: event.target.checked } });
           }} />
           <span>{text.enabled}</span>
-        </label>
+        </label> : null}
       </header>
       <div className="learning-search-row">
-        <input type="search" className="learning-search" aria-label={text.search} placeholder={text.search} value={query} onChange={(event) => setQuery(event.target.value)} />
+        <input type="search" className="learning-search" aria-label={searchLabel} placeholder={searchLabel} value={query} onChange={(event) => setQuery(event.target.value)} />
         <button type="button" className="secondary small" disabled={loading || mutating} onClick={() => { void refresh(); }}>{text.refresh}</button>
       </div>
-      {onOpenLearning ? <button className="secondary small" type="button" onClick={onOpenLearning}>{config.ui.app_language === "en-US" ? "Learning activity" : "查看学习动态"}</button> : null}
+      {onOpenLearning ? <button className="secondary small learning-activity-link" type="button" onClick={onOpenLearning}>{language === "en-US" ? "Learning activity" : "查看学习动态"}</button> : null}
       {status?.processing ? <span role="status">{text.processing}</span> : status?.pending ? <span role="status">{text.pending}</span> : null}
       {error ? <p className="learning-error" role="alert">{error}</p> : null}
       {status?.last_error ? <p className="learning-error" role="alert">{status.last_error}</p> : null}
       {notice ? <p className="learning-help" role="status">{notice}</p> : null}
-      {loading ? <p className="learning-empty" role="status">{text.loading}</p> : filtered.length === 0 ? <p className="learning-empty">{entries.length ? text.noResults : text.empty}</p> : (
+      {loading ? <p className="learning-empty" role="status">{text.loading}</p> : filtered.length === 0 ? <p className="learning-empty">{entriesForKind.length ? text.noResults : emptyLabel}</p> : (
         <ul className="learning-entry-list">
           {filtered.map((entry) => (
             <li key={entry.id} className={entry.enabled ? "learning-entry" : "learning-entry disabled"}>
@@ -116,10 +135,13 @@ export default function LearningSection({ config, onChange, onOpenModels, onOpen
                   {entry.from ? <><span className="learning-entry-from" aria-label={text.source}>{entry.from}</span><span aria-hidden="true">→</span></> : null}
                   <strong aria-label={text.term}>{entry.term}</strong>
                 </div>
-                <time dateTime={entry.created_at} title={text.created}>{new Date(entry.created_at).toLocaleString(config.ui.app_language)}</time>
+                <div className="learning-entry-date">
+                  <time dateTime={entry.created_at} title={text.created}>{new Date(entry.created_at).toLocaleString(language)}</time>
+                  {!entry.kind || entry.kind === "legacy" ? <span title={entry.from ? text.legacyHelp : undefined}>{changeText.kinds.legacy}</span> : null}
+                </div>
               </div>
               <div className="learning-entry-actions">
-                {onOpenRecord && entry.record_id ? <button type="button" className="secondary small" onClick={() => onOpenRecord(entry.record_id)}>{config.ui.app_language === "en-US" ? "Source" : "来源"}</button> : null}
+                {onOpenRecord && entry.record_id ? <button type="button" className="secondary small" onClick={() => onOpenRecord(entry.record_id)}>{changeText.source}</button> : null}
                 <label className="checkbox-row">
                   <input type="checkbox" aria-label={`${text.enabledTerm} ${entry.term}`} checked={entry.enabled} disabled={mutating} onChange={() => { void mutate(entry, false); }} />
                   <span>{entry.enabled ? text.enabledTerm : text.disabledTerm}</span>
@@ -130,7 +152,13 @@ export default function LearningSection({ config, onChange, onOpenModels, onOpen
           ))}
         </ul>
       )}
-      <footer className="learning-settings">
+      {appliedManual.length ? <aside className="learning-manual-changes" aria-label={changeText.appliedManual}>
+        <h3>{changeText.appliedManual}</h3>
+        <ul className="learning-changes-list">
+          {appliedManual.map((change) => <li key={change.id}><LearningChangeValues change={change} language={language} /></li>)}
+        </ul>
+      </aside> : null}
+      {showSettings ? <footer className="learning-settings">
         <div className="learning-model-reference">
           <div><strong>{text.modelTitle}</strong><span>{service && model.model.trim() ? `${service.name} / ${model.model}` : modelText.unconfigured}</span></div>
           {onOpenModels ? <button className="secondary small" type="button" onClick={onOpenModels}>{modelText.configure}</button> : null}
@@ -140,7 +168,7 @@ export default function LearningSection({ config, onChange, onOpenModels, onOpen
         {learning.enabled && (!model.model.trim() || !service?.api_key.trim() || !service?.endpoint.trim())
           ? <p className="learning-help">{text.modelRequired}</p> : null}
         {status?.observation.supported === false ? <p className="learning-help">{text.unsupported}</p> : null}
-      </footer>
+      </footer> : null}
     </section>
   );
 }

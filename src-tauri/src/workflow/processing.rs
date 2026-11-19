@@ -250,11 +250,18 @@ fn process_recording(
     // Observation owns its native worker and never keeps the workflow busy.
     // The capture service uses the current setting, not the recording's config
     // snapshot: switching learning off during transcription must take effect now.
-    let learning_app = app.clone();
     let observation = crate::learning::observation::prepare(
         recorded.id.clone(),
         pasted_text.clone(),
-        move |sample| crate::learning::submit(learning_app, sample),
+        || {
+            crate::learning::capture_correction(
+                &config.correction,
+                &raw_text,
+                &pasted_text,
+                correction_error.is_some(),
+            )
+        },
+        crate::learning::submitter(app.clone()),
     );
     let injection_error = injector::paste_text(&pasted_text)
         .err()

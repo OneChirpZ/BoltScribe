@@ -72,6 +72,25 @@ pub(crate) fn load_learned_corrections() -> Result<Vec<learning::LearnedEntry>, 
 }
 
 #[tauri::command]
+pub(crate) fn load_learning_changes() -> Result<Vec<learning::LearningChange>, String> {
+    let config = config::ConfigStore::load().map_err(|err| err.to_string())?;
+    learning::list_changes(&config.correction).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn resolve_learning_change(
+    app: tauri::AppHandle,
+    id: String,
+    action: learning::ChangeResolution,
+) -> Result<Vec<learning::LearningChange>, String> {
+    let config = config::ConfigStore::load().map_err(|err| err.to_string())?;
+    let changes =
+        learning::resolve_change(&config.correction, &id, action).map_err(|err| err.to_string())?;
+    let _ = app.emit("learning://updated", ());
+    Ok(changes)
+}
+
+#[tauri::command]
 pub(crate) fn delete_learned_correction(
     app: tauri::AppHandle,
     id: String,

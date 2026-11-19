@@ -78,6 +78,7 @@ fn test_task(id: &str) -> WorkflowTask {
     WorkflowTask {
         id: id.to_string(),
         cancel_token: Arc::new(AtomicBool::new(false)),
+        _learning_hold: None,
     }
 }
 

@@ -116,11 +116,36 @@ export interface LearningConfig {
 
 export interface LearnedEntry {
   id: string;
+  kind?: LearningEntryKind;
   term: string;
   from: string | null;
   created_at: string;
   record_id: string;
   enabled: boolean;
+}
+
+export type LearningEntryKind = "legacy" | "dictionary" | "rule";
+export type LearningChangeAction = "approve" | "dismiss" | "undo";
+
+export interface LearningEntryValue {
+  term: string;
+  from: string | null;
+  enabled: boolean;
+}
+
+export interface LearningChange {
+  id: string;
+  activity_id?: string | null;
+  record_id: string;
+  kind: LearningEntryKind;
+  operation: "add" | "update" | "disable";
+  origin: "manual" | "learned";
+  before: LearningEntryValue | null;
+  after: LearningEntryValue | null;
+  status: "pending" | "applied" | "dismissed" | "undone";
+  reason: string;
+  created_at: string;
+  effective?: boolean | null;
 }
 
 export type LearningActivityState =
@@ -137,6 +162,7 @@ export type LearningActivityState =
 export interface LearningActivity {
   id: string;
   record_id: string;
+  additional_record_ids?: string[];
   started_at: string;
   updated_at: string;
   finished_at: string | null;
@@ -146,6 +172,7 @@ export interface LearningActivity {
   service_id: string | null;
   entries: LearnedEntry[];
   error: string | null;
+  original_text?: string | null;
   edited_text?: string | null;
   model_output?: string | null;
 }

@@ -1,6 +1,7 @@
 use super::{
     activity::{ActivityHandle, ActivityState},
-    model, store, validation, LearnedEntry, LearningConfig, LearningSample, LearningStatus,
+    context, model, store, validation, LearnedEntry, LearningConfig, LearningSample,
+    LearningStatus,
 };
 use crate::config::ConfigStore;
 use anyhow::Result;
@@ -93,17 +94,22 @@ pub fn cancel() {
     }
 }
 
-pub fn submit(app: AppHandle, sample: LearningSample) {
-    // Both sample validation and configuration loading may race cancellation.
-    let generation = match state().lock() {
-        Ok(state) => state.queue.generation,
-        Err(_) => return,
-    };
+pub fn submitter(app: AppHandle) -> impl FnOnce(LearningSample) + Send {
+    // Bind the sample to the learning configuration in use when observation starts.
+    let generation = state().lock().ok().map(|state| state.queue.generation);
+    move |sample| {
+        if let Some(generation) = generation {
+            submit(app, sample, generation);
+        }
+    }
+}
+
+fn submit(app: AppHandle, sample: LearningSample, generation: u64) {
     let rejection = validation::sample_rejection(&sample);
     if matches!(rejection, None | Some("unrelated_edit")) {
         if let (Some(activity), Ok(state)) = (&sample.activity, state().lock()) {
             if generation == state.queue.generation {
-                activity.set_details(Some(&sample.current), None);
+                activity.set_details(Some(&sample.original), Some(&sample.current), None);
             }
         }
     }
@@ -196,6 +202,7 @@ enum JobResult {
     Skipped(&'static str),
     Analyzed {
         entries: Vec<LearnedEntry>,
+        applied: usize,
         rejected: usize,
         reason: Option<&'static str>,
     },
@@ -214,14 +221,19 @@ fn run(mut job: Job) {
             }
             Ok(JobResult::Analyzed {
                 entries,
+                applied,
                 rejected,
                 reason,
             }) => {
-                let accepted = entries.len();
                 if let Some(activity) = &job.sample.activity {
                     activity.update(
-                        if accepted > 0 {
+                        if applied > 0 {
                             ActivityState::Learned
+                        } else if matches!(
+                            reason,
+                            Some("already_covered" | "awaiting_review" | "waiting_for_evidence")
+                        ) {
+                            ActivityState::NoChange
                         } else {
                             ActivityState::NoTerms
                         },
@@ -231,7 +243,7 @@ fn run(mut job: Job) {
                     );
                 }
                 state.status.analyzed += 1;
-                state.status.accepted += accepted as u64;
+                state.status.accepted += applied as u64;
                 state.status.rejected += rejected as u64;
                 state.status.last_error = None;
             }
@@ -289,8 +301,10 @@ fn process(job: &Job) -> Result<JobResult> {
     if !current.learning.enabled || current.learning_model() != job.config {
         return Ok(JobResult::Skipped("config_changed"));
     }
+    let snapshot = store::snapshot(&job.path, &current.correction)?;
+    let (inventory, complete) = context::select_inventory(snapshot, &job.sample);
     update_activity(&job.sample.activity, ActivityState::Analyzing, None);
-    let response = model::analyze(&job.config, &job.sample);
+    let response = model::analyze(&job.config, &job.sample, &inventory, complete);
     {
         let state = state()
             .lock()
@@ -300,7 +314,7 @@ fn process(job: &Job) -> Result<JobResult> {
         }
     }
     let text = response?;
-    let (candidates, rejected) = validation::parse_candidates(&text, &job.sample)?;
+    let analysis = validation::parse_analysis(&text, &job.sample, &inventory)?;
     let latest = ConfigStore::load()?;
     // Serialize cancellation with the final write. No state/store lock is held during HTTP.
     let state = state()
@@ -314,26 +328,40 @@ fn process(job: &Job) -> Result<JobResult> {
         if !activity.is_current_active() {
             return Ok(JobResult::Skipped("cancelled"));
         }
-        activity.set_details(None, Some(&text));
+        activity.set_details(None, None, Some(&text));
     }
-    let entries = store::add_candidates(
+    let committed = store::commit_analysis(
         &job.path,
-        &candidates,
         &latest.correction,
         &job.sample.record_id,
+        job.sample.activity.as_ref().map(ActivityHandle::id),
+        &inventory,
+        &analysis.actions,
     )?;
-    let reason = if !entries.is_empty() {
+    let applied = committed.changed.saturating_sub(committed.pending);
+    let reason = if applied > 0 {
         None
-    } else if !candidates.is_empty() {
+    } else if committed.pending > 0 {
+        Some("awaiting_review")
+    } else if committed.awaiting_evidence > 0 {
+        Some("waiting_for_evidence")
+    } else if analysis.already_covered {
+        Some("already_covered")
+    } else if !analysis.actions.is_empty() {
         Some("already_known_or_conflict")
-    } else if rejected > 0 {
+    } else if analysis.rejected > 0 {
         Some("candidates_rejected")
     } else {
         Some("no_terms")
     };
     Ok(JobResult::Analyzed {
-        rejected: rejected + candidates.len() - entries.len(),
-        entries,
+        rejected: analysis.rejected
+            + analysis
+                .actions
+                .len()
+                .saturating_sub(committed.changed + committed.awaiting_evidence),
+        entries: committed.entries,
+        applied,
         reason,
     })
 }

@@ -197,10 +197,7 @@ impl LlmProvider for OpenAiCompatibleCorrector {
 }
 
 pub fn build_correction_prompt(raw_text: &str, correction: &CorrectionConfig) -> String {
-    let dictionary_text = enabled_dictionary_text(
-        &correction.dictionary_text,
-        &correction.disabled_dictionary_terms,
-    );
+    let dictionary_text = enabled_dictionary_text(correction);
     let prompt = correction
         .prompt_template
         .replace("{{user_requirements}}", correction.user_requirements.trim())
@@ -211,12 +208,14 @@ pub fn build_correction_prompt(raw_text: &str, correction: &CorrectionConfig) ->
     apply_prompt_variables(prompt, &correction.variables)
 }
 
-fn enabled_dictionary_text(dictionary_text: &str, disabled_terms: &[String]) -> String {
-    let disabled_keys = disabled_terms
+pub(crate) fn enabled_dictionary_text(correction: &CorrectionConfig) -> String {
+    let disabled_keys = correction
+        .disabled_dictionary_terms
         .iter()
         .map(|term| term.trim().to_lowercase())
         .collect::<HashSet<_>>();
-    dictionary_text
+    correction
+        .dictionary_text
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !disabled_keys.contains(&line.to_lowercase()))

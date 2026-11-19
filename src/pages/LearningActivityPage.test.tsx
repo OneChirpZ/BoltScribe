@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LearningApi } from "../app/api";
 import { createBrowserPreviewState } from "../app/api/previewData";
 import { emptyLearningStatus } from "../domain/learning";
-import type { LearningActivityPage as ActivityPage } from "../types";
+import type { LearningActivityPage as ActivityPage, LearningChange } from "../types";
 import LearningActivityPage from "./LearningActivityPage";
 
 function harness() {
@@ -19,6 +19,8 @@ function harness() {
     loadActivity: vi.fn(async () => snapshot),
     loadSource: vi.fn(async () => null),
     loadEntries: vi.fn(async () => preview.learnedEntries),
+    loadChanges: vi.fn(async () => []),
+    resolveChange: vi.fn(async () => []),
     getStatus: vi.fn(async () => emptyLearningStatus()),
     deleteEntry: vi.fn(async () => []),
     setEntryEnabled: vi.fn(async () => []),
@@ -36,6 +38,47 @@ function harness() {
 afterEach(() => { vi.useRealTimers(); });
 
 describe("LearningActivityPage", () => {
+  it("shows a proposed manual change, opens its source, and supports approval and undo", async () => {
+    const props = harness();
+    const proposed: LearningChange = {
+      id: "change-1", activity_id: "preview-activity-1", record_id: "1", kind: "rule", operation: "disable",
+      origin: "manual", before: { term: "New spelling", from: "old spelling", enabled: true },
+      after: { term: "New spelling", from: "old spelling", enabled: false },
+      status: "pending", reason: "修正了这条规则引入的误替换", created_at: "2026-11-05T08:30:00Z",
+    };
+    vi.mocked(props.api.loadChanges).mockResolvedValue([proposed]);
+    vi.mocked(props.api.resolveChange)
+      .mockResolvedValueOnce([{ ...proposed, status: "applied", effective: true }])
+      .mockResolvedValueOnce([{ ...proposed, status: "undone" }]);
+    render(<LearningActivityPage {...props} />);
+
+    const changes = within(await screen.findByRole("region", { name: "词库变更" }));
+    expect(changes.getByText("停用 · 易错词纠正")).toBeTruthy();
+    expect(changes.getByText("手动条目 · 待确认")).toBeTruthy();
+    expect(changes.getByText(proposed.reason)).toBeTruthy();
+    expect(changes.getByText("已停用")).toBeTruthy();
+    fireEvent.click(changes.getByRole("button", { name: "来源" }));
+    expect(props.onOpenRecord).toHaveBeenCalledWith("1", "preview-activity-1");
+    fireEvent.click(changes.getByRole("button", { name: "确认" }));
+    expect(props.api.resolveChange).toHaveBeenNthCalledWith(1, "change-1", "approve");
+    fireEvent.click(await changes.findByRole("button", { name: "撤销" }));
+    expect(props.api.resolveChange).toHaveBeenNthCalledWith(2, "change-1", "undo");
+    expect(await changes.findByText("手动条目 · 已撤销")).toBeTruthy();
+  });
+
+  it("distinguishes a covered correction from no edits and reports changes with no new entries", async () => {
+    const props = harness();
+    const base = createBrowserPreviewState().learningActivity[0];
+    props.replace({ active: [], history: [
+      { ...base, id: "covered", state: "no_change", reason: "already_covered", entries: [] },
+      { ...base, entries: [] },
+    ], has_more: false });
+    render(<LearningActivityPage {...props} />);
+
+    expect(await screen.findByText("本次修改涉及已有条目，词库无需变更")).toBeTruthy();
+    expect(screen.getByText("已更新词库")).toBeTruthy();
+    expect(screen.queryByText("未检测到修改")).toBeNull();
+  });
   it("opens the privacy explanation and returns focus when it closes", async () => {
     render(<LearningActivityPage {...harness()} />);
     await screen.findByText("正在观察上屏后的修改");
@@ -104,6 +147,17 @@ describe("LearningActivityPage", () => {
     view.unmount();
     expect(props.stop).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("opens the selected dictation when viewing a grouped attempt from another source record", async () => {
+    const props = harness();
+    const first = createBrowserPreviewState().learningActivity[0];
+    const grouped = { ...first, additional_record_ids: ["next-record"] };
+    props.replace({ active: [], history: [grouped], has_more: false });
+    render(<LearningActivityPage {...props} recordId="next-record" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^详情/ }));
+    expect(props.onOpenRecord).toHaveBeenCalledWith("next-record", grouped.id);
   });
 
   it("discards a slow older response when the source-record filter changes", async () => {

@@ -57,6 +57,7 @@ pub(super) enum ProcessingOutcome {
 pub(super) struct WorkflowTask {
     pub(super) id: String,
     pub(super) cancel_token: Arc<AtomicBool>,
+    pub(super) _learning_hold: Option<Arc<crate::learning::observation::RecordingHold>>,
 }
 
 pub(super) struct StopContext {

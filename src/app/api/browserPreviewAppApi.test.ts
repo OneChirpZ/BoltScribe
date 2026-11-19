@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AppApi } from "./contracts";
 import { createBrowserPreviewAppApi } from "./browserPreviewAppApi";
-import { createBrowserPreviewState } from "./previewData";
+import * as previewData from "./previewData";
 import { nativeAppApi } from "./nativeAppApi";
 
 describe("browser preview AppApi", () => {
@@ -56,6 +56,29 @@ describe("browser preview AppApi", () => {
     expect(await api.history.loadRecord("missing")).toBeNull();
   });
 
+  it("loads grouped learning from each source while keeping text out of summary pages", async () => {
+    const state = previewData.createBrowserPreviewState();
+    const grouped = {
+      ...state.learningActivity[0],
+      additional_record_ids: ["2"],
+      original_text: "合并上屏文字",
+      edited_text: "合并修改文字",
+    };
+    state.learningActivity[0] = grouped;
+    const createState = vi.spyOn(previewData, "createBrowserPreviewState").mockReturnValueOnce(state);
+    const api = createBrowserPreviewAppApi({ appVersion: "test-version" });
+    createState.mockRestore();
+
+    for (const id of [grouped.record_id, "2"]) {
+      const { history } = await api.learning.loadActivity(30, 0, id);
+      const summary = history.find((item) => item.id === grouped.id);
+      expect(summary).toMatchObject({ additional_record_ids: ["2"] });
+      expect(summary?.original_text).toBeUndefined();
+      expect(summary?.edited_text).toBeUndefined();
+      expect(await api.learning.loadSource(id, grouped.id)).toEqual(grouped);
+    }
+  });
+
   it("shares workflow state across workflow and audio domains", async () => {
     const api = createBrowserPreviewAppApi({ appVersion: "test-version" });
     const recording = await api.workflow.toggleRecording();
@@ -69,7 +92,7 @@ describe("browser preview AppApi", () => {
   });
 
   it("supports a recognizing overlay preview", () => {
-    const state = createBrowserPreviewState("http://localhost/?preview-status=recognizing");
+    const state = previewData.createBrowserPreviewState("http://localhost/?preview-status=recognizing");
 
     expect(state.status).toMatchObject({
       mode: "processing",
@@ -79,8 +102,8 @@ describe("browser preview AppApi", () => {
   });
 
   it("supports bounded overlay scales and terminal visual states for QA", () => {
-    const complete = createBrowserPreviewState("http://localhost/?preview-status=complete&preview-overlay-scale=1");
-    const compact = createBrowserPreviewState("http://localhost/?preview-overlay-scale=0.1");
+    const complete = previewData.createBrowserPreviewState("http://localhost/?preview-status=complete&preview-overlay-scale=1");
+    const compact = previewData.createBrowserPreviewState("http://localhost/?preview-overlay-scale=0.1");
 
     expect(complete.status).toMatchObject({ mode: "processing", stage: "complete" });
     expect(complete.config.ui.recording_overlay_scale).toBe(1);

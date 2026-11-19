@@ -15,6 +15,8 @@ function harness() {
     loadActivity: vi.fn(async () => ({ active: [], history: [], has_more: false })),
     loadSource: vi.fn(async () => null),
     loadEntries: vi.fn(async () => entries),
+    loadChanges: vi.fn(async () => []),
+    resolveChange: vi.fn(async () => []),
     getStatus: vi.fn(async () => emptyLearningStatus()),
     deleteEntry: vi.fn(async (id) => {
       entries = entries.filter((entry) => entry.id !== id);
@@ -38,6 +40,21 @@ function harness() {
 afterEach(() => { vi.useRealTimers(); });
 
 describe("LearningSection", () => {
+  it("shows learned terms and learned rules on their respective pages", async () => {
+    const props = harness();
+    const base = createBrowserPreviewState().learnedEntries[0];
+    props.replaceEntries([
+      { ...base, id: "term", kind: "dictionary", term: "DictOnly", from: null },
+      { ...base, id: "rule", kind: "rule", term: "RuleOnly", from: "rule source" },
+    ]);
+    const view = render(<LearningSection {...props} />);
+    expect(await screen.findByText("DictOnly")).toBeTruthy();
+    expect(screen.queryByText("RuleOnly")).toBeNull();
+    view.rerender(<LearningSection {...props} kind="rule" />);
+    expect(await screen.findByText("RuleOnly")).toBeTruthy();
+    expect(screen.queryByText("DictOnly")).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: "自动学习纠错词" })).toBeNull();
+  });
   it("defaults learning off and links to centralized model settings", async () => {
     const props = harness();
     render(<LearningSection {...props} />);

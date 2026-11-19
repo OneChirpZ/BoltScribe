@@ -14,6 +14,8 @@ import type {
   LearnedEntry,
   LearningActivity,
   LearningActivityPage,
+  LearningChange,
+  LearningChangeAction,
   LearningStatus,
   RecordingCleanupPreview,
   RecordingCleanupResult,
@@ -32,6 +34,9 @@ export const nativeAppApi = {
     loadSource: (recordId: string, activityId?: string) =>
       invoke<LearningActivity | null>("load_learning_activity_source", { recordId, activityId: activityId ?? null }),
     loadEntries: () => invoke<LearnedEntry[]>("load_learned_corrections"),
+    loadChanges: () => invoke<LearningChange[]>("load_learning_changes"),
+    resolveChange: (id: string, action: LearningChangeAction) =>
+      invoke<LearningChange[]>("resolve_learning_change", { id, action }),
     deleteEntry: (id: string) => invoke<LearnedEntry[]>("delete_learned_correction", { id }),
     setEntryEnabled: (id: string, enabled: boolean) =>
       invoke<LearnedEntry[]>("set_learned_correction_enabled", { id, enabled }),

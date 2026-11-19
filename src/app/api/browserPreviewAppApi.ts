@@ -8,7 +8,7 @@ import {
   normalizeVadNoiseMargin,
   normalizeVadNoiseWindowMs,
 } from "../../domain/vadSettings";
-import type { AppConfig, AudioLevelSample, HistoryRecord, RecordingCleanupPreview, RecordingCleanupUnit, WorkflowStatusCode } from "../../types";
+import type { AppConfig, AudioLevelSample, HistoryRecord, LearningActivity, RecordingCleanupPreview, RecordingCleanupUnit, WorkflowStatusCode } from "../../types";
 import type { AppApi } from "./contracts";
 import { clonePreview, createBrowserPreviewState, type BrowserPreviewState } from "./previewData";
 import { defaultLearningConfig, emptyLearningStatus } from "../../domain/learning";
@@ -16,6 +16,10 @@ import { defaultLearningConfig, emptyLearningStatus } from "../../domain/learnin
 interface BrowserPreviewAppApiOptions {
   appVersion: string;
   locationHref?: string;
+}
+
+function hasLearningSource(item: LearningActivity, recordId: string): boolean {
+  return item.record_id === recordId || (item.additional_record_ids?.includes(recordId) ?? false);
 }
 
 export function createBrowserPreviewAppApi({ appVersion, locationHref }: BrowserPreviewAppApiOptions): AppApi {
@@ -26,20 +30,29 @@ export function createBrowserPreviewAppApi({ appVersion, locationHref }: Browser
     learning: {
       loadActivity: (limit, offset = 0, recordId) => {
         const matching = state.learningActivity
-          .filter((item) => !recordId || item.record_id === recordId)
-          .map(({ edited_text: _editedText, model_output: _modelOutput, ...item }) => item);
+          .filter((item) => !recordId || hasLearningSource(item, recordId))
+          .map(({ original_text: _originalText, edited_text: _editedText, model_output: _modelOutput, ...item }) => item);
         const active = matching.filter((item) => item.finished_at === null);
         const history = matching.filter((item) => item.finished_at !== null);
         const pageSize = Math.max(1, Math.min(100, limit));
         return Promise.resolve(clonePreview({ active, history: history.slice(offset, offset + pageSize), has_more: history.length > offset + pageSize }));
       },
       loadSource: (recordId, activityId) => {
-        const matching = state.learningActivity.filter((item) => item.record_id === recordId);
+        const matching = state.learningActivity.filter((item) => hasLearningSource(item, recordId));
         const source = activityId ? matching.find((item) => item.id === activityId)
           : matching.find((item) => item.state === "learned") ?? matching[0];
         return Promise.resolve(clonePreview(source ?? null));
       },
       loadEntries: () => Promise.resolve(clonePreview(state.learnedEntries)),
+      loadChanges: () => Promise.resolve(clonePreview(state.learningChanges)),
+      resolveChange: async (id, action) => {
+        const change = state.learningChanges.find((item) => item.id === id);
+        const expectedStatus = action === "undo" ? "applied" : "pending";
+        if (!change || change.status !== expectedStatus) throw new Error("Learning change no longer available");
+        change.status = action === "approve" ? "applied" : action === "dismiss" ? "dismissed" : "undone";
+        learningListeners.forEach((handler) => handler());
+        return clonePreview(state.learningChanges);
+      },
       deleteEntry: (id) => {
         state.learnedEntries = state.learnedEntries.filter((entry) => entry.id !== id);
         learningListeners.forEach((handler) => handler());

@@ -3,13 +3,16 @@ import type { HistoryRecord, LearningActivity } from "../types";
 
 const chinese = {
   title: "来源语音",
+  groupedTitle: (count: number) => `来源语音（合并 ${count} 段）`,
   close: "关闭",
   transcript: "原始转写",
+  selectedTranscript: "所选语音的原始转写",
   corrected: "纠错后输出",
+  groupedOriginal: "合并后的上屏文本",
   edited: "用户修改后",
   model: "学习模型输出",
-  savedTerms: "已写入词典",
-  noSavedTerms: "未写入词条",
+  savedTerms: "新增条目",
+  noSavedTerms: "本轮没有新增条目",
   missing: "未记录",
   noEdits: "未检测到手动修改",
   pendingModel: "等待学习结果",
@@ -17,13 +20,16 @@ const chinese = {
 
 const english = {
   title: "Source dictation",
+  groupedTitle: (count: number) => `Source dictation (${count} combined)`,
   close: "Close",
   transcript: "Original transcript",
+  selectedTranscript: "Original transcript for this dictation",
   corrected: "Corrected output",
+  groupedOriginal: "Combined inserted text",
   edited: "User-edited text",
   model: "Learning model output",
-  savedTerms: "Saved to dictionary",
-  noSavedTerms: "No corrections saved",
+  savedTerms: "New entries",
+  noSavedTerms: "No new entries",
   missing: "Not recorded",
   noEdits: "No manual edits detected",
   pendingModel: "Waiting for the learning result",
@@ -38,10 +44,15 @@ export default function LearningSourceDialog({ record, activity, language, onClo
   const dialog = useRef<HTMLDialogElement>(null);
   const text = language === "en-US" ? english : chinese;
   const inProgress = activity?.finished_at === null;
+  const additionalCount = activity?.additional_record_ids?.length ?? 0;
+  const grouped = additionalCount > 0;
+  const title = grouped ? text.groupedTitle(additionalCount + 1) : text.title;
   const stages = [
-    { title: text.transcript, value: record.raw_text, empty: text.missing },
-    { title: text.corrected, value: record.corrected_text || record.pasted_text, empty: text.missing },
-    { title: text.edited, value: activity?.edited_text, empty: activity?.state === "no_change" ? text.noEdits : text.missing },
+    { title: grouped ? text.selectedTranscript : text.transcript, value: record.raw_text, empty: text.missing },
+    grouped
+      ? { title: text.groupedOriginal, value: activity?.original_text, empty: text.missing }
+      : { title: text.corrected, value: record.corrected_text || record.pasted_text, empty: text.missing },
+    { title: text.edited, value: activity?.edited_text, empty: activity?.reason === "no_change" ? text.noEdits : text.missing },
   ];
 
   useEffect(() => {
@@ -52,7 +63,7 @@ export default function LearningSourceDialog({ record, activity, language, onClo
     <dialog ref={dialog} className="learning-source-dialog" aria-labelledby="learning-source-title" onClose={onClose}>
       <header className="panel-header">
         <div>
-          <h1 id="learning-source-title">{text.title}</h1>
+          <h1 id="learning-source-title">{title}</h1>
           <time dateTime={record.created_at}>{new Date(record.created_at).toLocaleString(language)}</time>
         </div>
         <button className="secondary small" type="button" autoFocus onClick={onClose}>{text.close}</button>

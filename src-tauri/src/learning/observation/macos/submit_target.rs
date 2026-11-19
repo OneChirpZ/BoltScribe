@@ -37,8 +37,7 @@ enum Host {
 
 pub(super) struct SubmitTarget {
     host: Host,
-    composer: Owned,
-    primary_button: Owned,
+    composer: Option<Owned>,
     web_area: Option<Owned>,
 }
 
@@ -53,62 +52,58 @@ impl SubmitTarget {
             &["AXRole", "AXDOMClassList", "AXDOMIdentifier"],
             deadline,
         )?;
+        let chatgpt_prompt = attribute_string(&attrs, 2).as_deref() == Some("prompt-textarea");
         if attribute_string(&attrs, 0).as_deref() != Some("AXTextArea")
-            || !(has_class(array_at(&attrs, 1), "ProseMirror")
-                || attribute_string(&attrs, 2).as_deref() == Some("prompt-textarea"))
+            || !(has_class(array_at(&attrs, 1), "ProseMirror") || chatgpt_prompt)
         {
             return None;
         }
 
         let mut node = attribute(input, "AXParent", deadline)?;
-        let mut composer = None;
+        let mut candidates = Vec::new();
         for depth in 0..MAX_ANCESTORS {
             let attrs = attributes(node.0, &["AXRole", "AXParent", "AXURL"], deadline)?;
             let role = attribute_string(&attrs, 0)?;
             if role == "AXWebArea" {
-                let (composer, primary_button) = composer?;
-                return (host == Host::ChatGpt && is_chatgpt_url(array_at(&attrs, 2))).then_some(
-                    Self {
-                        host,
-                        composer,
-                        primary_button,
-                        web_area: Some(node),
-                    },
-                );
+                if host != Host::ChatGpt || !is_chatgpt_url(array_at(&attrs, 2)) {
+                    return None;
+                }
+                let composer = candidates
+                    .into_iter()
+                    .find_map(|candidate: Owned| find_composer(candidate.0, input, host, deadline));
+                // The scoped ChatGPT editor can handle Return without a
+                // button. Clicks still require a verified composer.
+                return Some(Self {
+                    host,
+                    composer,
+                    web_area: Some(node),
+                });
             }
             if matches!(role.as_str(), "AXWindow" | "AXApplication") {
                 return None;
             }
-            if composer.is_none() && depth < MAX_COMPOSER_ANCESTORS {
-                let mut scan = ComposerScan::default();
-                let mut remaining = MAX_COMPOSER_NODES;
-                if inspect_composer(node.0, input, host, 0, &mut remaining, deadline, &mut scan)
-                    .is_some()
-                    && scan.source_found
-                    && !scan.other_input
-                    && scan.primary_buttons == 1
-                {
-                    let nearest = retain(node.0)?;
-                    let primary_button = scan.primary_button?;
-                    if host == Host::Codex {
-                        return Some(Self {
-                            host,
-                            composer: nearest,
-                            primary_button,
-                            web_area: None,
-                        });
-                    }
-                    composer = Some((nearest, primary_button));
+            if depth < MAX_COMPOSER_ANCESTORS && host == Host::Codex {
+                if let Some(composer) = find_composer(node.0, input, host, deadline) {
+                    return Some(Self {
+                        host,
+                        composer: Some(composer),
+                        web_area: None,
+                    });
                 }
             }
-            node = retain(array_at(&attrs, 1)?)?;
+            let parent = retain(array_at(&attrs, 1)?)?;
+            if depth < MAX_COMPOSER_ANCESTORS && host == Host::ChatGpt {
+                candidates.push(node);
+            }
+            node = parent;
         }
         None
     }
 
-    pub(super) fn has_enabled_send(&self, deadline: Instant) -> bool {
-        attributes(self.primary_button.0, BUTTON_ATTRIBUTES, deadline)
-            .is_some_and(|attrs| enabled_send(self.host, &attrs))
+    pub(super) fn is_current_page(&self, deadline: Instant) -> bool {
+        self.web_area.as_ref().is_none_or(|web_area| {
+            attribute(web_area.0, "AXURL", deadline).is_some_and(|url| is_chatgpt_url(Some(url.0)))
+        })
     }
 
     /// Coordinates are CGEventGetLocation screen points, which share AX hit
@@ -120,14 +115,9 @@ impl SubmitTarget {
         y: f64,
         deadline: Instant,
     ) -> Option<Owned> {
-        if !x.is_finite() || !y.is_finite() || Instant::now() >= deadline {
+        let composer = self.composer.as_ref()?;
+        if !x.is_finite() || !y.is_finite() || !self.is_current_page(deadline) {
             return None;
-        }
-        if let Some(web_area) = &self.web_area {
-            let url = attribute(web_area.0, "AXURL", deadline)?;
-            if !is_chatgpt_url(Some(url.0)) {
-                return None;
-            }
         }
         if Instant::now() >= deadline {
             return None;
@@ -139,7 +129,7 @@ impl SubmitTarget {
         let mut node = Owned::new(hit)?;
         let mut button = None;
         for _ in 0..8 {
-            if unsafe { CFEqual(node.0, self.composer.0) } != 0 {
+            if unsafe { CFEqual(node.0, composer.0) } != 0 {
                 return button.filter(|_| Instant::now() < deadline);
             }
             let attrs = attributes(node.0, BUTTON_ATTRIBUTES, deadline)?;
@@ -211,7 +201,16 @@ struct ComposerScan {
     source_found: bool,
     other_input: bool,
     primary_buttons: usize,
-    primary_button: Option<Owned>,
+}
+
+fn find_composer(element: AxRef, input: AxRef, host: Host, deadline: Instant) -> Option<Owned> {
+    let mut scan = ComposerScan::default();
+    let mut remaining = MAX_COMPOSER_NODES;
+    inspect_composer(element, input, host, 0, &mut remaining, deadline, &mut scan)?;
+    if !scan.source_found || scan.other_input || scan.primary_buttons != 1 {
+        return None;
+    }
+    retain(element)
 }
 
 fn inspect_composer(
@@ -249,7 +248,6 @@ fn inspect_composer(
         "AXButton" => {
             if primary_control(host, &attrs, 1, 2, 3) {
                 result.primary_buttons += 1;
-                result.primary_button = retain(element);
             }
             return Some(());
         }
@@ -303,7 +301,7 @@ fn attributes(element: AxRef, names: &[&str], deadline: Instant) -> Option<Owned
     copy_attributes(element, names)
 }
 
-fn attribute(element: AxRef, name: &str, deadline: Instant) -> Option<Owned> {
+fn attribute(element: AxRef, name: &'static str, deadline: Instant) -> Option<Owned> {
     if Instant::now() >= deadline {
         return None;
     }

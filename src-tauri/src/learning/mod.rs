@@ -1,5 +1,6 @@
 //! Resource-bounded learning from edits to a confirmed dictation insertion.
 pub mod activity;
+mod context;
 mod model;
 pub mod observation;
 mod store;
@@ -10,10 +11,12 @@ use crate::config::LlmConfig;
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
+pub use context::capture_correction;
 pub use store::{
-    augment_correction_for_text, delete_entry, list_entries, set_entry_enabled, with_store_lock,
+    correction_for_text, delete_entry, list_changes, list_entries, resolve_change,
+    set_entry_enabled, with_store_lock,
 };
-pub use worker::{cancel, status, submit};
+pub use worker::{cancel, status, submitter};
 
 pub const MAX_TEXT_UNITS: usize = 8_000;
 pub const MAX_TERMS: usize = 8;
@@ -106,11 +109,120 @@ pub struct LearningSample {
     pub original: String,
     pub current: String,
     pub record_id: String,
+    pub correction: Option<Vec<CorrectionEvidence>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CorrectionEvidence {
+    pub raw_text: Option<String>,
+    pub pasted_text: Option<String>,
+    pub dictionary: Option<PromptEntries>,
+    pub rules: Option<PromptEntries>,
+    pub outcome: CorrectionState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CorrectionState {
+    Disabled,
+    Failed,
+    Succeeded,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PromptEntries {
+    pub lines: Vec<String>,
+    pub complete: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryKind {
+    #[default]
+    Legacy,
+    Dictionary,
+    Rule,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryOrigin {
+    Manual,
+    Learned,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum LearningOperation {
+    Add,
+    Update,
+    Disable,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeStatus {
+    Pending,
+    Applied,
+    Dismissed,
+    Undone,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeResolution {
+    Approve,
+    Dismiss,
+    Undo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct EntryValue {
+    pub term: String,
+    pub from: Option<String>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InventoryEntry {
+    pub id: String,
+    pub kind: EntryKind,
+    pub origin: EntryOrigin,
+    pub value: EntryValue,
+    pub editable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LearningChange {
+    pub id: String,
+    pub activity_id: Option<String>,
+    pub record_id: String,
+    pub kind: EntryKind,
+    pub operation: LearningOperation,
+    pub origin: EntryOrigin,
+    pub before: Option<EntryValue>,
+    pub after: Option<EntryValue>,
+    pub status: ChangeStatus,
+    pub reason: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedAction {
+    pub kind: EntryKind,
+    pub operation: LearningOperation,
+    pub target_id: Option<String>,
+    pub value: Option<EntryValue>,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LearnedEntry {
     pub id: String,
+    #[serde(default)]
+    pub kind: EntryKind,
     pub term: String,
     pub from: Option<String>,
     pub created_at: String,

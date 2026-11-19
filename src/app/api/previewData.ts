@@ -7,6 +7,7 @@ import type {
   InputStats,
   LearnedEntry,
   LearningActivity,
+  LearningChange,
   VadTestStatus,
   WorkflowStatus,
 } from "../../types";
@@ -27,6 +28,7 @@ export interface BrowserPreviewState {
   recordingBytes: number;
   learnedEntries: LearnedEntry[];
   learningActivity: LearningActivity[];
+  learningChanges: LearningChange[];
 }
 
 export function clonePreview<T>(value: T): T {
@@ -95,6 +97,7 @@ export function createBrowserPreviewState(locationHref = browserLocationHref()):
       { id: "preview-learning-2", term: "DemoTerm", from: "Demo Term", created_at: "2026-11-05T07:10:00Z", record_id: "2", enabled: false },
     ],
     learningActivity: previewLearningActivity(activeLearning),
+    learningChanges: [],
   };
 }
 

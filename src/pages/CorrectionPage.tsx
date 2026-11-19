@@ -183,7 +183,14 @@ export default function CorrectionPage({
         ) : null}
 
         {section === "rules" ? (
-          <CorrectionLineEditor kind="rules" value={correctionRulesText} onChange={updateCorrectionRuleLines} text={text} />
+          <div className="rules-workspace">
+            <section className="dictionary-source-card">
+              <CorrectionLineEditor
+                heading={config.ui.app_language === "en-US" ? "Manual rules" : "手动规则"}
+                kind="rules" value={correctionRulesText} onChange={updateCorrectionRuleLines} text={text} />
+            </section>
+            <LearningSection kind="rule" config={config} onChange={onChange} onOpenLearning={onOpenLearning} onOpenRecord={onOpenRecord} />
+          </div>
         ) : null}
 
         {section === "prompt" ? (

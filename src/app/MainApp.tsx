@@ -33,7 +33,7 @@ export default function MainApp() {
     learningActive.some((item) => item.state === "queued") ? (language === "en-US" ? "Queued" : "等待中") : "",
   ].filter(Boolean).join(" · ") : "";
   const learningLabel = language === "en-US" ? "Self-learning" : "自学习";
-  const correctionWorkspace = page === "correction" && (correctionSection === "rules" || correctionSection === "prompt");
+  const correctionWorkspace = page === "correction" && correctionSection === "prompt";
 
   useEffect(() => {
     sourceRequest.current += 1;

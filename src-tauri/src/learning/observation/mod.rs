@@ -1,11 +1,11 @@
-//! A bounded, event-driven observation of one confirmed dictation insertion.
+//! A bounded, event-driven observation of confirmed dictations in one input field.
 //! Native handles and notification delivery stay on the platform worker.
 
 #[cfg(any(target_os = "macos", test))]
 use super::MAX_TEXT_UNITS;
 use super::{
     activity::{self, ActivityState},
-    LearningSample,
+    CorrectionEvidence, LearningSample,
 };
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(target_os = "macos", test))]
+mod scope;
 
 // The editor snapshot includes local anchors around the learning sample.
 #[cfg(any(target_os = "macos", test))]
@@ -41,29 +43,26 @@ type Completion = Box<dyn FnOnce(LearningSample) + Send>;
 
 pub struct Session {
     control: Arc<Control>,
-    committed: bool,
+    #[cfg(target_os = "macos")]
+    injection: Arc<macos::Injection>,
 }
 
 impl Session {
     /// Call immediately after the injector returns. Success still requires native
     /// readback; it is never treated as evidence that text reached the field.
-    pub fn injected(mut self, success: bool) {
-        self.committed = success;
+    pub fn injected(self, success: bool) {
         #[cfg(target_os = "macos")]
-        self.control
-            .injected
-            .store(if success { 1 } else { 2 }, Ordering::Release);
-        if !success {
-            self.control.cancelled.store(true, Ordering::Release);
-        }
+        self.injection.finish(success);
+        #[cfg(not(target_os = "macos"))]
+        let _ = success;
         self.control.wake();
     }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        if !self.committed {
-            self.control.cancelled.store(true, Ordering::Release);
+        #[cfg(target_os = "macos")]
+        if self.injection.finish(false) {
             self.control.wake();
         }
     }
@@ -71,9 +70,10 @@ impl Drop for Session {
 
 struct Control {
     cancelled: AtomicBool,
-    finishing: AtomicBool,
     #[cfg(target_os = "macos")]
-    injected: std::sync::atomic::AtomicU8,
+    recordings: AtomicU64,
+    #[cfg(target_os = "macos")]
+    request: Mutex<Option<macos::Request>>,
     #[cfg(target_os = "macos")]
     wake: Mutex<Option<macos::WakeHandle>>,
 }
@@ -94,20 +94,12 @@ impl RuntimeGate {
         self.state.lock().is_ok_and(|state| state.enabled)
     }
 
-    #[cfg(any(target_os = "macos", test))]
+    #[cfg(test)]
     fn install(&self, control: &Arc<Control>, running: &AtomicBool) -> bool {
         let Ok(mut state) = self.state.lock() else {
             return false;
         };
-        if !state.enabled
-            || running
-                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-                .is_err()
-        {
-            return false;
-        }
-        state.active = Some(Arc::downgrade(control));
-        true
+        state.install(control, running)
     }
 
     fn set_enabled(&self, enabled: bool) {
@@ -120,6 +112,17 @@ impl RuntimeGate {
                 }
             }
         }
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+impl GateState {
+    fn install(&mut self, control: &Arc<Control>, running: &AtomicBool) -> bool {
+        if !self.enabled || running.swap(true, Ordering::AcqRel) {
+            return false;
+        }
+        self.active = Some(Arc::downgrade(control));
+        true
     }
 }
 
@@ -139,6 +142,7 @@ impl Control {
 pub fn prepare(
     record_id: String,
     text: String,
+    correction: impl FnOnce() -> CorrectionEvidence,
     on_complete: impl FnOnce(LearningSample) + Send + 'static,
 ) -> Option<Session> {
     if !GATE.enabled() {
@@ -151,20 +155,29 @@ pub fn prepare(
     #[cfg(target_os = "macos")]
     {
         if text.trim().is_empty() || text.encode_utf16().count() > MAX_TEXT_UNITS {
+            // This paste bypasses readback. It must not be read as an edit to
+            // a batch already observing the same field.
+            cancel();
             SKIPPED.fetch_add(1, Ordering::Relaxed);
             if let Some(activity) = activity {
                 activity.update(ActivityState::Skipped, Some("invalid_sample"), vec![], None);
             }
             return None;
         }
-        macos::prepare(record_id, text, Box::new(on_complete), activity)
+        macos::prepare(
+            record_id,
+            text,
+            correction(),
+            Box::new(on_complete),
+            activity,
+        )
     }
     #[cfg(not(target_os = "macos"))]
     {
         if let Some(activity) = activity {
             activity.update(ActivityState::Skipped, Some("unsupported"), vec![], None);
         }
-        let _ = (record_id, text, on_complete);
+        let _ = (record_id, text, correction, on_complete);
         None
     }
 }
@@ -184,10 +197,31 @@ pub fn cancel() {
     }
 }
 
-pub fn finish() {
-    if let Ok(state) = GATE.state.lock() {
-        if let Some(control) = state.active.as_ref().and_then(Weak::upgrade) {
-            control.finishing.store(true, Ordering::Release);
+pub struct RecordingHold {
+    #[cfg(target_os = "macos")]
+    control: Weak<Control>,
+}
+
+pub fn recording_started() -> Option<Arc<RecordingHold>> {
+    #[cfg(target_os = "macos")]
+    {
+        let state = GATE.state.lock().ok()?;
+        let control = state.active.as_ref()?.upgrade()?;
+        control.recordings.fetch_add(1, Ordering::AcqRel);
+        control.wake();
+        Some(Arc::new(RecordingHold {
+            control: Arc::downgrade(&control),
+        }))
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+impl Drop for RecordingHold {
+    fn drop(&mut self) {
+        #[cfg(target_os = "macos")]
+        if let Some(control) = self.control.upgrade() {
+            control.recordings.fetch_sub(1, Ordering::AcqRel);
             control.wake();
         }
     }
@@ -436,6 +470,7 @@ mod tests {
                         original: insertion.original.clone(),
                         current,
                         record_id: "test".into(),
+                        correction: None,
                     }),
                     rejection
                 );
@@ -510,9 +545,10 @@ mod tests {
     fn new_control() -> Arc<Control> {
         Arc::new(Control {
             cancelled: AtomicBool::new(false),
-            finishing: AtomicBool::new(false),
             #[cfg(target_os = "macos")]
-            injected: std::sync::atomic::AtomicU8::new(0),
+            recordings: AtomicU64::new(0),
+            #[cfg(target_os = "macos")]
+            request: Mutex::new(None),
             #[cfg(target_os = "macos")]
             wake: Mutex::new(None),
         })
@@ -524,9 +560,12 @@ mod tests {
         // default-state test cannot enable AX or interfere with another test.
         assert!(!GATE.enabled());
         let reads = TEXT_READS.load(Ordering::Relaxed);
-        assert!(prepare("test".into(), "never observed".into(), |_| panic!(
-            "disabled callback"
-        ))
+        assert!(prepare(
+            "test".into(),
+            "never observed".into(),
+            || panic!("disabled context"),
+            |_| panic!("disabled callback")
+        )
         .is_none());
         assert_eq!(TEXT_READS.load(Ordering::Relaxed), reads);
     }
